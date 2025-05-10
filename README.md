@@ -1,6 +1,6 @@
-# MR Comment Generator (Rust)
+# MR Comment Generator (Go)
 
-A command-line tool written in Rust that generates professional GitLab Merge Request (MR) comments based on git diffs using AI (OpenAI or Claude).
+A command-line tool written in Go that generates professional GitLab Merge Request (MR) comments based on git diffs using AI (OpenAI or Claude).
 
 ## Features
 
@@ -12,13 +12,13 @@ A command-line tool written in Rust that generates professional GitLab Merge Req
 - Outputs to console or to a file
 - Proper error handling with context
 - Diff truncation and token estimation
-- Native binary with no runtime dependencies (thanks to Rust)
+- Native binary with no runtime dependencies
 
 ## Installation
 
 ### Prerequisites
 
-- Rust and Cargo (install via [rustup](https://rustup.rs/))
+- Go
 - Git
 - OpenAI API key or Claude API key
 
@@ -44,11 +44,11 @@ go build -o ai-mr-comment
 ## Usage
 
 ```bash
-# Generate comment using Claude (default)
-ai-mr-comment --api-key YOUR_CLAUDE_API_KEY
+# Generate comment using OpenAI (default)
+ai-mr-comment --api-key YOUR_OPENAI_API_KEY
 
-# Generate comment using OpenAI
-ai-mr-comment --provider openai --api-key YOUR_OPENAI_API_KEY
+# Generate comment using Claude
+ai-mr-comment --provider openai --api-key  YOUR_CLAUDE_API_KEY
 
 # Generate comment for a specific commit
 ai-mr-comment --commit a1b2c3d
@@ -97,7 +97,7 @@ The tool will look for configuration in the following order:
 #### OpenAI
 
 - Endpoint: `https://api.openai.com/v1/chat/completions`
-- Model: `gpt-4-turbo`
+- Model: `gpt-4o-mini`
 
 ## Example Output
 
@@ -139,7 +139,6 @@ The implementation follows OWASP security guidelines and includes rate limiting 
 - `go.mod`: Go package configuration and dependencies
 
 ### Dependencies
-
 
 
 ## License
