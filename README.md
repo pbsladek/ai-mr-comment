@@ -144,3 +144,7 @@ The implementation follows OWASP security guidelines and includes rate limiting 
 ## License
 
 MIT
+
+## Acknowledgements
+
+This project is Go rewrite of [mr-comment](https://github.com/RobertKozak/mr-comment) originally created by [Robert Kozak](https://github.com/RobertKozak).
