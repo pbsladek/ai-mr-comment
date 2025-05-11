@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,6 +33,9 @@ type PromptTemplate struct {
 	Purpose      string
 	Instructions string
 }
+
+//go:embed prompt_template.tmpl
+var defaultPromptTemplate string
 
 const (
 	OpenAI ApiProvider = "openai"
@@ -194,38 +198,8 @@ func NewPromptTemplate(host GitHost) PromptTemplate {
 		purpose, platform, artifact = "MR/PR comment", "version control system", "MR/PR"
 	}
 
-	instructions := fmt.Sprintf(`Carefully review the provided git diff and generate a concise, professional %s comment. Use this format:
-
-%s Title: [1-sentence summary]
-%s Summary: [brief overview]
-## Key Changes:
-
-- [bulleted list of major updates]
-
-## Why These Changes:
-
-[explanation]
-
-## Review Checklist:
-
-- [ ] Item 1
-- [ ] Item 2
-
-## Notes:
-
-[additional context]
-
-Formatting rules:
-- Use %s-appropriate terminology
-- Maintain technical clarity while being concise
-- Add blank lines after headings using '\n\n'
-- Never include section headers in title/summary
-- Adapt structure to %s conventions
-
-Example %s Title: Add user authentication middleware
-Example %s Summary: Implemented JWT-based authentication flow for API endpoints
-
-The git diff may be truncated - focus analysis on visible changes.`, artifact, artifact, artifact, platform, platform, artifact, artifact)
+	instructions := strings.ReplaceAll(defaultPromptTemplate, "{{artifact}}", artifact)
+	instructions = strings.ReplaceAll(instructions, "{{platform}}", platform)
 
 	return PromptTemplate{Purpose: purpose, Instructions: instructions}
 }
@@ -243,7 +217,9 @@ func callOpenAI(cfg *Config, prompt, diff string) (string, error) {
 			{"role": "user", "content": diff},
 		},
 		"temperature": 0.7,
+		"max_tokens":  4000,
 	}
+
 	buf, _ := json.Marshal(body)
 	req, _ := http.NewRequest("POST", cfg.OpenAIEndpoint, bytes.NewBuffer(buf))
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", cfg.OpenAIKey))
