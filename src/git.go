@@ -16,9 +16,12 @@ const (
 	Unknown GitHost = "unknown"
 )
 
+var runGitRemote = func() ([]byte, error) {
+	return exec.Command("git", "remote", "-v").CombinedOutput()
+}
+
 func detectGitHost() GitHost {
-	cmd := exec.Command("git", "remote", "-v")
-	out, err := cmd.CombinedOutput()
+	out, err := runGitRemote()
 	if err != nil {
 		return Unknown
 	}

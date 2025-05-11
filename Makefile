@@ -21,16 +21,16 @@ all: build
 
 build:
 	@mkdir -p $(BUILD_DIR)
-	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) .
+	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) ./src
 
 run:
 	@mkdir -p $(BUILD_DIR)
-	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) .
+	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) ./src
 	./dist/ai-mr-comment
 
 run-debug:
 	@mkdir -p $(BUILD_DIR)
-	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) .
+	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) ./src
 	./dist/ai-mr-comment --debug
 
 test:
@@ -57,6 +57,6 @@ release: clean
 		EXT=$$( [ "$$OS" = "windows" ] && echo .exe || echo ); \
 		OUTPUT=$(BUILD_DIR)/$(APP)-$$OS-$$ARCH$$EXT; \
 		echo "Building: $$OUTPUT"; \
-		GOOS=$$OS GOARCH=$$ARCH go build $(LDFLAGS) -o $$OUTPUT .; \
+		GOOS=$$OS GOARCH=$$ARCH go build $(LDFLAGS) -o $$OUTPUT ./src; \
 	done
 

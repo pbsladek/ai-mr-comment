@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -51,14 +52,23 @@ func main() {
 				return nil
 			}
 
-			comment, err := chatCompletions(cfg, cfg.Provider, prompt, diff)
+			spinnerMsg := fmt.Sprintf("calling %s api", cfg.Provider)
+			err = withSpinner(spinnerMsg, func() error {
+				comment, err := chatCompletions(cfg, cfg.Provider, prompt, diff)
+				if err == nil {
+					fmt.Println(comment)
+				}
+
+				if outputPath != "" {
+					return os.WriteFile(outputPath, []byte(comment), 0644)
+				}
+				fmt.Println(comment)
+
+				return err
+			})
 			if err != nil {
 				return err
 			}
-			if outputPath != "" {
-				return os.WriteFile(outputPath, []byte(comment), 0644)
-			}
-			fmt.Println(comment)
 			return nil
 		},
 	}
@@ -73,4 +83,28 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func withSpinner(label string, f func() error) error {
+	done := make(chan struct{})
+	go func() {
+		spin := []rune(`|/-\`)
+		i := 0
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				fmt.Printf("\r%s %c", label, spin[i%len(spin)])
+				i++
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+	}()
+
+	start := time.Now()
+	err := f()
+	close(done)
+	fmt.Printf("\r%s done in %s\n", label, time.Since(start).Truncate(time.Millisecond))
+	return err
 }

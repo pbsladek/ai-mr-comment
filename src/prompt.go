@@ -10,7 +10,7 @@ type PromptTemplate struct {
 	Instructions string
 }
 
-//go:embed prompt_template.tmpl
+//go:embed templates/prompt.tmpl
 var defaultPromptTemplate string
 
 func NewPromptTemplate(host GitHost) PromptTemplate {
