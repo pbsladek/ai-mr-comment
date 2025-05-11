@@ -18,6 +18,11 @@ run:
 	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) ./main.go
 	./dist/ai-mr-comment
 
+run-debug:
+	@mkdir -p $(BUILD_DIR)
+	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) ./main.go
+	./dist/ai-mr-comment --debug
+
 test:
 	go test -v ./...
 

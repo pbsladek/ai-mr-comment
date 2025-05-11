@@ -1,4 +1,3 @@
-// ai-mr-comment - enhanced version with prompt template, diff summarization, truncation
 package main
 
 import (
@@ -18,76 +17,7 @@ import (
 )
 
 type GitHost string
-
-const (
-	GitHub  GitHost = "github"
-	GitLab  GitHost = "gitlab"
-	Unknown GitHost = "unknown"
-)
-
-type PromptTemplate struct {
-	Purpose      string
-	Instructions string
-}
-
-func NewPromptTemplate(host GitHost) PromptTemplate {
-	var purpose, platform, artifact string
-	switch host {
-	case GitHub:
-		purpose, platform, artifact = "GitHub PR comment", "GitHub", "PR"
-	case GitLab:
-		purpose, platform, artifact = "GitLab MR comment", "GitLab", "MR"
-	default:
-		purpose, platform, artifact = "MR/PR comment", "version control system", "MR/PR"
-	}
-
-	instructions := fmt.Sprintf(`Carefully review the provided git diff and generate a concise, professional %s comment. Use this format:
-
-%s Title: [1-sentence summary]
-%s Summary: [brief overview]
-## Key Changes:
-
-- [bulleted list of major updates]
-
-## Why These Changes:
-
-[explanation]
-
-## Review Checklist:
-
-- [ ] Item 1
-- [ ] Item 2
-
-## Notes:
-
-[additional context]
-
-Formatting rules:
-- Use %s-appropriate terminology
-- Maintain technical clarity while being concise
-- Add blank lines after headings using '\n\n'
-- Never include section headers in title/summary
-- Adapt structure to %s conventions
-
-Example %s Title: Add user authentication middleware
-Example %s Summary: Implemented JWT-based authentication flow for API endpoints
-
-The git diff may be truncated - focus analysis on visible changes.`, artifact, artifact, artifact, platform, platform, artifact, artifact)
-
-	return PromptTemplate{Purpose: purpose, Instructions: instructions}
-}
-
-func (p PromptTemplate) SystemMessage() string {
-	return p.Purpose + "\n\n" + p.Instructions
-}
-
 type ApiProvider string
-
-const (
-	OpenAI ApiProvider = "openai"
-	Claude ApiProvider = "claude"
-)
-
 type Config struct {
 	OpenAIKey      string      `mapstructure:"openai_api_key"`
 	ClaudeKey      string      `mapstructure:"claude_api_key"`
@@ -98,15 +28,31 @@ type Config struct {
 	Provider       ApiProvider `mapstructure:"provider"`
 }
 
+type PromptTemplate struct {
+	Purpose      string
+	Instructions string
+}
+
+const (
+	OpenAI ApiProvider = "openai"
+	Claude ApiProvider = "claude"
+)
+
+const (
+	GitHub  GitHost = "github"
+	GitLab  GitHost = "gitlab"
+	Unknown GitHost = "unknown"
+)
+
 func loadConfig() (*Config, error) {
 	cfg := &Config{
 		Provider:       OpenAI,
-		OpenAIModel:    "gpt-4-turbo",
+		OpenAIModel:    "gpt-4o-mini",
 		OpenAIEndpoint: "https://api.openai.com/v1/chat/completions",
 		ClaudeModel:    "claude-3-7-sonnet-20250219",
 		ClaudeEndpoint: "https://api.anthropic.com/v1/messages",
 	}
-	viper.SetConfigName(".ai-mr-comment")
+	viper.SetConfigName(".ai-mr-comment.toml")
 	viper.SetConfigType("toml")
 	viper.AddConfigPath("$HOME")
 	if err := viper.ReadInConfig(); err == nil {
@@ -140,82 +86,6 @@ func detectGitHost() GitHost {
 		}
 	}
 	return Unknown
-}
-
-func callOpenAI(cfg *Config, prompt, diff string) (string, error) {
-	client := &http.Client{}
-	body := map[string]interface{}{
-		"model": cfg.OpenAIModel,
-		"messages": []map[string]string{
-			{"role": "system", "content": prompt},
-			{"role": "user", "content": diff},
-		},
-		"temperature": 0.7,
-	}
-	buf, _ := json.Marshal(body)
-	req, _ := http.NewRequest("POST", cfg.OpenAIEndpoint, bytes.NewBuffer(buf))
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", cfg.OpenAIKey))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	res, _ := io.ReadAll(resp.Body)
-	var parsed map[string]interface{}
-	if err := json.Unmarshal(res, &parsed); err != nil {
-		return "", err
-	}
-	choices, ok := parsed["choices"].([]interface{})
-	if !ok || len(choices) == 0 {
-		return "", errors.New("no choices returned")
-	}
-	first := choices[0].(map[string]interface{})
-	msg := first["message"].(map[string]interface{})
-	return msg["content"].(string), nil
-}
-
-func callClaude(cfg *Config, prompt, diff string) (string, error) {
-	client := &http.Client{}
-	body := map[string]interface{}{
-		"model":  cfg.ClaudeModel,
-		"system": prompt,
-		"messages": []map[string]string{
-			{"role": "user", "content": diff},
-		},
-		"temperature": 0.7,
-		"max_tokens":  4000,
-	}
-	buf, _ := json.Marshal(body)
-	req, _ := http.NewRequest("POST", cfg.ClaudeEndpoint, bytes.NewBuffer(buf))
-	req.Header.Set("x-api-key", cfg.ClaudeKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	res, _ := io.ReadAll(resp.Body)
-	var parsed map[string]interface{}
-	if err := json.Unmarshal(res, &parsed); err != nil {
-		return "", err
-	}
-	content, ok := parsed["content"].([]interface{})
-	if !ok || len(content) == 0 {
-		return "", nil
-	}
-	entry := content[0].(map[string]interface{})
-	return entry["text"].(string), nil
-}
-
-func callAPI(cfg *Config, provider ApiProvider, prompt, diff string) (string, error) {
-	if provider == OpenAI {
-		return callOpenAI(cfg, prompt, diff)
-	} else if provider == Claude {
-		return callClaude(cfg, prompt, diff)
-	}
-	return "", errors.New("unsupported provider")
 }
 
 func getGitDiff(commit string) (string, error) {
@@ -313,6 +183,133 @@ func estimateTokens(text string) int {
 	return int(math.Ceil(float64(len(text)) / 3.5))
 }
 
+func NewPromptTemplate(host GitHost) PromptTemplate {
+	var purpose, platform, artifact string
+	switch host {
+	case GitHub:
+		purpose, platform, artifact = "GitHub PR comment", "GitHub", "PR"
+	case GitLab:
+		purpose, platform, artifact = "GitLab MR comment", "GitLab", "MR"
+	default:
+		purpose, platform, artifact = "MR/PR comment", "version control system", "MR/PR"
+	}
+
+	instructions := fmt.Sprintf(`Carefully review the provided git diff and generate a concise, professional %s comment. Use this format:
+
+%s Title: [1-sentence summary]
+%s Summary: [brief overview]
+## Key Changes:
+
+- [bulleted list of major updates]
+
+## Why These Changes:
+
+[explanation]
+
+## Review Checklist:
+
+- [ ] Item 1
+- [ ] Item 2
+
+## Notes:
+
+[additional context]
+
+Formatting rules:
+- Use %s-appropriate terminology
+- Maintain technical clarity while being concise
+- Add blank lines after headings using '\n\n'
+- Never include section headers in title/summary
+- Adapt structure to %s conventions
+
+Example %s Title: Add user authentication middleware
+Example %s Summary: Implemented JWT-based authentication flow for API endpoints
+
+The git diff may be truncated - focus analysis on visible changes.`, artifact, artifact, artifact, platform, platform, artifact, artifact)
+
+	return PromptTemplate{Purpose: purpose, Instructions: instructions}
+}
+
+func (p PromptTemplate) SystemMessage() string {
+	return p.Purpose + "\n\n" + p.Instructions
+}
+
+func callOpenAI(cfg *Config, prompt, diff string) (string, error) {
+	client := &http.Client{}
+	body := map[string]any{
+		"model": cfg.OpenAIModel,
+		"messages": []map[string]string{
+			{"role": "system", "content": prompt},
+			{"role": "user", "content": diff},
+		},
+		"temperature": 0.7,
+	}
+	buf, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", cfg.OpenAIEndpoint, bytes.NewBuffer(buf))
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", cfg.OpenAIKey))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	res, _ := io.ReadAll(resp.Body)
+	var parsed map[string]any
+	if err := json.Unmarshal(res, &parsed); err != nil {
+		return "", err
+	}
+	choices, ok := parsed["choices"].([]any)
+	if !ok || len(choices) == 0 {
+		return "", errors.New("no choices returned")
+	}
+	first := choices[0].(map[string]any)
+	msg := first["message"].(map[string]any)
+	return msg["content"].(string), nil
+}
+
+func callClaude(cfg *Config, prompt, diff string) (string, error) {
+	client := &http.Client{}
+	body := map[string]any{
+		"model":  cfg.ClaudeModel,
+		"system": prompt,
+		"messages": []map[string]string{
+			{"role": "user", "content": diff},
+		},
+		"temperature": 0.7,
+		"max_tokens":  4000,
+	}
+	buf, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", cfg.ClaudeEndpoint, bytes.NewBuffer(buf))
+	req.Header.Set("x-api-key", cfg.ClaudeKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	res, _ := io.ReadAll(resp.Body)
+	var parsed map[string]any
+	if err := json.Unmarshal(res, &parsed); err != nil {
+		return "", err
+	}
+	content, ok := parsed["content"].([]any)
+	if !ok || len(content) == 0 {
+		return "", nil
+	}
+	entry := content[0].(map[string]any)
+	return entry["text"].(string), nil
+}
+
+func callAPI(cfg *Config, provider ApiProvider, prompt, diff string) (string, error) {
+	if provider == OpenAI {
+		return callOpenAI(cfg, prompt, diff)
+	} else if provider == Claude {
+		return callClaude(cfg, prompt, diff)
+	}
+	return "", errors.New("unsupported provider")
+}
+
 func main() {
 	var commit, filePath, outputPath, provider string
 	var debug bool
@@ -337,7 +334,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			diff = processDiff(diff, 800)
+			diff = processDiff(diff, 4000)
 			host := detectGitHost()
 			prompt := NewPromptTemplate(host).SystemMessage()
 
