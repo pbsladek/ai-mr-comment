@@ -1,13 +1,13 @@
 # MR Comment Generator (Go)
 
-A command-line tool written in Go that generates professional GitLab Merge Request (MR) comments based on git diffs using AI (OpenAI or Claude).
+A command-line tool written in Go that generates professional GitLab Merge Request (MR) comments based on git diffs using AI (OpenAI or Anthropic).
 
 ## Features
 
 - Reads git diffs from current repo or from a file
-- Supports both OpenAI and Claude (Anthropic) APIs
+- Supports both OpenAI and Anthropic (Claude) APIs
 - Customizable API endpoints and models
-- Configuration file support (~/.mr-comment)
+- Configuration file support (~/.ai-mr-comment)
 - Environment variable configuration
 - Outputs to console or to a file
 - Proper error handling with context
@@ -20,7 +20,7 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 
 - Go
 - Git
-- OpenAI API key or Claude API key
+- OpenAI API key or Anthropic API key
 
 ### Building from source
 
@@ -29,16 +29,56 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 git clone https://github.com/yourusername/ai-mr-comment.git
 cd ai-mr-comment
 
-# Build in release mode
-go build -o ai-mr-comment
+# Build
+make build
 
-# The binary will be available at root
+# The binary will be available at ./dist/ai-mr-comment
+# Build and run
+make run
+
+# Show estimated tokens
+make run-debug
 ```
 
-### Installing with Go
+### Installing
 
 ```bash
 
+```
+
+## Configuration File
+
+```toml
+# Choose which provider to use: "openai" or "anthropic"
+provider = "openai"
+
+# === OpenAI Settings ===
+# Your OpenAI API key
+openai_api_key = "xxxx"            
+# The OpenAI model to use (e.g., gpt-4, gpt-4o-mini)         
+openai_model = "gpt-4o-mini"
+ # Custom endpoint (optional, default is OpenAI's)
+openai_endpoint = "https://api.openai.com/v1/chat/completions"
+
+# === Anthropic Settings ===
+# Your Anthropic Claude API key
+anthropic_api_key = "xxxx"
+# The Claude model to use
+anthropic_model = "claude-3-7-sonnet-20250219"
+# Custom endpoint (optional, default is Anthropic's)
+anthropic_endpoint = "https://api.anthropic.com/v1/messages"
+```
+
+```toml
+provider = "openai"
+
+openai_api_key = "xxxx"                    
+openai_model = "gpt-4o-mini"
+openai_endpoint = "https://api.openai.com/v1/chat/completions"
+
+anthropic_api_key = "xxxx"
+anthropic_model = "claude-3-7-sonnet-20250219"
+anthropic_endpoint = "https://api.anthropic.com/v1/messages"
 ```
 
 ## Usage
@@ -47,8 +87,8 @@ go build -o ai-mr-comment
 # Generate comment using OpenAI (default)
 ai-mr-comment --api-key YOUR_OPENAI_API_KEY
 
-# Generate comment using Claude
-ai-mr-comment --provider openai --api-key  YOUR_CLAUDE_API_KEY
+# Generate comment using Anthropic
+ai-mr-comment --provider anthropic --api-key  YOUR_ANTHROPIC_API_KEY
 
 # Generate comment for a specific commit
 ai-mr-comment --commit a1b2c3d
@@ -60,10 +100,10 @@ ai-mr-comment --commit "HEAD~3..HEAD"
 ai-mr-comment --file path/to/diff.txt
 
 # Write output to file
-ai-mr-comment --output mr-comment.md
+ai-mr-comment --output ai-mr-comment.md
 
 # Use a different model
-ai-mr-comment --provider claude --model claude-3-haiku-20240307
+ai-mr-comment --provider anthropic --model claude-3-haiku-20240307
 ```
 
 ### Options
@@ -72,7 +112,7 @@ ai-mr-comment --provider claude --model claude-3-haiku-20240307
 - `-f, --file <FILE>`: Read diff from file instead of git command
 - `-o, --output <FILE>`: Write output to file instead of stdout
 - `-k, --api-key <API_KEY>`: API key (can also use OPENAI_API_KEY or ANTHROPIC_API_KEY env var)
-- `-p, --provider <PROVIDER>`: API provider to use (openai or claude)
+- `-p, --provider <PROVIDER>`: API provider to use (openai or anthropic)
 - `-e, --endpoint <ENDPOINT>`: API endpoint (defaults based on provider)
 - `-m, --model <MODEL>`: Model to use (defaults based on provider)
 - `-h, --help`: Print help
@@ -84,12 +124,12 @@ ai-mr-comment --provider claude --model claude-3-haiku-20240307
 The tool will look for configuration in the following order:
 
 1. Command line arguments
-2. Environment variables (`OPENAI_API_KEY` for OpenAI or `ANTHROPIC_API_KEY` for Claude)
-3. Environment variables (`OPENAI_API_KEY` for OpenAI or `ANTHROPIC_API_KEY` for Claude)
+2. Environment variables (`OPENAI_API_KEY` for OpenAI or `ANTHROPIC_API_KEY` for Anthropic (claude))
+3. Environment variables (`OPENAI_API_KEY` for OpenAI or `ANTHROPIC_API_KEY` for Anthropic (claude))
 
 ### Default Values
 
-#### Claude
+#### Anthropic
 
 - Endpoint: `https://api.anthropic.com/v1/messages`
 - Model: `claude-3-7-sonnet-20250219`

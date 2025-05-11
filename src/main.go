@@ -2,6 +2,7 @@ package main
 
 import (
 	_ "embed"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -11,6 +12,13 @@ import (
 )
 
 func main() {
+	if err := newRootCmd(chatCompletions).Execute(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func newRootCmd(chatFn func(*Config, ApiProvider, string, string) (string, error)) *cobra.Command {
 	var commit, filePath, outputPath, provider string
 	var debug bool
 
@@ -24,6 +32,11 @@ func main() {
 			} else {
 				cfg.Provider = ApiProvider(cfg.Provider)
 			}
+
+			if cfg.Provider != OpenAI && cfg.Provider != Anthropic {
+				return errors.New("unsupported provider: " + string(cfg.Provider))
+			}
+
 			var diff string
 			var err error
 			if filePath != "" {
@@ -48,13 +61,13 @@ func main() {
 				fmt.Printf("- Diff content: %d tokens (%d lines)\n", diffTokens, originalLen)
 				fmt.Printf("- Total estimate: %d tokens\n", totalTokens)
 				fmt.Println("OpenApi limit: 200,000 tokens")
-				fmt.Println("Claude's limit: 200,000 tokens")
+				fmt.Println("Anthropic's limit: 200,000 tokens")
 				return nil
 			}
 
 			spinnerMsg := fmt.Sprintf("calling %s api", cfg.Provider)
 			err = withSpinner(spinnerMsg, func() error {
-				comment, err := chatCompletions(cfg, cfg.Provider, prompt, diff)
+				comment, err := chatFn(cfg, cfg.Provider, prompt, diff)
 				if err == nil {
 					fmt.Println(comment)
 				}
@@ -79,10 +92,7 @@ func main() {
 	rootCmd.Flags().StringVar(&provider, "provider", "openai", "API provider (openai or claude)")
 	rootCmd.Flags().BoolVar(&debug, "debug", false, "Estimate token usage")
 
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
+	return rootCmd
 }
 
 func withSpinner(label string, f func() error) error {

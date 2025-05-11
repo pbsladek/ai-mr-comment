@@ -10,27 +10,27 @@ import (
 type ApiProvider string
 
 const (
-	OpenAI ApiProvider = "openai"
-	Claude ApiProvider = "claude"
+	OpenAI    ApiProvider = "openai"
+	Anthropic ApiProvider = "anthropic"
 )
 
 type Config struct {
-	OpenAIKey      string      `mapstructure:"openai_api_key"`
-	ClaudeKey      string      `mapstructure:"claude_api_key"`
-	OpenAIModel    string      `mapstructure:"openai_model"`
-	ClaudeModel    string      `mapstructure:"claude_model"`
-	OpenAIEndpoint string      `mapstructure:"openai_endpoint"`
-	ClaudeEndpoint string      `mapstructure:"claude_endpoint"`
-	Provider       ApiProvider `mapstructure:"provider"`
+	OpenAIKey         string      `mapstructure:"openai_api_key"`
+	AnthropicKey      string      `mapstructure:"anthropic_api_key"`
+	OpenAIModel       string      `mapstructure:"openai_model"`
+	AnthropicModel    string      `mapstructure:"anthropic_model"`
+	OpenAIEndpoint    string      `mapstructure:"openai_endpoint"`
+	AnthropicEndpoint string      `mapstructure:"anthropic_endpoint"`
+	Provider          ApiProvider `mapstructure:"provider"`
 }
 
 func loadConfig() (*Config, error) {
 	cfg := &Config{
-		Provider:       OpenAI,
-		OpenAIModel:    "gpt-4o-mini",
-		OpenAIEndpoint: "https://api.openai.com/v1/chat/completions",
-		ClaudeModel:    "claude-3-7-sonnet-20250219",
-		ClaudeEndpoint: "https://api.anthropic.com/v1/messages",
+		Provider:          OpenAI,
+		OpenAIModel:       "gpt-4o-mini",
+		OpenAIEndpoint:    "https://api.openai.com/v1/chat/completions",
+		AnthropicModel:    "claude-3-7-sonnet-20250219",
+		AnthropicEndpoint: "https://api.anthropic.com/v1/messages",
 	}
 	viper.SetConfigName(".ai-mr-comment.toml")
 	viper.SetConfigType("toml")
