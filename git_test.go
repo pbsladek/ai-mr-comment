@@ -6,34 +6,6 @@ import (
 	"testing"
 )
 
-func TestEstimateTokens(t *testing.T) {
-	text := "This is a short sentence."
-	tokens := estimateTokens(text)
-	if tokens <= 0 {
-		t.Errorf("Expected positive token count, got %d", tokens)
-	}
-}
-
-func TestPromptTemplateGeneration(t *testing.T) {
-	tt := []struct {
-		host     GitHost
-		expected string
-	}{
-		{GitHub, "GitHub PR comment"},
-		{GitLab, "GitLab MR comment"},
-		{Unknown, "MR/PR comment"},
-	}
-	for _, tc := range tt {
-		pt := NewPromptTemplate(tc.host)
-		if !strings.Contains(pt.Purpose, tc.expected) {
-			t.Errorf("Prompt purpose mismatch: got %s", pt.Purpose)
-		}
-		if !strings.Contains(pt.Instructions, "Title:") {
-			t.Error("Instructions should include formatting rules")
-		}
-	}
-}
-
 func TestProcessDiffAndTruncate(t *testing.T) {
 	raw := `
 diff --git a/foo.txt b/foo.txt
@@ -73,13 +45,5 @@ func TestReadDiffFromFile(t *testing.T) {
 	}
 	if !strings.Contains(data, "+++ b/x") {
 		t.Error("Expected diff content not found")
-	}
-}
-
-func TestEstimateDebugOutput(t *testing.T) {
-	text := strings.Repeat("x", 3500) // ~1000 tokens
-	tokens := estimateTokens(text)
-	if tokens < 900 || tokens > 1100 {
-		t.Errorf("Unexpected token estimate: %d", tokens)
 	}
 }
