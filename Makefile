@@ -5,7 +5,7 @@ BUILD_DIR := dist
 
 PLATFORMS := linux/amd64 darwin/amd64 darwin/arm64 windows/amd64
 
-.PHONY: all clean build release
+.PHONY: all clean build release test test-cover
 
 all: build
 
@@ -17,6 +17,12 @@ run:
 	@mkdir -p $(BUILD_DIR)
 	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) ./main.go
 	./dist/ai-mr-comment
+
+test:
+	go test -v ./...
+
+test-cover:
+	go test -cover ./...
 
 clean:
 	rm -rf $(BUILD_DIR)
@@ -30,3 +36,4 @@ release: clean
 		echo "Building: $$OUTPUT"; \
 		GOOS=$$OS GOARCH=$$ARCH go build $(LDFLAGS) -o $$OUTPUT ./main.go; \
 	done
+
