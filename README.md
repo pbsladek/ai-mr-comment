@@ -42,9 +42,26 @@ make run-debug
 
 ### Installing
 
-```bash
+Download the latest binary for your OS from the [Releases](https://github.com/pbsladek/ai-mr-comment/releases) page.
 
+```bash
+# macOS (Intel)
+curl -L https://github.com/pbsladek/ai-mr-comment/releases/latest/download/ai-mr-comment-darwin-amd64 -o /usr/local/bin/ai-mr-comment
+chmod +x /usr/local/bin/ai-mr-comment
+
+# macOS (Apple Silicon / M1/M2)
+curl -L https://github.com/your-org/ai-mr-comment/releases/latest/download/ai-mr-comment-darwin-arm64 -o /usr/local/bin/ai-mr-comment
+chmod +x /usr/local/bin/ai-mr-comment
+
+# Linux (x86_64)
+curl -L https://github.com/your-org/ai-mr-comment/releases/latest/download/ai-mr-comment-linux-amd64 -o /usr/local/bin/ai-mr-comment
+chmod +x /usr/local/bin/ai-mr-comment
+
+# Windows (x86_64)
+# Download and add it to your PATH.
+https://github.com/your-org/ai-mr-comment/releases/latest/download/ai-mr-comment-windows-amd64.exe
 ```
+
 
 ## Configuration File
 

@@ -69,12 +69,16 @@ func newRootCmd(chatFn func(*Config, ApiProvider, string, string) (string, error
 			err = withSpinner(spinnerMsg, func() error {
 				comment, err := chatFn(cfg, cfg.Provider, prompt, diff)
 				if err == nil {
+					fmt.Println()
+					fmt.Println()
 					fmt.Println(comment)
 				}
 
 				if outputPath != "" {
 					return os.WriteFile(outputPath, []byte(comment), 0644)
 				}
+				fmt.Println()
+				fmt.Println()
 				fmt.Println(comment)
 
 				return err
@@ -112,9 +116,10 @@ func withSpinner(label string, f func() error) error {
 		}
 	}()
 
-	start := time.Now()
+	// start := time.Now()
 	err := f()
 	close(done)
-	fmt.Printf("\r%s done in %s\n", label, time.Since(start).Truncate(time.Millisecond))
+	fmt.Println()
+	// fmt.Printf("\r%s done in %s\n", label, time.Since(start).Truncate(time.Millisecond))
 	return err
 }
