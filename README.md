@@ -62,7 +62,6 @@ chmod +x /usr/local/bin/ai-mr-comment
 https://github.com/your-org/ai-mr-comment/releases/latest/download/ai-mr-comment-windows-amd64.exe
 ```
 
-
 ## Configuration File
 
 ```toml
@@ -142,7 +141,7 @@ The tool will look for configuration in the following order:
 
 1. Command line arguments
 2. Environment variables (`OPENAI_API_KEY` for OpenAI or `ANTHROPIC_API_KEY` for Anthropic (claude))
-3. Environment variables (`OPENAI_API_KEY` for OpenAI or `ANTHROPIC_API_KEY` for Anthropic (claude))
+3. Configuration file
 
 ### Default Values
 
@@ -192,11 +191,12 @@ The implementation follows OWASP security guidelines and includes rate limiting 
 
 ### Project Structure
 
-- `main.go`: Contains all the code for the CLI tool
+- `sr/`: Contains all the code for the CLI tool
 - `go.mod`: Go package configuration and dependencies
 
 ### Dependencies
 
+- see `go.mod`
 
 ## License
 

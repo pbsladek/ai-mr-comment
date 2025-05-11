@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"math"
+	"net/http"
 
 	openai "github.com/openai/openai-go"
 	openaiopt "github.com/openai/openai-go/option"
@@ -92,21 +95,49 @@ func callAnthropicMessages(client AnthropicMessagesClient, cfg *Config, prompt, 
 	return block.Text, nil
 }
 
+func callOllama(prompt, diff string) (string, error) {
+	reqBody := map[string]any{
+		"model":  "llama3", // or whatever model name you use
+		"prompt": prompt + "\n" + diff,
+		"stream": false,
+	}
+
+	buf, _ := json.Marshal(reqBody)
+
+	resp, err := http.Post("http://localhost:11434/api/generate", "application/json", bytes.NewReader(buf))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Response string `json:"response"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	return result.Response, nil
+}
+
 func chatCompletions(cfg *Config, provider ApiProvider, prompt, diff string) (string, error) {
-	if provider == OpenAI {
+	switch provider {
+	case OpenAI:
 		// defaults to os.LookupEnv("OPENAI_API_KEY")
 		client := openai.NewClient(
 			openaiopt.WithAPIKey(cfg.OpenAIKey),
 		)
 		return callOpenAIChatCompletions(&realOpenAIClient{client: &client}, cfg, prompt, diff)
-	} else if provider == Anthropic {
+	case Anthropic:
 		// defaults to os.LookupEnv("ANTHROPIC_API_KEY")
 		client := anthropic.NewClient(
 			anthropicopt.WithAPIKey(cfg.AnthropicKey),
 		)
 		return callAnthropicMessages(&realAnthropicClient{client: &client}, cfg, prompt, diff)
+	case Ollama:
+		return callOllama(prompt, diff)
+	default:
+		return "", errors.New("unsupported provider")
 	}
-	return "", errors.New("unsupported provider")
 }
 
 func estimateTokens(text string) int {

@@ -33,7 +33,7 @@ func newRootCmd(chatFn func(*Config, ApiProvider, string, string) (string, error
 				cfg.Provider = ApiProvider(cfg.Provider)
 			}
 
-			if cfg.Provider != OpenAI && cfg.Provider != Anthropic {
+			if cfg.Provider != OpenAI && cfg.Provider != Anthropic && cfg.Provider != Ollama {
 				return errors.New("unsupported provider: " + string(cfg.Provider))
 			}
 
@@ -47,6 +47,8 @@ func newRootCmd(chatFn func(*Config, ApiProvider, string, string) (string, error
 			if err != nil {
 				return err
 			}
+
+			out := cmd.OutOrStdout()
 			diff = processDiff(diff, 4000)
 			host := detectGitHost()
 			prompt := NewPromptTemplate(host).SystemMessage()
@@ -56,12 +58,13 @@ func newRootCmd(chatFn func(*Config, ApiProvider, string, string) (string, error
 				diffTokens := estimateTokens(diff)
 				originalLen := len(strings.Split(diff, "\n"))
 				totalTokens := systemTokens + diffTokens
-				fmt.Println("Token estimation:")
-				fmt.Printf("- System prompt: %d tokens\n", systemTokens)
-				fmt.Printf("- Diff content: %d tokens (%d lines)\n", diffTokens, originalLen)
-				fmt.Printf("- Total estimate: %d tokens\n", totalTokens)
-				fmt.Println("OpenApi limit: 200,000 tokens")
-				fmt.Println("Anthropic's limit: 200,000 tokens")
+
+				fmt.Fprintln(out, "Token estimation:")
+				fmt.Fprintf(out, "- System prompt: %d tokens\n", systemTokens)
+				fmt.Fprintf(out, "- Diff content: %d tokens (%d lines)\n", diffTokens, originalLen)
+				fmt.Fprintf(out, "- Total estimate: %d tokens\n", totalTokens)
+				fmt.Fprintln(out, "OpenApi limit: 200,000 tokens")
+				fmt.Fprintln(out, "Anthropic's limit: 200,000 tokens")
 				return nil
 			}
 
@@ -69,17 +72,15 @@ func newRootCmd(chatFn func(*Config, ApiProvider, string, string) (string, error
 			err = withSpinner(spinnerMsg, func() error {
 				comment, err := chatFn(cfg, cfg.Provider, prompt, diff)
 				if err == nil {
-					fmt.Println()
-					fmt.Println()
-					fmt.Println(comment)
+					fmt.Fprintln(out)
+					fmt.Fprintln(out, "----------------------------------------")
+					fmt.Fprintln(out)
+					fmt.Fprintln(out, comment)
 				}
 
 				if outputPath != "" {
 					return os.WriteFile(outputPath, []byte(comment), 0644)
 				}
-				fmt.Println()
-				fmt.Println()
-				fmt.Println(comment)
 
 				return err
 			})

@@ -19,13 +19,13 @@ openai_model = "gpt-4"
 anthropic_model = "claude-3-opus"
 `
 
-	err := os.WriteFile(configPath, []byte(content), 0644)
-	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(configPath, []byte(content), 0644))
 
-	t.Setenv("HOME", tmpDir)
+	v := viper.New()
+	v.SetConfigFile(configPath)
+	v.SetConfigType("toml")
 
-	viper.Reset()
-	cfg, err := loadConfig()
+	cfg, err := loadConfigWith(v)
 	require.NoError(t, err)
 	require.Equal(t, Anthropic, cfg.Provider)
 	require.Equal(t, "gpt-4", cfg.OpenAIModel)
@@ -33,10 +33,12 @@ anthropic_model = "claude-3-opus"
 }
 
 func TestLoadConfig_DefaultsWhenMissingFile(t *testing.T) {
-	viper.Reset()
-	viper.SetConfigFile("/nonexistent/path/.ai-mr-comment.toml")
+	v := viper.New()
+	v.SetConfigName(".ai-mr-comment.toml")
+	v.SetConfigType("toml")
+	v.AddConfigPath("/nonexistent") // a directory that doesn't exist
 
-	cfg, err := loadConfig()
+	cfg, err := loadConfigWith(v)
 	require.NoError(t, err)
 	require.Equal(t, OpenAI, cfg.Provider)
 	require.Equal(t, "gpt-4o-mini", cfg.OpenAIModel)
