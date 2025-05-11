@@ -65,7 +65,22 @@ https://github.com/your-org/ai-mr-comment/releases/latest/download/ai-mr-comment
 ## Configuration File
 
 ```toml
-# Choose which provider to use: "openai" or "anthropic"
+provider = "openai"
+
+openai_api_key = "xxxx"                    
+openai_model = "gpt-4o-mini"
+openai_endpoint = "https://api.openai.com/v1/chat/completions"
+
+anthropic_api_key = "xxxx"
+anthropic_model = "claude-3-7-sonnet-20250219"
+anthropic_endpoint = "https://api.anthropic.com/v1/messages"
+
+ollama_model = "ollama"
+ollama_endpoint = "http://localhost:11434/api/generate"
+```
+
+```toml
+# Choose which provider to use: "openai" or "anthropic" or "ollama"
 provider = "openai"
 
 # === OpenAI Settings ===
@@ -83,18 +98,12 @@ anthropic_api_key = "xxxx"
 anthropic_model = "claude-3-7-sonnet-20250219"
 # Custom endpoint (optional, default is Anthropic's)
 anthropic_endpoint = "https://api.anthropic.com/v1/messages"
-```
 
-```toml
-provider = "openai"
-
-openai_api_key = "xxxx"                    
-openai_model = "gpt-4o-mini"
-openai_endpoint = "https://api.openai.com/v1/chat/completions"
-
-anthropic_api_key = "xxxx"
-anthropic_model = "claude-3-7-sonnet-20250219"
-anthropic_endpoint = "https://api.anthropic.com/v1/messages"
+# === Ollama Settings ===
+# The Ollama model to use
+ollama_model = "ollama"
+# Custom endpoint (optional, default is Ollama's)
+ollama_endpoint = "http://localhost:11434/api/generate"
 ```
 
 ## Usage
@@ -145,15 +154,20 @@ The tool will look for configuration in the following order:
 
 ### Default Values
 
+#### OpenAI
+
+- Endpoint: `https://api.openai.com/v1/chat/completions`
+- Model: `gpt-4o-mini`
+
 #### Anthropic
 
 - Endpoint: `https://api.anthropic.com/v1/messages`
 - Model: `claude-3-7-sonnet-20250219`
 
-#### OpenAI
+#### Ollama
 
-- Endpoint: `https://api.openai.com/v1/chat/completions`
-- Model: `gpt-4o-mini`
+- Endpoint: `http://localhost:11434/api/generate`
+- Model: `llama3`
 
 ## Example Output
 

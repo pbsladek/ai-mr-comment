@@ -17,12 +17,16 @@ const (
 )
 
 type Config struct {
-	OpenAIKey         string      `mapstructure:"openai_api_key"`
-	AnthropicKey      string      `mapstructure:"anthropic_api_key"`
-	OpenAIModel       string      `mapstructure:"openai_model"`
-	AnthropicModel    string      `mapstructure:"anthropic_model"`
+	OpenAIKey    string `mapstructure:"openai_api_key"`
+	AnthropicKey string `mapstructure:"anthropic_api_key"`
+
+	OpenAIModel    string `mapstructure:"openai_model"`
+	AnthropicModel string `mapstructure:"anthropic_model"`
+	OllamaModel    string `mapstructure:"ollama_model"`
+
 	OpenAIEndpoint    string      `mapstructure:"openai_endpoint"`
 	AnthropicEndpoint string      `mapstructure:"anthropic_endpoint"`
+	OllamaEndpoint    string      `mapstructure:"ollama_endpoint"`
 	Provider          ApiProvider `mapstructure:"provider"`
 }
 
