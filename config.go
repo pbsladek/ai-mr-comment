@@ -31,6 +31,7 @@ type Config struct {
 	AnthropicEndpoint string      `mapstructure:"anthropic_endpoint"`
 	OllamaEndpoint    string      `mapstructure:"ollama_endpoint"`
 	Provider          ApiProvider `mapstructure:"provider"`
+	Template          string      `mapstructure:"template"`
 }
 
 func loadConfig() (*Config, error) {
@@ -60,11 +61,17 @@ func loadConfigWith(v *viper.Viper) (*Config, error) {
 	v.SetDefault("ollama_model", "llama3")
 	v.SetDefault("ollama_endpoint", "http://localhost:11434/api/generate")
 	v.SetDefault("gemini_model", "gemini-2.5-flash")
+	v.SetDefault("template", "default")
 
 	if err := v.ReadInConfig(); err != nil {
+		var configParseError viper.ConfigParseError
+		if errors.As(err, &configParseError) {
+			return nil, fmt.Errorf("malformed config file: %w", err)
+		}
+
 		var notFound viper.ConfigFileNotFoundError
 		if !errors.As(err, &notFound) {
-			return nil, err
+			return nil, err // A different read error occurred
 		}
 	}
 

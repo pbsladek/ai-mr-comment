@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -132,5 +133,29 @@ func TestLoadConfig_Gemini(t *testing.T) {
 	}
 	if cfg.Provider != Gemini {
 		t.Errorf("expected Provider to be 'gemini', got '%s'", cfg.Provider)
+	}
+}
+
+func TestLoadConfig_MalformedTOML(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, ".ai-mr-comment.toml")
+
+	// Malformed content (missing quotes)
+	content := `provider = anthropic`
+
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	v := viper.New()
+	v.SetConfigFile(configPath)
+	v.SetConfigType("toml")
+
+	_, err := loadConfigWith(v)
+	if err == nil {
+		t.Fatal("expected an error for malformed TOML, but got nil")
+	}
+	if !strings.Contains(err.Error(), "malformed config file") {
+		t.Errorf("expected error to contain 'malformed config file', got '%v'", err)
 	}
 }

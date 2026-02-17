@@ -15,7 +15,7 @@ NEXT_VERSION := $(shell \
   fi \
 )
 
-.PHONY: all clean build release test test-cover lint
+.PHONY: all clean build release test test-cover test-integration lint test-run
 
 all: build
 
@@ -39,8 +39,17 @@ test:
 test-cover:
 	go test -cover ./...
 
+test-integration:
+	go test -v -tags=integration ./...
+
 lint:
 	golangci-lint run ./...
+
+PROVIDER ?= gemini
+
+test-run: build
+	@echo "Running ai-mr-comment on current git diff with provider: $(PROVIDER)..."
+	./dist/ai-mr-comment --provider $(PROVIDER)
 
 clean:
 	rm -rf $(BUILD_DIR)

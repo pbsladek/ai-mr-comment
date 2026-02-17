@@ -19,7 +19,7 @@ func main() {
 }
 
 func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
-	var commit, diffFilePath, outputPath, provider string
+	var commit, diffFilePath, outputPath, provider, templateName string
 	var debug bool
 
 	rootCmd := &cobra.Command{
@@ -29,8 +29,9 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			cfg, _ := loadConfig()
 			if cmd.Flags().Changed("provider") {
 				cfg.Provider = ApiProvider(provider)
-			} else {
-				cfg.Provider = ApiProvider(cfg.Provider)
+			}
+			if cmd.Flags().Changed("template") {
+				cfg.Template = templateName
 			}
 
 			if cfg.Provider != OpenAI && cfg.Provider != Anthropic && cfg.Provider != Ollama && cfg.Provider != Gemini {
@@ -63,7 +64,10 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 
 			out := cmd.OutOrStdout()
 			diffContent = processDiff(diffContent, 4000)
-			systemPrompt := NewPromptTemplate().SystemMessage()
+			systemPrompt, err := NewPromptTemplate(cfg.Template)
+			if err != nil {
+				_, _ = fmt.Fprintln(os.Stderr, "Warning:", err)
+			}
 
 			if debug {
 				systemTokens := estimateTokens(systemPrompt)
@@ -104,6 +108,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().StringVar(&diffFilePath, "file", "", "Path to diff file")
 	rootCmd.Flags().StringVar(&outputPath, "output", "", "Output file path")
 	rootCmd.Flags().StringVar(&provider, "provider", "openai", "API provider (openai, anthropic, gemini, ollama)")
+	rootCmd.Flags().StringVarP(&templateName, "template", "t", "default", "Prompt template to use (e.g., default, conventional, technical)")
 	rootCmd.Flags().BoolVar(&debug, "debug", false, "Estimate token usage")
 
 	return rootCmd

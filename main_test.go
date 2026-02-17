@@ -19,7 +19,7 @@ func dummyChatFn(ctx context.Context, cfg *Config, provider ApiProvider, systemP
 func TestNewRootCmd_DebugFlag(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "dummy")
 	cmd := newRootCmd(dummyChatFn)
-	cmd.SetArgs([]string{"--debug", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetArgs([]string{"--debug", "--file=testdata/simple.diff", "--provider=openai"})
 
 	origStdout := os.Stdout
 	_, w, _ := os.Pipe()

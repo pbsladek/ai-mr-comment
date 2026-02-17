@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
@@ -168,9 +167,4 @@ func chatCompletions(ctx context.Context, cfg *Config, provider ApiProvider, sys
 	default:
 		return "", errors.New("unsupported provider")
 	}
-}
-
-func estimateTokens(text string) int {
-	// Anthropic counts ~4 chars per token, OpenAI ~3.5 - we'll use conservative estimate
-	return int(math.Ceil(float64(len(text)) / 3.5))
 }

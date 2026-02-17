@@ -80,6 +80,8 @@ gemini_model = "gemini-2.5-flash"
 
 ollama_model = "ollama"
 ollama_endpoint = "http://localhost:11434/api/generate"
+
+template = "default"
 ```
 
 ```toml
@@ -113,6 +115,11 @@ gemini_model = "gemini-2.5-flash"
 ollama_model = "ollama"
 # Custom endpoint (optional, default is Ollama's)
 ollama_endpoint = "http://localhost:11434/api/generate"
+
+# === Template Settings ===
+# The prompt template to use (e.g., default, conventional, technical, user-focused)
+# You can also provide a path to a custom .tmpl file
+template = "default"
 ```
 
 ## Usage
@@ -150,6 +157,7 @@ ai-mr-comment --provider anthropic --model claude-3-haiku-20240307
 - `-o, --output <FILE>`: Write output to file instead of stdout
 - `-k, --api-key <API_KEY>`: API key (can also use OPENAI_API_KEY, ANTHROPIC_API_KEY, or GEMINI_API_KEY env var)
 - `-p, --provider <PROVIDER>`: API provider to use (openai, anthropic, gemini, ollama)
+- `-t, --template <TEMPLATE>`: Prompt template to use (e.g., default, conventional, technical)
 - `-e, --endpoint <ENDPOINT>`: API endpoint (defaults based on provider)
 - `-m, --model <MODEL>`: Model to use (defaults based on provider)
 - `-h, --help`: Print help
