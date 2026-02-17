@@ -72,11 +72,11 @@ openai_model = "gpt-4o-mini"
 openai_endpoint = "https://api.openai.com/v1/chat/completions"
 
 anthropic_api_key = "xxxx"
-anthropic_model = "claude-3-7-sonnet-20250219"
+anthropic_model = "claude-3-5-sonnet-20240620"
 anthropic_endpoint = "https://api.anthropic.com/v1/messages"
 
 gemini_api_key = "xxxx"
-gemini_model = "gemini-1.5-flash"
+gemini_model = "gemini-2.5-flash"
 
 ollama_model = "ollama"
 ollama_endpoint = "http://localhost:11434/api/generate"
@@ -98,7 +98,7 @@ openai_endpoint = "https://api.openai.com/v1/chat/completions"
 # Your Anthropic Claude API key
 anthropic_api_key = "xxxx"
 # The Claude model to use
-anthropic_model = "claude-3-7-sonnet-20250219"
+anthropic_model = "claude-3-5-sonnet-20240620"
 # Custom endpoint (optional, default is Anthropic's)
 anthropic_endpoint = "https://api.anthropic.com/v1/messages"
 
@@ -106,7 +106,7 @@ anthropic_endpoint = "https://api.anthropic.com/v1/messages"
 # Your Google Gemini API key
 gemini_api_key = "xxxx"
 # The Gemini model to use
-gemini_model = "gemini-1.5-flash"
+gemini_model = "gemini-2.5-flash"
 
 # === Ollama Settings ===
 # The Ollama model to use
@@ -174,11 +174,11 @@ The tool will look for configuration in the following order:
 #### Anthropic
 
 - Endpoint: `https://api.anthropic.com/v1/messages`
-- Model: `claude-3-7-sonnet-20250219`
+- Model: `claude-3-5-sonnet-20240620`
 
 #### Gemini
 
-- Model: `gemini-1.5-flash`
+- Model: `gemini-2.5-flash`
 
 #### Ollama
 

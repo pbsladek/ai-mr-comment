@@ -57,8 +57,8 @@ func TestLoadConfig_DefaultsWhenMissingFile(t *testing.T) {
 	if cfg.OpenAIModel != "gpt-4o-mini" {
 		t.Errorf("expected OpenAI model gpt-4o-mini, got %v", cfg.OpenAIModel)
 	}
-	if cfg.AnthropicModel != "claude-3-7-sonnet-20250219" {
-		t.Errorf("expected Anthropic model claude-3-7-sonnet-20250219, got %v", cfg.AnthropicModel)
+	if cfg.AnthropicModel != "claude-3-5-sonnet-20240620" {
+		t.Errorf("expected Anthropic model claude-3-5-sonnet-20240620, got %v", cfg.AnthropicModel)
 	}
 }
 

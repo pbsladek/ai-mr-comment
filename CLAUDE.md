@@ -1,26 +1,29 @@
 # AI MR Comment Generator
 
-A command-line tool written in Go that generates professional GitLab Merge Request (MR) comments based on git diffs using AI (OpenAI, Anthropic, Gemini, or Ollama).
+A command-line tool written in Go that generates professional MR/PR comments based on git diffs using AI (OpenAI, Anthropic, Gemini, or Ollama).
 
 ## Build & Run
 
 - **Build**: `make build` (creates binary in `./dist/ai-mr-comment`)
 - **Run**: `make run` or `./dist/ai-mr-comment`
-- **Debug**: `make run-debug` (shows token estimation)
-- **Test**: `go test ./src/...`
-- **Install dependencies**: `go mod download`
+- **Test**: `go test ./...`
+- **Lint**: `make lint`
+- **Install dependencies**: `go mod tidy`
 
 ## Code Structure
 
-- `src/`: Source code for the CLI tool.
-  - `main.go`: Entry point, command definition, and core logic.
-  - `main_test.go`: Tests for main logic.
+- `main.go`: Entry point, command definition, and core logic.
+- `api.go`: Logic for calling external AI provider APIs.
+- `config.go`: Configuration loading (Viper).
+- `git.go`: Git diff handling.
+- `prompt.go`: System prompt generation.
+- `*.go`: Go source files are in the project root.
 - `dist/`: Built binaries.
 - `Makefile`: Build scripts.
 
 ## Configuration
 
-- Config file: `~/.ai-mr-comment` (TOML format).
+- Config file: `~/.ai-mr-comment.toml` or `ai-mr-comment.toml` (TOML format).
 - Environment variables: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`.
 - Providers: `openai`, `anthropic`, `gemini`, `ollama`.
 

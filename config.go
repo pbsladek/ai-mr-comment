@@ -55,11 +55,11 @@ func loadConfigWith(v *viper.Viper) (*Config, error) {
 	v.SetDefault("provider", OpenAI)
 	v.SetDefault("openai_model", "gpt-4o-mini")
 	v.SetDefault("openai_endpoint", "https://api.openai.com/v1/chat/completions")
-	v.SetDefault("anthropic_model", "claude-3-7-sonnet-20250219")
+	v.SetDefault("anthropic_model", "claude-3-5-sonnet-20240620")
 	v.SetDefault("anthropic_endpoint", "https://api.anthropic.com/v1/messages")
 	v.SetDefault("ollama_model", "llama3")
 	v.SetDefault("ollama_endpoint", "http://localhost:11434/api/generate")
-	v.SetDefault("gemini_model", "gemini-1.5-flash")
+	v.SetDefault("gemini_model", "gemini-2.5-flash")
 
 	if err := v.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError

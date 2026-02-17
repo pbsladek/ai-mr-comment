@@ -1,0 +1,22 @@
+diff --git a/main.go b/main.go
+index a1b2c3d..e4f5g6h 100644
+--- a/main.go
++++ b/main.go
+@@ -5,7 +5,7 @@
+ )
+ 
+ func main() {
+-	fmt.Println("Hello")
++	fmt.Println("Hello, World!")
+ }
+diff --git a/utils.go b/utils.go
+index d1e2f3g..h4i5j6k 100644
+--- a/utils.go
++++ b/utils.go
+@@ -1,5 +1,6 @@
+ package main
+ 
++// Add is a helpful function
+ func Add(a, b int) int {
+ 	return a + b
+ }

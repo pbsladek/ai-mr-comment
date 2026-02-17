@@ -1,0 +1,11 @@
+diff --git a/README.md b/README.md
+index 1234567..abcdefg 100644
+--- a/README.md
++++ b/README.md
+@@ -1,5 +1,5 @@
+ # My Project
+ 
+-This is a simple project.
++This is a simple but important project.
+ 
+ It does things.
