@@ -30,7 +30,7 @@ func TestNewRootCmd_DebugFlag(t *testing.T) {
 
 	err := cmd.Execute()
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = origStdout
 
 	if err != nil {
@@ -59,7 +59,7 @@ func TestNewRootCmd_ChatFnError(t *testing.T) {
 	cmd.SetArgs([]string{"--file=testdata/diff.txt", "--provider=openai"})
 
 	_ = os.WriteFile("testdata/fail.txt", []byte("this should fail"), 0644)
-	defer os.Remove("testdata/fail.txt")
+	defer func() { _ = os.Remove("testdata/fail.txt") }()
 
 	cmd.SetArgs([]string{"--file=testdata/fail.txt", "--provider=openai"})
 
@@ -77,7 +77,7 @@ func TestNewRootCmd_ChatFnError(t *testing.T) {
 func TestNewRootCmd_OutputToFile(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "dummy")
 	outputFile := "testdata/output.txt"
-	defer os.Remove(outputFile)
+	defer func() { _ = os.Remove(outputFile) }()
 
 	cmd := newRootCmd(dummyChatFn)
 	cmd.SetArgs([]string{"--file=testdata/diff.txt", "--provider=openai", "--output=" + outputFile})

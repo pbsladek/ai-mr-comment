@@ -44,7 +44,7 @@ func TestReadDiffFromFile(t *testing.T) {
 	content := "diff --git a/x b/x\n+++ b/x\n"
 	tmpFile := "tmp.diff"
 	_ = os.WriteFile(tmpFile, []byte(content), 0644)
-	defer os.Remove(tmpFile)
+	defer func() { _ = os.Remove(tmpFile) }()
 
 	data, err := readDiffFromFile(tmpFile)
 	if err != nil {

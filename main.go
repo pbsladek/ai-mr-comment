@@ -71,12 +71,12 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				originalLen := len(strings.Split(diffContent, "\n"))
 				totalTokens := systemTokens + diffTokens
 
-				fmt.Fprintln(out, "Token estimation:")
-				fmt.Fprintf(out, "- System prompt: %d tokens\n", systemTokens)
-				fmt.Fprintf(out, "- Diff content: %d tokens (%d lines)\n", diffTokens, originalLen)
-				fmt.Fprintf(out, "- Total estimate: %d tokens\n", totalTokens)
-				fmt.Fprintln(out, "OpenApi limit: 200,000 tokens")
-				fmt.Fprintln(out, "Anthropic's limit: 200,000 tokens")
+				_, _ = fmt.Fprintln(out, "Token estimation:")
+				_, _ = fmt.Fprintf(out, "- System prompt: %d tokens\n", systemTokens)
+				_, _ = fmt.Fprintf(out, "- Diff content: %d tokens (%d lines)\n", diffTokens, originalLen)
+				_, _ = fmt.Fprintf(out, "- Total estimate: %d tokens\n", totalTokens)
+				_, _ = fmt.Fprintln(out, "OpenApi limit: 200,000 tokens")
+				_, _ = fmt.Fprintln(out, "Anthropic's limit: 200,000 tokens")
 				return nil
 			}
 
@@ -88,10 +88,10 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				return err
 			}
 
-			fmt.Fprintln(out)
-			fmt.Fprintln(out, "----------------------------------------")
-			fmt.Fprintln(out)
-			fmt.Fprintln(out, comment)
+			_, _ = fmt.Fprintln(out)
+			_, _ = fmt.Fprintln(out, "----------------------------------------")
+			_, _ = fmt.Fprintln(out)
+			_, _ = fmt.Fprintln(out, comment)
 
 			if outputPath != "" {
 				return os.WriteFile(outputPath, []byte(comment), 0644)

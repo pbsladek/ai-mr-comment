@@ -91,7 +91,7 @@ func callOllama(ctx context.Context, cfg *Config, systemPrompt, diffContent stri
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -124,7 +124,7 @@ func callGemini(ctx context.Context, cfg *Config, systemPrompt, diffContent stri
 	if err != nil {
 		return "", err
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	model := client.GenerativeModel(cfg.GeminiModel)
 	model.SystemInstruction = &genai.Content{
