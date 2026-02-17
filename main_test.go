@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -8,37 +9,15 @@ import (
 	"testing"
 )
 
-func dummyChatFn(cfg *Config, provider ApiProvider, prompt, diff string) (string, error) {
-	if strings.Contains(diff, "fail") {
+func dummyChatFn(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
+	if strings.Contains(diffContent, "fail") {
 		return "", errors.New("forced error")
 	}
 	return "mocked comment", nil
 }
 
-func TestWithSpinner_Success(t *testing.T) {
-	called := false
-	err := withSpinner("testing spinner", func() error {
-		called = true
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-	if !called {
-		t.Fatalf("expected function to be called")
-	}
-}
-
-func TestWithSpinner_Error(t *testing.T) {
-	err := withSpinner("testing spinner error", func() error {
-		return errors.New("expected error")
-	})
-	if err == nil || err.Error() != "expected error" {
-		t.Fatalf("expected 'expected error', got %v", err)
-	}
-}
-
 func TestNewRootCmd_DebugFlag(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
 	cmd := newRootCmd(dummyChatFn)
 	cmd.SetArgs([]string{"--debug", "--file=testdata/diff.txt", "--provider=openai"})
 
@@ -75,6 +54,7 @@ func TestNewRootCmd_UnsupportedProvider(t *testing.T) {
 }
 
 func TestNewRootCmd_ChatFnError(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
 	cmd := newRootCmd(dummyChatFn)
 	cmd.SetArgs([]string{"--file=testdata/diff.txt", "--provider=openai"})
 
@@ -95,6 +75,7 @@ func TestNewRootCmd_ChatFnError(t *testing.T) {
 }
 
 func TestNewRootCmd_OutputToFile(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
 	outputFile := "testdata/output.txt"
 	defer os.Remove(outputFile)
 
@@ -121,6 +102,7 @@ func TestNewRootCmd_OutputToFile(t *testing.T) {
 }
 
 func TestNewRootCmd_FileNotFound(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
 	cmd := newRootCmd(dummyChatFn)
 	cmd.SetArgs([]string{"--file=testdata/doesnotexist.diff", "--provider=openai"})
 
@@ -136,7 +118,8 @@ func TestNewRootCmd_FileNotFound(t *testing.T) {
 }
 
 func TestNewRootCmd_EmptyDiff(t *testing.T) {
-	cmd := newRootCmd(func(cfg *Config, provider ApiProvider, prompt, diff string) (string, error) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	cmd := newRootCmd(func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
 		return "", nil
 	})
 	cmd.SetArgs([]string{"--file=testdata/diff.txt", "--provider=openai"})
@@ -153,7 +136,8 @@ func TestNewRootCmd_EmptyDiff(t *testing.T) {
 }
 
 func TestNewRootCmd_DebugOnly(t *testing.T) {
-	cmd := newRootCmd(func(cfg *Config, provider ApiProvider, prompt, diff string) (string, error) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	cmd := newRootCmd(func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
 		t.Fatalf("chatFn should not be called in debug mode")
 		return "", nil
 	})
@@ -167,5 +151,65 @@ func TestNewRootCmd_DebugOnly(t *testing.T) {
 	if err != nil {
 
 		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestNewRootCmd_MissingOpenAIKey(t *testing.T) {
+	// Ensure no config file is found and no env vars are set
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("AI_MR_COMMENT_OPENAI_API_KEY", "")
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--file=testdata/diff.txt", "--provider=openai"})
+
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "missing OpenAI API key") {
+		t.Fatalf("expected missing API key error, got %v", err)
+	}
+}
+
+func TestNewRootCmd_MissingAnthropicKey(t *testing.T) {
+	// Ensure no config file is found and no env vars are set
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("AI_MR_COMMENT_ANTHROPIC_API_KEY", "")
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--file=testdata/diff.txt", "--provider=anthropic"})
+
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "missing Anthropic API key") {
+		t.Fatalf("expected missing API key error, got %v", err)
+	}
+}
+
+func TestNewRootCmd_MissingGeminiKey(t *testing.T) {
+	// Ensure no config file is found and no env vars are set
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("AI_MR_COMMENT_GEMINI_API_KEY", "")
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--file=testdata/diff.txt", "--provider=gemini"})
+
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "missing Gemini API key") {
+		t.Fatalf("expected missing API key error, got %v", err)
 	}
 }

@@ -1,0 +1,92 @@
+# .golangci.yml
+# Options for golangci-lint.
+# https://golangci-lint.run/usage/configuration/
+run:
+  # timeout for analysis, e.g. 30s, 5m, default is 1m
+  timeout: 5m
+  # exit-on-error: if set to false, it will continue to run all linters even if one fails.
+  exit-on-error: true
+  # which files to include, if empty all Go files are included
+  # tests: if set to false, tests will be skipped
+  tests: true
+
+linters-settings:
+  errcheck:
+    # report about not checking of errors in type assertions: `a := b.(T)`
+    check-type-assertions: true
+    # report about assignment of errors to blank identifier: `_ = Lint(a)`
+    check-blank: true
+  govet:
+    # report about shadowed variables
+    check-shadowing: true
+  gocyclo:
+    # minimal code complexity to report, 30 by default (but we can be stricter)
+    min-complexity: 15
+  maligned:
+    # print struct layout optimizations suggestions
+    suggest-new: true
+  goconst:
+    # minimal length of string constant, 3 by default
+    min-len: 2
+    # minimal occurrences of value to report, 3 by default
+    min-occurrences: 2
+  gocritic:
+    enabled-tags:
+      - performance
+      - style
+      - experimental
+    disabled-checks:
+      - hugeParam
+
+linters:
+  # please, do not use `enable-all`: it's deprecated and will be removed soon.
+  # inverted configuration with `enable-all` and `disable` is not scalable during updates of golangci-lint
+  disable-all: true
+  enable:
+    - bodyclose
+    - deadcode
+    - depguard
+    - dogsled
+    - dupl
+    - errcheck
+    - exportloopref
+    - exhaustive
+    - funlen
+    - gochecknoinits
+    - goconst
+    - gocritic
+    - gocyclo
+    - gofmt
+    - goimports
+    - revive
+    - goprintffuncname
+    - gosec
+    - gosimple
+    - govet
+    - ineffassign
+    - misspell
+    - nakedret
+    - noctx
+    - nolintlint
+    - staticcheck
+    - structcheck
+    - stylecheck
+    - typecheck
+    - unconvert
+    - unparam
+    - unused
+    - varcheck
+    - whitespace
+
+issues:
+  # Excluding configuration per-path, per-linter, per-text and per-source
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - funlen # be more lenient with test function length
+        - gocyclo
+
+# golangci.com configuration
+# https://golangci-lint.run/usage/configuration/#config-file
+service:
+  golangci-lint-version: 1.57.x # use the fixed version to not introduce new linters unexpectedly

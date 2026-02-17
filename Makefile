@@ -15,22 +15,22 @@ NEXT_VERSION := $(shell \
   fi \
 )
 
-.PHONY: all clean build release test test-cover
+.PHONY: all clean build release test test-cover lint
 
 all: build
 
 build:
 	@mkdir -p $(BUILD_DIR)
-	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) ./src
+	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) .
 
 run:
 	@mkdir -p $(BUILD_DIR)
-	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) ./src
+	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) .
 	./dist/ai-mr-comment
 
 run-debug:
 	@mkdir -p $(BUILD_DIR)
-	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) ./src
+	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) .
 	./dist/ai-mr-comment --debug
 
 test:
@@ -38,6 +38,9 @@ test:
 
 test-cover:
 	go test -cover ./...
+
+lint:
+	golangci-lint run ./...
 
 clean:
 	rm -rf $(BUILD_DIR)
@@ -57,6 +60,5 @@ release: clean
 		EXT=$$( [ "$$OS" = "windows" ] && echo .exe || echo ); \
 		OUTPUT=$(BUILD_DIR)/$(APP)-$$OS-$$ARCH$$EXT; \
 		echo "Building: $$OUTPUT"; \
-		GOOS=$$OS GOARCH=$$ARCH go build $(LDFLAGS) -o $$OUTPUT ./src; \
+		GOOS=$$OS GOARCH=$$ARCH go build $(LDFLAGS) -o $$OUTPUT .; \
 	done
-

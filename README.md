@@ -1,11 +1,11 @@
 # MR Comment Generator (Go)
 
-A command-line tool written in Go that generates professional GitLab Merge Request (MR) comments based on git diffs using AI (OpenAI or Anthropic).
+A command-line tool written in Go that generates professional GitLab Merge Request (MR) comments based on git diffs using AI (OpenAI, Anthropic, Gemini, or Ollama).
 
 ## Features
 
 - Reads git diffs from current repo or from a file
-- Supports both OpenAI and Anthropic (Claude) APIs
+- Supports OpenAI, Anthropic (Claude), Google Gemini, and Ollama APIs
 - Customizable API endpoints and models
 - Configuration file support (~/.ai-mr-comment)
 - Environment variable configuration
@@ -20,7 +20,7 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 
 - Go
 - Git
-- OpenAI API key or Anthropic API key
+- OpenAI API key, Anthropic API key, or Google Gemini API key
 
 ### Building from source
 
@@ -75,12 +75,15 @@ anthropic_api_key = "xxxx"
 anthropic_model = "claude-3-7-sonnet-20250219"
 anthropic_endpoint = "https://api.anthropic.com/v1/messages"
 
+gemini_api_key = "xxxx"
+gemini_model = "gemini-1.5-flash"
+
 ollama_model = "ollama"
 ollama_endpoint = "http://localhost:11434/api/generate"
 ```
 
 ```toml
-# Choose which provider to use: "openai" or "anthropic" or "ollama"
+# Choose which provider to use: "openai", "anthropic", "gemini", or "ollama"
 provider = "openai"
 
 # === OpenAI Settings ===
@@ -99,6 +102,12 @@ anthropic_model = "claude-3-7-sonnet-20250219"
 # Custom endpoint (optional, default is Anthropic's)
 anthropic_endpoint = "https://api.anthropic.com/v1/messages"
 
+# === Gemini Settings ===
+# Your Google Gemini API key
+gemini_api_key = "xxxx"
+# The Gemini model to use
+gemini_model = "gemini-1.5-flash"
+
 # === Ollama Settings ===
 # The Ollama model to use
 ollama_model = "ollama"
@@ -114,6 +123,9 @@ ai-mr-comment --api-key YOUR_OPENAI_API_KEY
 
 # Generate comment using Anthropic
 ai-mr-comment --provider anthropic --api-key  YOUR_ANTHROPIC_API_KEY
+
+# Generate comment using Gemini
+ai-mr-comment --provider gemini --api-key YOUR_GEMINI_API_KEY
 
 # Generate comment for a specific commit
 ai-mr-comment --commit a1b2c3d
@@ -136,8 +148,8 @@ ai-mr-comment --provider anthropic --model claude-3-haiku-20240307
 - `-c, --commit <COMMIT>`: Specific commit to generate comment for (default: HEAD)
 - `-f, --file <FILE>`: Read diff from file instead of git command
 - `-o, --output <FILE>`: Write output to file instead of stdout
-- `-k, --api-key <API_KEY>`: API key (can also use OPENAI_API_KEY or ANTHROPIC_API_KEY env var)
-- `-p, --provider <PROVIDER>`: API provider to use (openai or anthropic)
+- `-k, --api-key <API_KEY>`: API key (can also use OPENAI_API_KEY, ANTHROPIC_API_KEY, or GEMINI_API_KEY env var)
+- `-p, --provider <PROVIDER>`: API provider to use (openai, anthropic, gemini, ollama)
 - `-e, --endpoint <ENDPOINT>`: API endpoint (defaults based on provider)
 - `-m, --model <MODEL>`: Model to use (defaults based on provider)
 - `-h, --help`: Print help
@@ -149,7 +161,7 @@ ai-mr-comment --provider anthropic --model claude-3-haiku-20240307
 The tool will look for configuration in the following order:
 
 1. Command line arguments
-2. Environment variables (`OPENAI_API_KEY` for OpenAI or `ANTHROPIC_API_KEY` for Anthropic (claude))
+2. Environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `GEMINI_API_KEY`)
 3. Configuration file
 
 ### Default Values
@@ -163,6 +175,10 @@ The tool will look for configuration in the following order:
 
 - Endpoint: `https://api.anthropic.com/v1/messages`
 - Model: `claude-3-7-sonnet-20250219`
+
+#### Gemini
+
+- Model: `gemini-1.5-flash`
 
 #### Ollama
 

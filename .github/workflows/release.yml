@@ -3,7 +3,7 @@ name: release
 on:
   push:
     tags:
-      - '*'
+      - "*"
 
 jobs:
   release:
@@ -17,15 +17,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: '1.24'
+          go-version: "1.24"
 
-      - name: Build release binaries
-        run: make release
-
-      - name: Create GitHub Release
-        run: |
-          gh release create "${{ github.ref_name }}" dist/* \
-            --title "Release ${{ github.ref_name }}" \
-            --notes "Automated release of version ${{ github.ref_name }}"
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v5
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
