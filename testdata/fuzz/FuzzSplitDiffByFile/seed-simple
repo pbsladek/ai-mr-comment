@@ -1,0 +1,2 @@
+go test fuzz v1
+string("diff --git a/README.md b/README.md\nindex 1234567..abcdefg 100644\n--- a/README.md\n+++ b/README.md\n@@ -1,5 +1,5 @@\n # My Project\n \n-This is a simple project.\n+This is a simple but important project.\n \n It does things.\n")

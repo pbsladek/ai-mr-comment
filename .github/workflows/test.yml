@@ -36,5 +36,11 @@ jobs:
           echo ""
           echo "Total coverage: $(go tool cover -func=coverage.out | grep total | awk '{print $3}')"
 
+      - name: Fuzz Smoke Test
+        run: |
+          go test -fuzz=FuzzSplitDiffByFile -fuzztime=10s .
+          go test -fuzz=FuzzProcessDiff -fuzztime=10s .
+          go test -fuzz=FuzzEstimateCost -fuzztime=10s .
+
       - name: Check Binary Size
         run: make check-size

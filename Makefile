@@ -20,7 +20,7 @@ NEXT_VERSION := $(shell \
   fi \
 )
 
-.PHONY: all clean build release test test-cover test-integration lint test-run install install-completion-bash install-completion-zsh check-size
+.PHONY: all clean build release test test-cover test-integration test-fuzz lint test-run install install-completion-bash install-completion-zsh check-size
 
 all: build
 
@@ -62,6 +62,11 @@ test-cover:
 
 test-integration:
 	go test -v -tags=integration ./...
+
+test-fuzz:
+	go test -fuzz=FuzzSplitDiffByFile -fuzztime=30s .
+	go test -fuzz=FuzzProcessDiff -fuzztime=30s .
+	go test -fuzz=FuzzEstimateCost -fuzztime=30s .
 
 lint:
 	golangci-lint run ./...
