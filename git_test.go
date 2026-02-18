@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -49,15 +50,22 @@ func TestGetGitDiff_NoArgs(t *testing.T) {
 }
 
 func TestGetGitDiff_WithCommit(t *testing.T) {
+	// Skip if HEAD has no parent (shallow clone or single-commit repo)
+	if err := exec.Command("git", "rev-parse", "HEAD^").Run(); err != nil {
+		t.Skip("skipping: HEAD has no parent commit")
+	}
 	result, err := getGitDiff("HEAD")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Result may be empty if HEAD has no parent diff, that's fine
 	_ = result
 }
 
 func TestGetGitDiff_WithRange(t *testing.T) {
+	// Skip if HEAD~1 doesn't exist (shallow clone or single-commit repo)
+	if err := exec.Command("git", "rev-parse", "HEAD~1").Run(); err != nil {
+		t.Skip("skipping: HEAD~1 does not exist")
+	}
 	result, err := getGitDiff("HEAD~1..HEAD")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
