@@ -1,0 +1,34 @@
+name: SBOM
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  sbom:
+    name: Generate and upload SBOM
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # Required to submit the SBOM to the GitHub dependency graph.
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          # Scan the whole repository so Go module dependencies are discovered.
+          path: .
+          format: spdx-json
+          output-file: sbom.spdx.json
+          artifact-name: sbom.spdx.json
+          upload-artifact: true
+          # Submit to the GitHub dependency graph for Dependabot alerts.
+          dependency-snapshot: true
