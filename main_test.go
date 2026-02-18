@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -191,6 +192,103 @@ func TestNewRootCmd_MissingAnthropicKey(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "missing Anthropic API key") {
 		t.Fatalf("expected missing API key error, got %v", err)
+	}
+}
+
+func TestNewRootCmd_TemplateFlag(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--file=testdata/diff.txt", "--provider=openai", "--template=nonexistent"})
+
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("expected no error (template falls back to default), got %v", err)
+	}
+}
+
+func TestNewRootCmd_GitDiffPath(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	alwaysOkFn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
+		return "ok", nil
+	}
+	cmd := newRootCmd(alwaysOkFn)
+	// No --file flag, so it uses getGitDiff (we're in a git repo)
+	cmd.SetArgs([]string{"--provider=openai"})
+
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestNewRootCmd_OllamaConnectionRefused(t *testing.T) {
+	chatFn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
+		return "", fmt.Errorf("Post \"http://localhost:99999/api/generate\": dial tcp: connection refused")
+	}
+	cmd := newRootCmd(chatFn)
+	cmd.SetArgs([]string{"--file=testdata/diff.txt", "--provider=ollama"})
+
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to connect to Ollama") {
+		t.Errorf("expected Ollama connection error, got %q", err.Error())
+	}
+}
+
+func TestNewRootCmd_DebugTokenEstimationError(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "dummy")
+	cmd := newRootCmd(dummyChatFn)
+	// Use gemini provider in debug mode — without a real API, the SDK token counting will fail
+	// and trigger the fallback path
+	cmd.SetArgs([]string{"--file=testdata/diff.txt", "--provider=gemini", "--debug"})
+
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("expected no error (should fallback to heuristic), got %v", err)
+	}
+}
+
+func TestGetModelName(t *testing.T) {
+	tests := []struct {
+		provider ApiProvider
+		cfg      Config
+		expected string
+	}{
+		{OpenAI, Config{Provider: OpenAI, OpenAIModel: "gpt-4o"}, "gpt-4o"},
+		{Anthropic, Config{Provider: Anthropic, AnthropicModel: "claude-3"}, "claude-3"},
+		{Gemini, Config{Provider: Gemini, GeminiModel: "gemini-2.5-flash"}, "gemini-2.5-flash"},
+		{Ollama, Config{Provider: Ollama, OllamaModel: "llama3"}, "llama3"},
+		{"unknown", Config{Provider: "unknown"}, "unknown"},
+	}
+	for _, tc := range tests {
+		t.Run(string(tc.provider), func(t *testing.T) {
+			result := getModelName(&tc.cfg)
+			if result != tc.expected {
+				t.Errorf("expected %q, got %q", tc.expected, result)
+			}
+		})
 	}
 }
 

@@ -153,11 +153,13 @@ func chatCompletions(ctx context.Context, cfg *Config, provider ApiProvider, sys
 	case OpenAI:
 		client := openai.NewClient(
 			openaiopt.WithAPIKey(cfg.OpenAIAPIKey),
+			openaiopt.WithBaseURL(cfg.OpenAIEndpoint),
 		)
 		return callOpenAI(ctx, &client, cfg, systemPrompt, diffContent)
 	case Anthropic:
 		client := anthropic.NewClient(
 			anthropicopt.WithAPIKey(cfg.AnthropicAPIKey),
+			anthropicopt.WithBaseURL(cfg.AnthropicEndpoint),
 		)
 		return callAnthropic(ctx, &client, cfg, systemPrompt, diffContent)
 	case Ollama:

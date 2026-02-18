@@ -40,6 +40,31 @@ func TestProcessDiff_Truncation(t *testing.T) {
 	}
 }
 
+func TestGetGitDiff_NoArgs(t *testing.T) {
+	// We're in a git repo, so this should not error
+	_, err := getGitDiff("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetGitDiff_WithCommit(t *testing.T) {
+	result, err := getGitDiff("HEAD")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Result may be empty if HEAD has no parent diff, that's fine
+	_ = result
+}
+
+func TestGetGitDiff_WithRange(t *testing.T) {
+	result, err := getGitDiff("HEAD~1..HEAD")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_ = result
+}
+
 func TestReadDiffFromFile(t *testing.T) {
 	content := "diff --git a/x b/x\n+++ b/x\n"
 	tmpFile := "tmp.diff"

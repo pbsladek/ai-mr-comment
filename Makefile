@@ -37,7 +37,7 @@ test:
 	go test -v ./...
 
 test-cover:
-	go test -cover ./...
+	go test -v -coverprofile=coverage.out ./...
 
 test-integration:
 	go test -v -tags=integration ./...
@@ -52,7 +52,7 @@ test-run: build
 	./dist/ai-mr-comment --provider $(PROVIDER)
 
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD_DIR) coverage.out
 
 next-version:
 	@echo "Next version: $(NEXT_VERSION)"

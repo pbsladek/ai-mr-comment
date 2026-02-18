@@ -28,4 +28,8 @@ jobs:
         run: make test
 
       - name: Run Coverage
-        run: make test-cover
+        run: |
+          make test-cover
+          go tool cover -func=coverage.out
+          echo ""
+          echo "Total coverage: $(go tool cover -func=coverage.out | grep total | awk '{print $3}')"

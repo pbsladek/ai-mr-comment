@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -33,6 +34,29 @@ func TestHeuristicTokenEstimator(t *testing.T) {
 	}
 }
 
+func TestNewTokenEstimator(t *testing.T) {
+	tests := []struct {
+		provider ApiProvider
+		wantType string
+	}{
+		{Gemini, "*main.GeminiTokenEstimator"},
+		{OpenAI, "*main.HeuristicTokenEstimator"},
+		{Anthropic, "*main.HeuristicTokenEstimator"},
+		{Ollama, "*main.HeuristicTokenEstimator"},
+		{"unknown", "*main.HeuristicTokenEstimator"},
+	}
+	for _, tc := range tests {
+		t.Run(string(tc.provider), func(t *testing.T) {
+			cfg := &Config{Provider: tc.provider, GeminiAPIKey: "test"}
+			est := NewTokenEstimator(cfg)
+			got := fmt.Sprintf("%T", est)
+			if got != tc.wantType {
+				t.Errorf("expected %s, got %s", tc.wantType, got)
+			}
+		})
+	}
+}
+
 func TestEstimateCost(t *testing.T) {
 	tests := []struct {
 		model       string
@@ -47,6 +71,13 @@ func TestEstimateCost(t *testing.T) {
 		{"llama3", 1_000_000, 0.0, "Ollama/Llama (free)"},
 		{"unknown-model", 1000, 0.0, "Unknown model"},
 		{"custom-gpt-4o-mini-v2", 1_000_000, 0.15, "Fuzzy match"},
+		// Fuzzy match branches
+		{"custom-gpt-4o-v2", 1_000_000, 2.50, "Fuzzy gpt-4o"},
+		{"claude-3-7-sonnet-custom", 1_000_000, 3.00, "Fuzzy claude-3-7"},
+		{"gemini-2.0-flash-custom", 1_000_000, 0.10, "Fuzzy flash 2.0"},
+		{"gemini-2.5-flash-custom", 1_000_000, 0.10, "Fuzzy flash 2.5"},
+		{"custom-flash-model", 1_000_000, 0.075, "Fuzzy flash generic"},
+		{"gemini-pro-custom", 1_000_000, 3.50, "Fuzzy gemini pro"},
 	}
 
 	for _, tc := range tests {

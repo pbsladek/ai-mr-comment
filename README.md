@@ -1,240 +1,158 @@
 # MR Comment Generator (Go)
 
-A command-line tool written in Go that generates professional GitLab Merge Request (MR) comments based on git diffs using AI (OpenAI, Anthropic, Gemini, or Ollama).
+[![Go Test](https://github.com/pbsladek/ai-mr-comment/actions/workflows/test.yml/badge.svg)](https://github.com/pbsladek/ai-mr-comment/actions/workflows/test.yml)
+[![Release](https://img.shields.io/github/v/release/pbsladek/ai-mr-comment)](https://github.com/pbsladek/ai-mr-comment/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/pbsladek/ai-mr-comment)](https://goreportcard.com/report/github.com/pbsladek/ai-mr-comment)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+A command-line tool written in Go that generates professional GitLab Merge Request (MR) or GitHub Pull Request (PR) comments based on git diffs using AI (OpenAI, Anthropic, Gemini, or Ollama).
 
 ## Features
 
 - Reads git diffs from current repo or from a file
 - Supports OpenAI, Anthropic (Claude), Google Gemini, and Ollama APIs
 - Customizable API endpoints and models
-- Configuration file support (~/.ai-mr-comment)
+- Multiple prompt styles (Conventional, Technical, User-Focused)
+- Configuration file support (`~/.ai-mr-comment.toml`)
 - Environment variable configuration
 - Outputs to console or to a file
-- Proper error handling with context
-- Diff truncation and token estimation
+- Precise token counting for Gemini and heuristic estimation for others
+- Estimated cost calculation in debug mode
 - Native binary with no runtime dependencies
 
 ## Installation
 
 ### Prerequisites
 
-- Go
+- Go (1.26+)
 - Git
-- OpenAI API key, Anthropic API key, or Google Gemini API key
+- API Key for your preferred provider (OpenAI, Anthropic, or Google Gemini)
 
 ### Building from source
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/ai-mr-comment.git
+git clone https://github.com/pbsladek/ai-mr-comment.git
 cd ai-mr-comment
 
 # Build
 make build
 
 # The binary will be available at ./dist/ai-mr-comment
-# Build and run
-make run
-
-# Show estimated tokens
-make run-debug
+# Build and run on current diff
+make test-run
 ```
 
 ### Installing
 
 Download the latest binary for your OS from the [Releases](https://github.com/pbsladek/ai-mr-comment/releases) page.
 
-```bash
-# macOS (Intel)
-curl -L https://github.com/pbsladek/ai-mr-comment/releases/latest/download/ai-mr-comment-darwin-amd64 -o /usr/local/bin/ai-mr-comment
-chmod +x /usr/local/bin/ai-mr-comment
-
-# macOS (Apple Silicon / M1/M2)
-curl -L https://github.com/your-org/ai-mr-comment/releases/latest/download/ai-mr-comment-darwin-arm64 -o /usr/local/bin/ai-mr-comment
-chmod +x /usr/local/bin/ai-mr-comment
-
-# Linux (x86_64)
-curl -L https://github.com/your-org/ai-mr-comment/releases/latest/download/ai-mr-comment-linux-amd64 -o /usr/local/bin/ai-mr-comment
-chmod +x /usr/local/bin/ai-mr-comment
-
-# Windows (x86_64)
-# Download and add it to your PATH.
-https://github.com/your-org/ai-mr-comment/releases/latest/download/ai-mr-comment-windows-amd64.exe
-```
-
 ## Configuration File
 
-```toml
-provider = "openai"
-
-openai_api_key = "xxxx"                    
-openai_model = "gpt-4o-mini"
-openai_endpoint = "https://api.openai.com/v1/chat/completions"
-
-anthropic_api_key = "xxxx"
-anthropic_model = "claude-3-5-sonnet-20240620"
-anthropic_endpoint = "https://api.anthropic.com/v1/messages"
-
-gemini_api_key = "xxxx"
-gemini_model = "gemini-2.5-flash"
-
-ollama_model = "ollama"
-ollama_endpoint = "http://localhost:11434/api/generate"
-
-template = "default"
-```
+The tool looks for `.ai-mr-comment.toml` in your home directory or the current directory.
 
 ```toml
 # Choose which provider to use: "openai", "anthropic", "gemini", or "ollama"
-provider = "openai"
+provider = "gemini"
+
+# === Gemini Settings ===
+gemini_api_key = "xxxx"
+gemini_model = "gemini-2.5-flash"
 
 # === OpenAI Settings ===
-# Your OpenAI API key
 openai_api_key = "xxxx"            
-# The OpenAI model to use (e.g., gpt-4, gpt-4o-mini)         
 openai_model = "gpt-4o-mini"
- # Custom endpoint (optional, default is OpenAI's)
 openai_endpoint = "https://api.openai.com/v1/chat/completions"
 
 # === Anthropic Settings ===
-# Your Anthropic Claude API key
 anthropic_api_key = "xxxx"
-# The Claude model to use
 anthropic_model = "claude-3-5-sonnet-20240620"
-# Custom endpoint (optional, default is Anthropic's)
 anthropic_endpoint = "https://api.anthropic.com/v1/messages"
 
-# === Gemini Settings ===
-# Your Google Gemini API key
-gemini_api_key = "xxxx"
-# The Gemini model to use
-gemini_model = "gemini-2.5-flash"
-
 # === Ollama Settings ===
-# The Ollama model to use
-ollama_model = "ollama"
-# Custom endpoint (optional, default is Ollama's)
+ollama_model = "llama3"
 ollama_endpoint = "http://localhost:11434/api/generate"
 
 # === Template Settings ===
-# The prompt template to use (e.g., default, conventional, technical, user-focused)
-# You can also provide a path to a custom .tmpl file
+# Options: default, conventional, technical, user-focused
 template = "default"
 ```
 
 ## Usage
 
 ```bash
-# Generate comment using OpenAI (default)
-ai-mr-comment --api-key YOUR_OPENAI_API_KEY
+# Generate comment using default provider
+ai-mr-comment
 
-# Generate comment using Anthropic
-ai-mr-comment --provider anthropic --api-key  YOUR_ANTHROPIC_API_KEY
+# Use a specific provider and template
+ai-mr-comment --provider anthropic --template technical
 
-# Generate comment using Gemini
-ai-mr-comment --provider gemini --api-key YOUR_GEMINI_API_KEY
-
-# Generate comment for a specific commit
-ai-mr-comment --commit a1b2c3d
-
-# Generate comment for a range of commits
+# Generate comment for a specific commit range
 ai-mr-comment --commit "HEAD~3..HEAD"
 
-# Read diff from file
-ai-mr-comment --file path/to/diff.txt
-
-# Write output to file
-ai-mr-comment --output ai-mr-comment.md
-
-# Use a different model
-ai-mr-comment --provider anthropic --model claude-3-haiku-20240307
+# Show token and cost estimation without calling the API
+ai-mr-comment --debug
 ```
 
 ### Options
 
-- `-c, --commit <COMMIT>`: Specific commit to generate comment for (default: HEAD)
-- `-f, --file <FILE>`: Read diff from file instead of git command
+- `-c, --commit <COMMIT>`: Specific commit or range (default: HEAD)
+- `-f, --file <FILE>`: Read diff from file instead of git
 - `-o, --output <FILE>`: Write output to file instead of stdout
-- `-k, --api-key <API_KEY>`: API key (can also use OPENAI_API_KEY, ANTHROPIC_API_KEY, or GEMINI_API_KEY env var)
-- `-p, --provider <PROVIDER>`: API provider to use (openai, anthropic, gemini, ollama)
-- `-t, --template <TEMPLATE>`: Prompt template to use (e.g., default, conventional, technical)
-- `-e, --endpoint <ENDPOINT>`: API endpoint (defaults based on provider)
-- `-m, --model <MODEL>`: Model to use (defaults based on provider)
+- `-k, --api-key <API_KEY>`: API key (overrides env/config)
+- `-p, --provider <PROVIDER>`: Provider (openai, anthropic, gemini, ollama)
+- `-t, --template <NAME>`: Template style (default, conventional, technical, user-focused)
+- `--debug`: Debug mode - show precise token usage and cost estimation
 - `-h, --help`: Print help
 - `-V, --version`: Print version
-- `--debug`: Debug mode - estimate token usage and exit
 
-## Configuration
+## Token & Cost Estimation
 
-The tool will look for configuration in the following order:
+When running with the `--debug` flag, the tool provides a detailed breakdown of the expected usage:
 
-1. Command line arguments
-2. Environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `GEMINI_API_KEY`)
-3. Configuration file
-
-### Default Values
-
-#### OpenAI
-
-- Endpoint: `https://api.openai.com/v1/chat/completions`
-- Model: `gpt-4o-mini`
-
-#### Anthropic
-
-- Endpoint: `https://api.anthropic.com/v1/messages`
-- Model: `claude-3-5-sonnet-20240620`
-
-#### Gemini
-
-- Model: `gemini-2.5-flash`
-
-#### Ollama
-
-- Endpoint: `http://localhost:11434/api/generate`
-- Model: `llama3`
+- **Gemini**: Uses official SDK token counting (100% accurate).
+- **OpenAI/Anthropic/Ollama**: Uses a conservative character-based heuristic (~3.5 chars per token).
+- **Cost**: Calculates estimated input cost in USD based on current model pricing (Ollama is free).
 
 ## Example Output
 
 ```markdown
-Implement user authentication system
-
-This MR adds a complete user authentication system including login, registration, password reset, and account management.
+MR Title: Implement user authentication system
+MR Summary: This change adds a complete user authentication system including secure password hashing and JWT-based session management.
 
 ## Key Changes
 
-- Added user model with secure password hashing
-- Implemented JWT-based authentication
+- Added user model with bcrypt password hashing
+- Implemented JWT authentication middleware
 - Created login and registration API endpoints
-- Added password reset functionality
-- Included comprehensive test coverage
+- Added comprehensive unit tests for auth logic
 
 ## Why These Changes
 
-These changes provide a secure authentication foundation for the application, allowing users to create accounts and access protected features.
-
-## Review Checklist
-
-- [ ] Verify all authentication routes are properly protected
-- [ ] Check password hashing implementation
-- [ ] Review JWT token expiration and refresh logic
-- [ ] Confirm test coverage for edge cases
-- [ ] Validate error handling for invalid credentials
-
-## Notes
-
-The implementation follows OWASP security guidelines and includes rate limiting to prevent brute force attacks.
+Provides a secure foundation for user identity, allowing protected access to API resources.
 ```
 
 ## Development
 
 ### Project Structure
 
-- `sr/`: Contains all the code for the CLI tool
-- `go.mod`: Go package configuration and dependencies
+- `./`: Main Go source files (`main.go`, `api.go`, etc.)
+- `templates/`: Markdown prompt templates
+- `testdata/`: Sample git diffs for testing
+- `dist/`: Compiled binaries (after build)
 
-### Dependencies
+### Testing
 
-- see `go.mod`
+```bash
+# Run unit tests
+make test
+
+# Run integration tests (requires GEMINI_API_KEY)
+make test-integration
+
+# Run linter
+make lint
+```
 
 ## License
 
@@ -242,4 +160,4 @@ MIT
 
 ## Acknowledgements
 
-This project is Go rewrite of [mr-comment](https://github.com/RobertKozak/mr-comment) originally created by [Robert Kozak](https://github.com/RobertKozak).
+This project is a Go rewrite of [mr-comment](https://github.com/RobertKozak/mr-comment) originally created by [Robert Kozak](https://github.com/RobertKozak).
