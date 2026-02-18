@@ -5,6 +5,8 @@ on:
     tags:
       - "*"
 
+permissions: read-all
+
 jobs:
   release:
     name: Create GitHub Release
