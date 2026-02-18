@@ -38,7 +38,7 @@ func NewPromptTemplate(templateName string) (string, error) {
 
 	for _, path := range searchPaths {
 		if _, err := os.Stat(path); err == nil {
-			content, err := os.ReadFile(path)
+			content, err := os.ReadFile(path) //nolint:gosec // G304: reading user-configured prompt template file is intentional
 			if err != nil {
 				return defaultPromptTemplate, fmt.Errorf("failed to read template %s, falling back to default: %w", path, err)
 			}

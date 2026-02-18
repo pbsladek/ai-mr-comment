@@ -1,0 +1,18 @@
+version: "2"
+
+linters:
+  enable:
+    - gosec
+
+  settings:
+    gosec:
+      excludes:
+        # G304: reading user-supplied file paths is intentional
+        - G304
+
+  exclusions:
+    rules:
+      # Test files use permissive file permissions and read temp files - acceptable in tests
+      - path: _test\.go
+        linters:
+          - gosec

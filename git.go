@@ -12,7 +12,7 @@ import (
 // remote default branch, trying origin/main then origin/master.
 func getAutoMergeBase() (string, error) {
 	for _, branch := range []string{"origin/main", "origin/master"} {
-		out, err := exec.Command("git", "merge-base", "HEAD", branch).CombinedOutput()
+		out, err := exec.Command("git", "merge-base", "HEAD", branch).CombinedOutput() //nolint:gosec // G204: git is a fixed binary, args are internal constants
 		if err == nil {
 			return strings.TrimSpace(string(out)), nil
 		}
@@ -58,13 +58,13 @@ func getGitDiff(commit string, staged bool, exclude []string) (string, error) {
 		}
 	}
 
-	out, err := exec.Command("git", args...).CombinedOutput()
+	out, err := exec.Command("git", args...).CombinedOutput() //nolint:gosec // G204: git is a fixed binary, args are controlled by internal logic
 	return string(out), err
 }
 
 // readDiffFromFile reads a raw diff from the given file path.
 func readDiffFromFile(path string) (string, error) {
-	bytes, err := os.ReadFile(path)
+	bytes, err := os.ReadFile(path) //nolint:gosec // G304: reading user-supplied diff file is intentional
 	return string(bytes), err
 }
 
