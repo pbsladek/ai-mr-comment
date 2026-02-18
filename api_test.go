@@ -20,7 +20,7 @@ import (
 func TestCallOpenAI_Success(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id": "1", "object": "chat.completion", "created": 0, "model": "test",
 			"choices": []map[string]any{
 				{"index": 0, "message": map[string]string{"role": "assistant", "content": "openai response"}, "finish_reason": "stop"},
@@ -44,7 +44,7 @@ func TestCallOpenAI_Success(t *testing.T) {
 func TestCallOpenAI_NoChoices(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id": "1", "object": "chat.completion", "created": 0, "model": "test",
 			"choices": []map[string]any{},
 		})
@@ -66,7 +66,7 @@ func TestCallOpenAI_NoChoices(t *testing.T) {
 func TestCallOpenAI_APIError(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error":{"message":"server error","type":"server_error"}}`))
+		_, _ = w.Write([]byte(`{"error":{"message":"server error","type":"server_error"}}`))
 	}))
 	defer ts.Close()
 
@@ -84,7 +84,7 @@ func TestCallOpenAI_APIError(t *testing.T) {
 func TestCallAnthropic_Success(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id": "msg_1", "type": "message", "role": "assistant", "model": "test",
 			"content":     []map[string]string{{"type": "text", "text": "anthropic response"}},
 			"stop_reason": "end_turn",
@@ -107,7 +107,7 @@ func TestCallAnthropic_Success(t *testing.T) {
 func TestCallAnthropic_NoContent(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id": "msg_1", "type": "message", "role": "assistant", "model": "test",
 			"content":     []map[string]string{},
 			"stop_reason": "end_turn",
@@ -133,7 +133,7 @@ func TestCallGemini_Success(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "streamGenerateContent") || strings.Contains(r.URL.Path, "generateContent") {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"candidates": []map[string]any{
 					{"content": map[string]any{
 						"parts": []map[string]string{{"text": "gemini response"}},
@@ -167,7 +167,7 @@ func TestCallGemini_Success(t *testing.T) {
 func TestCallAnthropic_APIError(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"type":"error","error":{"type":"api_error","message":"server error"}}`))
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"api_error","message":"server error"}}`))
 	}))
 	defer ts.Close()
 
@@ -183,7 +183,7 @@ func TestCallAnthropic_APIError(t *testing.T) {
 func TestCallAnthropic_NonTextBlock(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id": "msg_1", "type": "message", "role": "assistant", "model": "test",
 			"content":     []map[string]string{{"type": "image", "text": ""}},
 			"stop_reason": "end_turn",
@@ -206,7 +206,7 @@ func TestCallAnthropic_NonTextBlock(t *testing.T) {
 func TestCallGemini_NoContent(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"candidates": []map[string]any{},
 		})
 	}))
@@ -237,7 +237,7 @@ func TestCallOllama_Success(t *testing.T) {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"response": "test comment"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"response": "test comment"})
 	}))
 	defer ts.Close()
 
@@ -258,7 +258,7 @@ func TestCallOllama_Success(t *testing.T) {
 func TestCallOllama_ErrorWithJSONBody(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "bad model"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "bad model"})
 	}))
 	defer ts.Close()
 
@@ -279,7 +279,7 @@ func TestCallOllama_ErrorWithJSONBody(t *testing.T) {
 func TestCallOllama_ErrorWithPlainBody(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("internal server error"))
+		_, _ = w.Write([]byte("internal server error"))
 	}))
 	defer ts.Close()
 
@@ -320,7 +320,7 @@ func TestCallOllama_ErrorWithEmptyBody(t *testing.T) {
 func TestCallOllama_BadJSON(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`not json`))
+		_, _ = w.Write([]byte(`not json`))
 	}))
 	defer ts.Close()
 
@@ -351,7 +351,7 @@ func TestChatCompletions_UnsupportedProvider(t *testing.T) {
 func TestChatCompletions_Ollama(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"response": "ollama comment"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"response": "ollama comment"})
 	}))
 	defer ts.Close()
 
@@ -373,7 +373,7 @@ func TestChatCompletions_Ollama(t *testing.T) {
 func TestChatCompletions_OpenAI(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id": "1", "object": "chat.completion", "created": 0, "model": "test",
 			"choices": []map[string]any{
 				{"index": 0, "message": map[string]string{"role": "assistant", "content": "openai via chat"}, "finish_reason": "stop"},
@@ -401,7 +401,7 @@ func TestChatCompletions_OpenAI(t *testing.T) {
 func TestChatCompletions_Anthropic(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id": "msg_1", "type": "message", "role": "assistant", "model": "test",
 			"content":     []map[string]string{{"type": "text", "text": "anthropic via chat"}},
 			"stop_reason": "end_turn",
@@ -428,7 +428,7 @@ func TestChatCompletions_Anthropic(t *testing.T) {
 func TestChatCompletions_Gemini(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"candidates": []map[string]any{
 				{"content": map[string]any{
 					"parts": []map[string]string{{"text": "gemini via chat"}},

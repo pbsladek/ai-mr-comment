@@ -103,7 +103,7 @@ func TestGeminiTokenEstimator_Mock(t *testing.T) {
 			"totalTokens": 10,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer ts.Close()
 
