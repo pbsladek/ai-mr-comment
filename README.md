@@ -10,12 +10,19 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 ## Features
 
 - Reads git diffs from current repo or from a file
+- Auto-detects branch diff against `origin/main` or `origin/master` when no flags are given
+- Staged-only diff (`--staged`) for reviewing changes before committing
+- Exclude files from the diff by glob pattern (`--exclude`)
+- Smart chunking (`--smart-chunk`) for large diffs: summarizes each file, then synthesizes a final comment
+- Optional MR/PR title generation (`--title`) alongside the comment
 - Supports OpenAI, Anthropic (Claude), Google Gemini, and Ollama APIs
 - Customizable API endpoints and models
 - Multiple prompt styles (Conventional, Technical, User-Focused)
 - Configuration file support (`~/.ai-mr-comment.toml`)
 - Environment variable configuration
-- Outputs to console or to a file
+- Outputs to console, a file (`--output`), or the system clipboard (`--clipboard`)
+- Structured JSON output for scripting and CI (`--format json`)
+- Shell completions for bash, zsh, fish, and PowerShell (`completion` subcommand)
 - Precise token counting for Gemini and heuristic estimation for others
 - Estimated cost calculation in debug mode
 - Native binary with no runtime dependencies
@@ -81,8 +88,17 @@ template = "default"
 ## Usage
 
 ```bash
-# Generate comment using default provider
+# Generate comment for the full branch diff (auto-detects merge base with origin/main)
 ai-mr-comment
+
+# Generate comment for staged changes only
+ai-mr-comment --staged
+
+# Exclude generated or vendored files
+ai-mr-comment --exclude "vendor/**" --exclude "*.sum"
+
+# Use smart chunking for large diffs (summarizes per-file, then combines)
+ai-mr-comment --smart-chunk
 
 # Use a specific provider and template
 ai-mr-comment --provider anthropic --template technical
@@ -90,21 +106,41 @@ ai-mr-comment --provider anthropic --template technical
 # Generate comment for a specific commit range
 ai-mr-comment --commit "HEAD~3..HEAD"
 
+# Output structured JSON (useful for CI/scripting)
+ai-mr-comment --format json
+
+# Generate a title and comment together
+ai-mr-comment --title
+
+# Generate title + comment as JSON
+ai-mr-comment --title --format json
+
+# Copy the output directly to the clipboard
+ai-mr-comment --clipboard
+
 # Show token and cost estimation without calling the API
 ai-mr-comment --debug
+
+# Generate shell completion script
+ai-mr-comment completion bash >> ~/.bash_completion
+ai-mr-comment completion zsh > ~/.zsh/completions/_ai-mr-comment
 ```
 
 ### Options
 
-- `-c, --commit <COMMIT>`: Specific commit or range (default: HEAD)
-- `-f, --file <FILE>`: Read diff from file instead of git
-- `-o, --output <FILE>`: Write output to file instead of stdout
-- `-k, --api-key <API_KEY>`: API key (overrides env/config)
-- `-p, --provider <PROVIDER>`: Provider (openai, anthropic, gemini, ollama)
+- `--commit <COMMIT>`: Specific commit or range
+- `--staged`: Diff staged changes only (`git diff --cached`); mutually exclusive with `--commit`
+- `--exclude <PATTERN>`: Exclude files matching glob pattern (e.g. `vendor/**`, `*.sum`). Can be repeated.
+- `--smart-chunk`: Split large diffs by file, summarize each, then synthesize a final comment
+- `--title`: Generate a concise MR/PR title in addition to the comment; included as `"title"` in JSON output
+- `--file <FILE>`: Read diff from file instead of git
+- `--output <FILE>`: Write output to file instead of stdout
+- `--clipboard`: Copy output to system clipboard (in addition to stdout)
+- `--format <FORMAT>`: Output format — `text` (default) or `json`
+- `--provider <PROVIDER>`: Provider (openai, anthropic, gemini, ollama)
 - `-t, --template <NAME>`: Template style (default, conventional, technical, user-focused)
 - `--debug`: Debug mode - show precise token usage and cost estimation
 - `-h, --help`: Print help
-- `-V, --version`: Print version
 
 ## Token & Cost Estimation
 
@@ -152,6 +188,19 @@ make test-integration
 
 # Run linter
 make lint
+```
+
+### Shell Completions
+
+```bash
+# Install bash completions
+make install-completion-bash
+
+# Install zsh completions
+make install-completion-zsh
+
+# Or generate manually for any shell
+ai-mr-comment completion [bash|zsh|fish|powershell]
 ```
 
 ## License

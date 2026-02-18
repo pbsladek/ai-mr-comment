@@ -15,7 +15,7 @@ NEXT_VERSION := $(shell \
   fi \
 )
 
-.PHONY: all clean build release test test-cover test-integration lint test-run
+.PHONY: all clean build release test test-cover test-integration lint test-run install install-completion-bash install-completion-zsh
 
 all: build
 
@@ -50,6 +50,19 @@ PROVIDER ?= gemini
 test-run: build
 	@echo "Running ai-mr-comment on current git diff with provider: $(PROVIDER)..."
 	./dist/ai-mr-comment --provider $(PROVIDER)
+
+install:
+	go install $(LDFLAGS) .
+
+install-completion-bash: build
+	./dist/ai-mr-comment completion bash > /tmp/ai-mr-comment-completion.bash
+	@echo "Source this file or move it to your bash completion directory:"
+	@echo "  source /tmp/ai-mr-comment-completion.bash"
+
+install-completion-zsh: build
+	./dist/ai-mr-comment completion zsh > /tmp/_ai-mr-comment
+	@echo "Move to your zsh functions path, e.g.:"
+	@echo "  mv /tmp/_ai-mr-comment ~/.zsh/completions/_ai-mr-comment"
 
 clean:
 	rm -rf $(BUILD_DIR) coverage.out

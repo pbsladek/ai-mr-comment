@@ -10,12 +10,23 @@ import (
 //go:embed templates/default.tmpl
 var defaultPromptTemplate string
 
+// titlePrompt is the system prompt used when --title is set. It instructs the
+// model to produce only a single concise title line with no extra text.
+const titlePrompt = `Generate a single-line MR/PR title for the following diff.
+Output only the title text — no explanation, no punctuation at the end, no quotes.
+Keep it under 72 characters. Use the imperative mood (e.g. "Add", "Fix", "Refactor").
+If the active template follows Conventional Commits style, prefix with the appropriate type (feat, fix, chore, etc.).`
+
+// NewPromptTemplate returns the system prompt for the given template name.
+// For "default" it returns the embedded template. For any other name it
+// searches ./templates/<name>.tmpl, ./<name>.tmpl, and
+// ~/.config/ai-mr-comment/templates/<name>.tmpl, falling back to the default
+// if none are found.
 func NewPromptTemplate(templateName string) (string, error) {
 	if templateName == "default" {
 		return defaultPromptTemplate, nil
 	}
 
-	// Look for template in current directory, then home directory
 	templateFileName := templateName + ".tmpl"
 	searchPaths := []string{
 		filepath.Join(".", "templates", templateFileName),

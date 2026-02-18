@@ -34,3 +34,15 @@ A command-line tool written in Go that generates professional MR/PR comments bas
 - Supports multiple AI providers.
 - Estimates token usage.
 - Outputs to console or file.
+
+## Testing Notes
+
+- `go test ./...` runs all unit tests; `make test` runs with `-v`.
+- `make test-integration` runs integration tests (requires `GEMINI_API_KEY`).
+- Tests that call `git diff HEAD^` or `git diff HEAD~1..HEAD` skip automatically when run in shallow clone environments (e.g., CI with `fetch-depth: 1`).
+- `errcheck` lint rule is enforced: always assign return values from `json.NewEncoder(w).Encode(...)` and `w.Write(...)` to `_` in test HTTP handlers.
+
+## Lint Notes
+
+- Linter: `golangci-lint` via `make lint`.
+- All error return values must be checked or explicitly discarded with `_`.

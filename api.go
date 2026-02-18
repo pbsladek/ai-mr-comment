@@ -19,8 +19,12 @@ import (
 	"google.golang.org/api/option"
 )
 
+// geminiClientOptions allows tests to inject a custom endpoint and HTTP client
+// for the Gemini SDK without modifying call sites.
 var geminiClientOptions []option.ClientOption
 
+// callOpenAI sends a chat completion request to the OpenAI API and returns the
+// generated message content.
 func callOpenAI(ctx context.Context, client *openai.Client, cfg *Config, systemPrompt, diffContent string) (string, error) {
 	resp, err := client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
 		Model: cfg.OpenAIModel,
@@ -40,6 +44,8 @@ func callOpenAI(ctx context.Context, client *openai.Client, cfg *Config, systemP
 	return resp.Choices[0].Message.Content, nil
 }
 
+// callAnthropic sends a message request to the Anthropic API and returns the
+// first text block from the response.
 func callAnthropic(ctx context.Context, client *anthropic.Client, cfg *Config, systemPrompt, diffContent string) (string, error) {
 	resp, err := client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.Model(cfg.AnthropicModel),
@@ -59,11 +65,9 @@ func callAnthropic(ctx context.Context, client *anthropic.Client, cfg *Config, s
 	if err != nil {
 		return "", err
 	}
-
 	if len(resp.Content) == 0 {
 		return "", errors.New("no content returned")
 	}
-
 	block := resp.Content[0]
 	if block.Type != "text" {
 		return "", errors.New("first content block is not text")
@@ -71,6 +75,8 @@ func callAnthropic(ctx context.Context, client *anthropic.Client, cfg *Config, s
 	return block.Text, nil
 }
 
+// callOllama sends a generation request to the Ollama local API and returns
+// the response text.
 func callOllama(ctx context.Context, cfg *Config, systemPrompt, diffContent string) (string, error) {
 	reqBody := map[string]any{
 		"model":  cfg.OllamaModel,
@@ -115,6 +121,8 @@ func callOllama(ctx context.Context, cfg *Config, systemPrompt, diffContent stri
 	return result.Response, nil
 }
 
+// callGemini sends a content generation request to the Google Gemini API and
+// returns the concatenated text from all response parts.
 func callGemini(ctx context.Context, cfg *Config, systemPrompt, diffContent string) (string, error) {
 	opts := []option.ClientOption{option.WithAPIKey(cfg.GeminiAPIKey)}
 	opts = append(opts, geminiClientOptions...)
@@ -148,6 +156,8 @@ func callGemini(ctx context.Context, cfg *Config, systemPrompt, diffContent stri
 	return result, nil
 }
 
+// chatCompletions dispatches a prompt and diff to the appropriate provider and
+// returns the generated comment.
 func chatCompletions(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
 	switch provider {
 	case OpenAI:

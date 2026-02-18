@@ -43,7 +43,7 @@ func TestProcessDiff_Truncation(t *testing.T) {
 
 func TestGetGitDiff_NoArgs(t *testing.T) {
 	// We're in a git repo, so this should not error
-	_, err := getGitDiff("")
+	_, err := getGitDiff("", false, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestGetGitDiff_WithCommit(t *testing.T) {
 	if err := exec.Command("git", "rev-parse", "HEAD^").Run(); err != nil {
 		t.Skip("skipping: HEAD has no parent commit")
 	}
-	result, err := getGitDiff("HEAD")
+	result, err := getGitDiff("HEAD", false, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -66,11 +66,81 @@ func TestGetGitDiff_WithRange(t *testing.T) {
 	if err := exec.Command("git", "rev-parse", "HEAD~1").Run(); err != nil {
 		t.Skip("skipping: HEAD~1 does not exist")
 	}
-	result, err := getGitDiff("HEAD~1..HEAD")
+	result, err := getGitDiff("HEAD~1..HEAD", false, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	_ = result
+}
+
+func TestGetGitDiff_Staged(t *testing.T) {
+	result, err := getGitDiff("", true, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_ = result
+}
+
+func TestGetGitDiff_Exclude(t *testing.T) {
+	result, err := getGitDiff("", false, []string{"*.md"})
+	if err != nil {
+		t.Fatalf("unexpected error with exclude: %v", err)
+	}
+	_ = result
+}
+
+func TestGetAutoMergeBase(t *testing.T) {
+	base, err := getAutoMergeBase()
+	if err != nil {
+		t.Skip("skipping: no origin/main or origin/master remote found")
+	}
+	if base == "" {
+		t.Error("expected non-empty merge base")
+	}
+}
+
+func TestGetGitDiff_AutoBase(t *testing.T) {
+	if _, err := getAutoMergeBase(); err != nil {
+		t.Skip("skipping: no remote found for auto base-branch detection")
+	}
+	result, err := getGitDiff("", false, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_ = result
+}
+
+func TestSplitDiffByFile_Empty(t *testing.T) {
+	chunks := splitDiffByFile("")
+	if len(chunks) != 0 {
+		t.Errorf("expected 0 chunks for empty diff, got %d", len(chunks))
+	}
+}
+
+func TestSplitDiffByFile_Single(t *testing.T) {
+	raw := "diff --git a/foo.txt b/foo.txt\n--- a/foo.txt\n+++ b/foo.txt\n@@ -1 +1 @@\n-old\n+new\n"
+	chunks := splitDiffByFile(raw)
+	if len(chunks) != 1 {
+		t.Errorf("expected 1 chunk, got %d", len(chunks))
+	}
+	if !strings.Contains(chunks[0], "diff --git a/foo.txt") {
+		t.Error("expected chunk to contain diff header")
+	}
+}
+
+func TestSplitDiffByFile_Multi(t *testing.T) {
+	raw := "diff --git a/foo.txt b/foo.txt\n+foo\n" +
+		"diff --git a/bar.txt b/bar.txt\n+bar\n"
+	chunks := splitDiffByFile(raw)
+	if len(chunks) != 2 {
+		t.Errorf("expected 2 chunks, got %d", len(chunks))
+	}
+	if !strings.Contains(chunks[0], "foo.txt") {
+		t.Error("first chunk should contain foo.txt")
+	}
+	if !strings.Contains(chunks[1], "bar.txt") {
+		t.Error("second chunk should contain bar.txt")
+	}
 }
 
 func TestReadDiffFromFile(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/viper"
 )
 
+// ApiProvider identifies which AI backend to use.
 type ApiProvider string
 
 const (
@@ -17,6 +18,8 @@ const (
 	Gemini    ApiProvider = "gemini"
 )
 
+// Config holds all runtime settings, populated from the TOML config file,
+// environment variables, and CLI flags.
 type Config struct {
 	OpenAIAPIKey    string `mapstructure:"openai_api_key"`
 	AnthropicAPIKey string `mapstructure:"anthropic_api_key"`
@@ -34,6 +37,8 @@ type Config struct {
 	Template          string      `mapstructure:"template"`
 }
 
+// loadConfig reads configuration from ~/.ai-mr-comment.toml (or the current
+// directory) and standard environment variables such as OPENAI_API_KEY.
 func loadConfig() (*Config, error) {
 	v := viper.New()
 	v.SetConfigName(".ai-mr-comment")
@@ -44,7 +49,7 @@ func loadConfig() (*Config, error) {
 	v.AutomaticEnv()
 	v.SetEnvPrefix("AI_MR_COMMENT")
 
-	// Bind standard environment variables
+	// Bind the conventional bare env vars in addition to the prefixed ones.
 	_ = v.BindEnv("openai_api_key", "OPENAI_API_KEY")
 	_ = v.BindEnv("anthropic_api_key", "ANTHROPIC_API_KEY")
 	_ = v.BindEnv("gemini_api_key", "GEMINI_API_KEY")
@@ -52,6 +57,9 @@ func loadConfig() (*Config, error) {
 	return loadConfigWith(v)
 }
 
+// loadConfigWith applies defaults, reads the config file (if present), and
+// unmarshals the result into a Config. It is split from loadConfig to allow
+// tests to inject a pre-configured Viper instance.
 func loadConfigWith(v *viper.Viper) (*Config, error) {
 	v.SetDefault("provider", OpenAI)
 	v.SetDefault("openai_model", "gpt-4o-mini")
@@ -71,7 +79,7 @@ func loadConfigWith(v *viper.Viper) (*Config, error) {
 
 		var notFound viper.ConfigFileNotFoundError
 		if !errors.As(err, &notFound) {
-			return nil, err // A different read error occurred
+			return nil, err
 		}
 	}
 

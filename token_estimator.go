@@ -10,19 +10,21 @@ import (
 	"google.golang.org/api/option"
 )
 
-// TokenEstimator defines the interface for counting tokens.
+// TokenEstimator defines the interface for counting tokens before an API call.
 type TokenEstimator interface {
 	CountTokens(ctx context.Context, modelName string, text ...string) (int32, error)
 }
 
-// GeminiTokenEstimator uses the official Go SDK to count tokens for Gemini models.
+// GeminiTokenEstimator uses the official Gemini SDK to count tokens exactly.
 type GeminiTokenEstimator struct {
 	APIKey string
 }
 
+// CountTokens returns the exact token count for the given texts using the Gemini
+// countTokens API.
 func (e *GeminiTokenEstimator) CountTokens(ctx context.Context, modelName string, text ...string) (int32, error) {
 	opts := []option.ClientOption{option.WithAPIKey(e.APIKey)}
-	// Access geminiClientOptions from api.go if it exists in the same package (used for testing)
+	// geminiClientOptions is declared in api.go and may be overridden in tests.
 	opts = append(opts, geminiClientOptions...)
 
 	client, err := genai.NewClient(ctx, opts...)
@@ -44,23 +46,21 @@ func (e *GeminiTokenEstimator) CountTokens(ctx context.Context, modelName string
 	return resp.TotalTokens, nil
 }
 
-// HeuristicTokenEstimator provides a rough token estimate based on character count.
-// This is used for providers (OpenAI, Anthropic, Ollama) whose SDKs do not
-// currently expose a direct token counting function in a way that is easily accessible
-// without extra dependencies or handling.
+// HeuristicTokenEstimator approximates token count from character length.
+// Used for OpenAI, Anthropic, and Ollama which do not expose a free counting API.
 type HeuristicTokenEstimator struct{}
 
+// CountTokens estimates tokens using ~3.5 characters per token, which is
+// slightly conservative compared to the common 4-char rule.
 func (e *HeuristicTokenEstimator) CountTokens(_ context.Context, _ string, text ...string) (int32, error) {
 	var totalChars int
 	for _, t := range text {
 		totalChars += len(t)
 	}
-	// A common heuristic is ~4 characters per token. We use a slightly more
-	// conservative estimate of 3.5 to be safe.
 	return int32(math.Ceil(float64(totalChars) / 3.5)), nil
 }
 
-// NewTokenEstimator returns the appropriate token estimator for the given provider.
+// NewTokenEstimator returns the appropriate TokenEstimator for the configured provider.
 func NewTokenEstimator(cfg *Config) TokenEstimator {
 	switch cfg.Provider {
 	case Gemini:
@@ -68,30 +68,28 @@ func NewTokenEstimator(cfg *Config) TokenEstimator {
 	case OpenAI, Anthropic, Ollama:
 		return &HeuristicTokenEstimator{}
 	default:
-		// Fallback to heuristic for any unknown provider.
 		return &HeuristicTokenEstimator{}
 	}
 }
 
-// ModelPrice represents the cost in USD per 1 Million tokens.
+// ModelPrice holds the input and output cost in USD per 1 million tokens.
 type ModelPrice struct {
 	Input  float64
 	Output float64
 }
 
-// EstimateCost returns the estimated cost in USD for the given number of input tokens.
-// Prices are per 1 Million tokens.
+// EstimateCost returns the estimated USD cost for the given number of input tokens.
+// It performs an exact lookup first, then falls back to substring matching.
+// Returns 0 for unknown models or Ollama (which runs locally at no cost).
 func EstimateCost(model string, inputTokens int32) float64 {
-	// Normalize model name
 	model = strings.ToLower(model)
 
-	// Ollama models are local and free
+	// Ollama models are local and free.
 	if strings.Contains(model, "ollama") || strings.Contains(model, "llama") {
 		return 0.0
 	}
 
-	// Pricing table (USD per 1M tokens)
-	// Prices are approximate and subject to change.
+	// Pricing table in USD per 1M tokens (approximate, subject to change).
 	prices := map[string]ModelPrice{
 		// OpenAI
 		"gpt-4o":            {Input: 2.50, Output: 10.00},
@@ -107,7 +105,7 @@ func EstimateCost(model string, inputTokens int32) float64 {
 		"claude-3-sonnet-20240229":   {Input: 3.00, Output: 15.00},
 		"claude-3-haiku-20240307":    {Input: 0.25, Output: 1.25},
 
-		// Gemini (Pricing for <= 128k context window)
+		// Gemini (pricing for ≤128k context window)
 		"gemini-1.5-pro":        {Input: 3.50, Output: 10.50},
 		"gemini-1.5-pro-latest": {Input: 3.50, Output: 10.50},
 		"gemini-1.5-flash":      {Input: 0.075, Output: 0.30},
@@ -115,12 +113,11 @@ func EstimateCost(model string, inputTokens int32) float64 {
 		"gemini-2.5-flash":      {Input: 0.10, Output: 0.40},
 	}
 
-	// Direct lookup
 	if price, ok := prices[model]; ok {
 		return float64(inputTokens) / 1_000_000 * price.Input
 	}
 
-	// Fallback/heuristic matching if exact model name isn't found
+	// Substring fallback for model name variants not in the table.
 	if strings.Contains(model, "gpt-4o-mini") {
 		return float64(inputTokens) / 1_000_000 * 0.15
 	}
@@ -140,5 +137,5 @@ func EstimateCost(model string, inputTokens int32) float64 {
 		return float64(inputTokens) / 1_000_000 * 3.50
 	}
 
-	return 0.0 // Unknown model cost
+	return 0.0
 }

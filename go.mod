@@ -4,6 +4,7 @@ go 1.24.3
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.22.1
+	github.com/atotto/clipboard v0.1.4
 	github.com/google/generative-ai-go v0.20.1
 	github.com/openai/openai-go v1.12.0
 	github.com/spf13/cobra v1.10.2
