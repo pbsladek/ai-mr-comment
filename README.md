@@ -22,6 +22,8 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 - Environment variable configuration
 - Outputs to console, a file (`--output`), or the system clipboard (`--clipboard`)
 - Structured JSON output for scripting and CI (`--format json`)
+- Live streaming output to the terminal — tokens appear as they are generated
+- Bootstrap a config file with `init-config` (never edit TOML by hand again)
 - Shell completions for bash, zsh, fish, and PowerShell (`completion` subcommand)
 - Precise token counting for Gemini and heuristic estimation for others
 - Estimated cost calculation in debug mode
@@ -57,6 +59,19 @@ Download the latest binary for your OS from the [Releases](https://github.com/pb
 ## Configuration File
 
 The tool looks for `.ai-mr-comment.toml` in your home directory or the current directory.
+
+### Generating the config file
+
+Run `init-config` to write a fully-commented template to `~/.ai-mr-comment.toml`:
+
+```bash
+ai-mr-comment init-config
+
+# Write to a custom path instead
+ai-mr-comment init-config --output ./ai-mr-comment.toml
+```
+
+The command refuses to overwrite an existing file. Remove the old file first if you want to regenerate it.
 
 ```toml
 # Choose which provider to use: "openai", "anthropic", "gemini", or "ollama"
@@ -124,6 +139,9 @@ ai-mr-comment --debug
 # Generate shell completion script
 ai-mr-comment completion bash >> ~/.bash_completion
 ai-mr-comment completion zsh > ~/.zsh/completions/_ai-mr-comment
+
+# Bootstrap a config file (writes ~/.ai-mr-comment.toml)
+ai-mr-comment init-config
 ```
 
 ### Options
@@ -141,6 +159,24 @@ ai-mr-comment completion zsh > ~/.zsh/completions/_ai-mr-comment
 - `-t, --template <NAME>`: Template style (default, conventional, technical, user-focused)
 - `--debug`: Debug mode - show precise token usage and cost estimation
 - `-h, --help`: Print help
+
+### Subcommands
+
+- `init-config [--output <PATH>]`: Write a default config file to `~/.ai-mr-comment.toml` (or the given path). Refuses to overwrite an existing file.
+- `completion [bash|zsh|fish|powershell]`: Print a shell completion script to stdout.
+
+## Streaming Output
+
+When running interactively (stdout is a TTY), the tool streams tokens directly to the terminal as the model generates them, so you see the comment appear word by word rather than waiting for the full response.
+
+Streaming is automatically disabled and the output is fully buffered when:
+
+- `--format json` is set (the full response is needed before encoding)
+- `--smart-chunk` is set (multi-stage summarise + synthesise calls)
+- `--output <file>` is set (writing to a file)
+- stdout is not a TTY (piped output, CI, redirected to file)
+
+If a streaming call fails mid-flight, the tool transparently falls back to a standard buffered request and outputs the full comment normally.
 
 ## Token & Cost Estimation
 

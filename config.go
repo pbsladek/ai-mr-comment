@@ -57,6 +57,15 @@ func loadConfig() (*Config, error) {
 	return loadConfigWith(v)
 }
 
+// newViperFromFile returns a Viper instance pre-configured to read from path.
+// It is used in tests to validate generated config files.
+func newViperFromFile(path string) *viper.Viper {
+	v := viper.New()
+	v.SetConfigFile(path)
+	v.SetConfigType("toml")
+	return v
+}
+
 // loadConfigWith applies defaults, reads the config file (if present), and
 // unmarshals the result into a Config. It is split from loadConfig to allow
 // tests to inject a pre-configured Viper instance.

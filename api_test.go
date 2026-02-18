@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -457,5 +459,121 @@ func TestChatCompletions_Gemini(t *testing.T) {
 	}
 	if result != "gemini via chat" {
 		t.Errorf("expected 'gemini via chat', got %q", result)
+	}
+}
+
+// --- streaming tests ---
+
+func TestStreamOpenAI_Success(t *testing.T) {
+	// OpenAI streaming uses SSE (text/event-stream).
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		chunks := []string{"Hello", " world", "!"}
+		for _, c := range chunks {
+			_, _ = fmt.Fprintf(w, "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"created\":0,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"content\":%q},\"finish_reason\":null}]}\n\n", c)
+		}
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer ts.Close()
+
+	client := openai.NewClient(
+		openaiopt.WithAPIKey("test"),
+		openaiopt.WithBaseURL(ts.URL+"/"),
+	)
+	cfg := &Config{OpenAIModel: "gpt-4o-mini"}
+
+	var buf strings.Builder
+	result, err := streamOpenAI(context.Background(), &client, cfg, "sys", "diff", &buf)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "Hello world!" {
+		t.Errorf("expected 'Hello world!', got %q", result)
+	}
+	if buf.String() != "Hello world!" {
+		t.Errorf("expected writer to receive 'Hello world!', got %q", buf.String())
+	}
+}
+
+func TestStreamOllama_Success(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, "{\"response\":\"chunk1\",\"done\":false}\n")
+		_, _ = fmt.Fprint(w, "{\"response\":\" chunk2\",\"done\":true}\n")
+	}))
+	defer ts.Close()
+
+	cfg := &Config{
+		OllamaModel:    "llama3",
+		OllamaEndpoint: ts.URL,
+	}
+
+	var buf strings.Builder
+	result, err := streamOllama(context.Background(), cfg, "sys", "diff", &buf)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "chunk1 chunk2" {
+		t.Errorf("expected 'chunk1 chunk2', got %q", result)
+	}
+	if buf.String() != "chunk1 chunk2" {
+		t.Errorf("expected writer to receive 'chunk1 chunk2', got %q", buf.String())
+	}
+}
+
+func TestStreamOllama_ServerError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("internal error"))
+	}))
+	defer ts.Close()
+
+	cfg := &Config{
+		OllamaModel:    "llama3",
+		OllamaEndpoint: ts.URL,
+	}
+
+	_, err := streamOllama(context.Background(), cfg, "sys", "diff", io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "ollama API error") {
+		t.Errorf("expected ollama API error, got %v", err)
+	}
+}
+
+func TestStreamAnthropic_Success(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-3-5-sonnet-20240620\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" stream\"}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+		_, _ = fmt.Fprint(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	}))
+	defer ts.Close()
+
+	client := anthropic.NewClient(
+		anthropicopt.WithAPIKey("test"),
+		anthropicopt.WithBaseURL(ts.URL),
+	)
+	cfg := &Config{AnthropicModel: "claude-3-5-sonnet-20240620"}
+
+	var buf strings.Builder
+	result, err := streamAnthropic(context.Background(), &client, cfg, "sys", "diff", &buf)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "Hello stream" {
+		t.Errorf("expected 'Hello stream', got %q", result)
+	}
+	if buf.String() != "Hello stream" {
+		t.Errorf("expected writer to receive 'Hello stream', got %q", buf.String())
+	}
+}
+
+func TestStreamToWriter_UnsupportedProvider(t *testing.T) {
+	cfg := &Config{}
+	_, err := streamToWriter(context.Background(), cfg, "unknown", "sys", "diff", io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "unsupported provider") {
+		t.Errorf("expected unsupported provider error, got %v", err)
 	}
 }

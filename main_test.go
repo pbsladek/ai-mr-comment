@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -213,13 +214,17 @@ func TestNewRootCmd_TemplateFlag(t *testing.T) {
 }
 
 func TestNewRootCmd_GitDiffPath(t *testing.T) {
+	// Skip if HEAD^ is unavailable (shallow clone or no prior commit).
+	if err := exec.Command("git", "rev-parse", "HEAD^").Run(); err != nil {
+		t.Skip("skipping: HEAD^ not available")
+	}
 	t.Setenv("OPENAI_API_KEY", "dummy")
 	alwaysOkFn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
 		return "ok", nil
 	}
 	cmd := newRootCmd(alwaysOkFn)
-	// No --file flag, so it uses getGitDiff (we're in a git repo)
-	cmd.SetArgs([]string{"--provider=openai"})
+	// Use HEAD^..HEAD so there's always a non-empty diff in the repo.
+	cmd.SetArgs([]string{"--provider=openai", "--commit=HEAD^..HEAD"})
 
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
@@ -514,6 +519,179 @@ func TestNewRootCmd_SmartChunk(t *testing.T) {
 	}
 	if callCount == 0 {
 		t.Error("expected chatFn to be called at least once")
+	}
+}
+
+// TestStreaming_NonTTYUsesBuffered confirms that when stdout is not a TTY (as in
+// all test runs), the buffered chatFn path is used and the output is correct.
+func TestStreaming_NonTTYUsesBuffered(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	called := 0
+	fn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
+		called++
+		return "buffered comment", nil
+	}
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if called != 1 {
+		t.Errorf("expected chatFn called once, got %d", called)
+	}
+	if !strings.Contains(buf.String(), "buffered comment") {
+		t.Errorf("expected buffered comment in output, got: %s", buf.String())
+	}
+}
+
+// TestStreaming_JSONFormatSkipsStream confirms that --format json never streams
+// (needs the full response to encode) and produces valid JSON.
+func TestStreaming_JSONFormatSkipsStream(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	var buf strings.Builder
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--format=json", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var result map[string]string
+	if err := json.Unmarshal([]byte(buf.String()), &result); err != nil {
+		t.Fatalf("expected valid JSON, got: %s", buf.String())
+	}
+	if result["comment"] != "mocked comment" {
+		t.Errorf("expected 'mocked comment', got %q", result["comment"])
+	}
+}
+
+// TestStreaming_SmartChunkSkipsStream confirms --smart-chunk always uses the
+// buffered chatFn path for both per-file summarise calls and the final call.
+func TestStreaming_SmartChunkSkipsStream(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	called := 0
+	fn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
+		called++
+		return "chunk result", nil
+	}
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--smart-chunk", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if called == 0 {
+		t.Error("expected chatFn to be called at least once")
+	}
+}
+
+func TestInitConfig_WritesFile(t *testing.T) {
+	dest := t.TempDir() + "/test-config.toml"
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"init-config", "--output=" + dest})
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	data, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("expected config file to exist, got %v", err)
+	}
+	if !strings.Contains(string(data), "provider") {
+		t.Error("expected config to contain 'provider'")
+	}
+	if !strings.Contains(string(data), "openai_model") {
+		t.Error("expected config to contain 'openai_model'")
+	}
+	if !strings.Contains(buf.String(), dest) {
+		t.Errorf("expected stdout to mention destination path, got %q", buf.String())
+	}
+}
+
+func TestInitConfig_RefusesOverwrite(t *testing.T) {
+	dest := t.TempDir() + "/existing.toml"
+	if err := os.WriteFile(dest, []byte("existing"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"init-config", "--output=" + dest})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected already-exists error, got %v", err)
+	}
+
+	// Existing file must be untouched.
+	data, _ := os.ReadFile(dest)
+	if string(data) != "existing" {
+		t.Error("expected existing file to be unchanged")
+	}
+}
+
+func TestInitConfig_DefaultPath(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"init-config"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	data, err := os.ReadFile(tmpHome + "/.ai-mr-comment.toml")
+	if err != nil {
+		t.Fatalf("expected default config file at ~/.ai-mr-comment.toml, got %v", err)
+	}
+	if !strings.Contains(string(data), "ollama_endpoint") {
+		t.Error("expected config to contain 'ollama_endpoint'")
+	}
+}
+
+func TestInitConfig_ContentIsValidTOML(t *testing.T) {
+	dest := t.TempDir() + "/config.toml"
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"init-config", "--output=" + dest})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	// Load the generated file through loadConfigWith to verify it parses cleanly.
+	v := newViperFromFile(dest)
+	_, err := loadConfigWith(v)
+	if err != nil {
+		t.Fatalf("generated config failed to parse: %v", err)
 	}
 }
 

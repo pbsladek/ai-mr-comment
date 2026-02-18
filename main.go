@@ -13,6 +13,7 @@ import (
 
 	"github.com/atotto/clipboard"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 func main() {
@@ -30,8 +31,10 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	var exclude []string
 
 	rootCmd := &cobra.Command{
-		Use:   "ai-mr-comment",
-		Short: "Generate MR/PR comments using AI",
+		Use:           "ai-mr-comment",
+		Short:         "Generate MR/PR comments using AI",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, _ := loadConfig()
 			if cmd.Flags().Changed("provider") {
@@ -71,10 +74,19 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			if diffFilePath != "" {
 				diffContent, err = readDiffFromFile(diffFilePath)
 			} else {
+				if !isGitRepo() {
+					return fmt.Errorf("not a git repository. Run from inside a git repo or use --file to provide a diff")
+				}
 				diffContent, err = getGitDiff(commit, staged, exclude)
 			}
 			if err != nil {
 				return err
+			}
+			if strings.TrimSpace(diffContent) == "" {
+				if staged {
+					return fmt.Errorf("no staged changes found. Stage your changes with 'git add' first")
+				}
+				return fmt.Errorf("no diff found. Make sure you have uncommitted changes or specify a commit range with --commit")
 			}
 
 			out := cmd.OutOrStdout()
@@ -109,6 +121,15 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				return nil
 			}
 
+			// Stream tokens directly to the terminal when output is a real TTY,
+			// text format is selected, smart-chunk is off, and no output file is set.
+			// All other paths use the buffered chatFn to get the full response first.
+			isTTY := term.IsTerminal(int(os.Stdout.Fd()))
+			shouldStream := isTTY && format == "text" && !smartChunk && outputPath == ""
+			// streamedOK is set to true only when streaming completes successfully.
+			// The output block uses it to decide whether body was already written.
+			var streamedOK bool
+
 			var comment string
 			if smartChunk {
 				chunks := splitDiffByFile(diffContent)
@@ -130,6 +151,15 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 					comment, err = chatFn(cmd.Context(), cfg, cfg.Provider, systemPrompt, combinedSummaries)
 				} else {
 					comment, err = chatFn(cmd.Context(), cfg, cfg.Provider, systemPrompt, diffContent)
+				}
+			} else if shouldStream {
+				comment, err = streamToWriter(cmd.Context(), cfg, cfg.Provider, systemPrompt, diffContent, out)
+				if err != nil {
+					// Streaming failed; fall back to the buffered call.
+					// headerPrinted=true tells the output block to skip reprinting the separator.
+					comment, err = chatFn(cmd.Context(), cfg, cfg.Provider, systemPrompt, diffContent)
+				} else {
+					streamedOK = true
 				}
 			} else {
 				comment, err = chatFn(cmd.Context(), cfg, cfg.Provider, systemPrompt, diffContent)
@@ -170,6 +200,14 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				}); err != nil {
 					return err
 				}
+			} else if streamedOK {
+				// Streaming succeeded: body was already written token-by-token.
+				// Print a trailing newline and the title if generated.
+				_, _ = fmt.Fprintln(out)
+				if title != "" {
+					_, _ = fmt.Fprintln(out, title)
+					_, _ = fmt.Fprintln(out)
+				}
 			} else {
 				_, _ = fmt.Fprintln(out)
 				_, _ = fmt.Fprintln(out, "----------------------------------------")
@@ -207,6 +245,8 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().BoolVar(&smartChunk, "smart-chunk", false, "Split large diffs by file, summarize each, then combine")
 	rootCmd.Flags().BoolVar(&generateTitle, "title", false, "Generate a concise MR/PR title in addition to the comment")
 
+	rootCmd.AddCommand(newInitConfigCmd())
+
 	rootCmd.AddCommand(&cobra.Command{
 		Use:       "completion [bash|zsh|fish|powershell]",
 		Short:     "Generate shell completion script",
@@ -229,6 +269,74 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	})
 
 	return rootCmd
+}
+
+// defaultConfigTOML is the template written by the init-config subcommand.
+// It documents every supported key with its default value.
+const defaultConfigTOML = `# ai-mr-comment configuration
+# Place this file at ~/.ai-mr-comment.toml or in the project root.
+
+# Default AI provider: openai | anthropic | gemini | ollama
+provider = "openai"
+
+# Default prompt template: default | conventional | technical
+template = "default"
+
+# --- OpenAI ---
+# openai_api_key = ""   # or set OPENAI_API_KEY env var
+openai_model    = "gpt-4o-mini"
+openai_endpoint = "https://api.openai.com/v1/chat/completions"
+
+# --- Anthropic ---
+# anthropic_api_key = ""   # or set ANTHROPIC_API_KEY env var
+anthropic_model    = "claude-3-5-sonnet-20240620"
+anthropic_endpoint = "https://api.anthropic.com/v1/messages"
+
+# --- Google Gemini ---
+# gemini_api_key = ""   # or set GEMINI_API_KEY env var
+gemini_model = "gemini-2.5-flash"
+
+# --- Ollama (local) ---
+ollama_model    = "llama3"
+ollama_endpoint = "http://localhost:11434/api/generate"
+`
+
+// newInitConfigCmd returns the init-config subcommand, which writes a commented
+// TOML configuration file to the destination path (default: ~/.ai-mr-comment.toml).
+func newInitConfigCmd() *cobra.Command {
+	var outputPath string
+
+	cmd := &cobra.Command{
+		Use:   "init-config",
+		Short: "Write a default config file to ~/.ai-mr-comment.toml",
+		Long: `Writes a commented TOML configuration file with all supported settings and
+their defaults. Edit the generated file to add your API keys and customise
+models, endpoints, or the default provider.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dest := outputPath
+			if dest == "" {
+				home, err := os.UserHomeDir()
+				if err != nil {
+					return fmt.Errorf("could not determine home directory: %w", err)
+				}
+				dest = home + "/.ai-mr-comment.toml"
+			}
+
+			if _, err := os.Stat(dest); err == nil {
+				return fmt.Errorf("config file already exists at %s (remove it first or use --output to choose a different path)", dest)
+			}
+
+			if err := os.WriteFile(dest, []byte(defaultConfigTOML), 0600); err != nil {
+				return fmt.Errorf("could not write config file: %w", err)
+			}
+
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Config file written to %s\n", dest)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&outputPath, "output", "", "Write config to this path instead of ~/.ai-mr-comment.toml")
+	return cmd
 }
 
 // getModelName returns the configured model name for the active provider.

@@ -20,6 +20,12 @@ func getAutoMergeBase() (string, error) {
 	return "", fmt.Errorf("could not determine merge base: no origin/main or origin/master found")
 }
 
+// isGitRepo reports whether the current directory is inside a git repository.
+func isGitRepo() bool {
+	err := exec.Command("git", "rev-parse", "--is-inside-work-tree").Run()
+	return err == nil
+}
+
 // getGitDiff returns the git diff for the given mode.
 // Priority: staged > explicit commit > auto merge-base > unstaged working tree.
 // Patterns in exclude are passed as git pathspecs (":!pattern") to filter files at the source.
@@ -35,9 +41,14 @@ func getGitDiff(commit string, staged bool, exclude []string) (string, error) {
 			args = []string{"diff", fmt.Sprintf("%s^", commit), commit}
 		}
 	} else if base, err := getAutoMergeBase(); err == nil {
-		args = []string{"diff", base + "..HEAD"}
+		// Diff the merge base against the working tree (staged + unstaged).
+		// This covers both committed and uncommitted changes on the branch.
+		args = []string{"diff", base}
 	} else {
-		args = []string{"diff"}
+		// No merge base found (no remote, detached HEAD, etc.).
+		// Fall back to all changes relative to the last commit — includes both
+		// staged and unstaged changes, so nothing is silently missed.
+		args = []string{"diff", "HEAD"}
 	}
 
 	if len(exclude) > 0 {
