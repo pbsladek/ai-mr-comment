@@ -17,6 +17,7 @@ A command-line tool written in Go that generates professional MR/PR comments bas
 - `config.go`: Configuration loading (Viper).
 - `git.go`: Git diff handling.
 - `prompt.go`: System prompt generation.
+- `token_estimator.go`: Token counting and cost estimation logic.
 - `*.go`: Go source files are in the project root.
 - `dist/`: Built binaries.
 - `Makefile`: Build scripts.

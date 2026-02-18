@@ -20,7 +20,9 @@ func TestNewPromptTemplate_CustomFile(t *testing.T) {
 	// Create a temporary template file
 	dir := t.TempDir()
 	templatePath := dir + "/templates"
-	os.Mkdir(templatePath, 0755)
+	if err := os.Mkdir(templatePath, 0755); err != nil {
+		t.Fatalf("failed to create directory: %v", err)
+	}
 	customTmpl := "This is a custom template."
 	err := os.WriteFile(templatePath+"/custom.tmpl", []byte(customTmpl), 0644)
 	if err != nil {
@@ -29,8 +31,10 @@ func TestNewPromptTemplate_CustomFile(t *testing.T) {
 
 	// Change to the temp directory so the template can be found
 	origWD, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origWD)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(origWD) }()
 
 	prompt, err := NewPromptTemplate("custom")
 	if err != nil {

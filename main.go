@@ -70,17 +70,29 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			}
 
 			if debug {
-				systemTokens := estimateTokens(systemPrompt)
-				diffTokens := estimateTokens(diffContent)
-				originalLen := len(strings.Split(diffContent, "\n"))
-				totalTokens := systemTokens + diffTokens
+				estimator := NewTokenEstimator(cfg)
+				model := getModelName(cfg)
 
-				_, _ = fmt.Fprintln(out, "Token estimation:")
-				_, _ = fmt.Fprintf(out, "- System prompt: %d tokens\n", systemTokens)
-				_, _ = fmt.Fprintf(out, "- Diff content: %d tokens (%d lines)\n", diffTokens, originalLen)
-				_, _ = fmt.Fprintf(out, "- Total estimate: %d tokens\n", totalTokens)
-				_, _ = fmt.Fprintln(out, "OpenApi limit: 200,000 tokens")
-				_, _ = fmt.Fprintln(out, "Anthropic's limit: 200,000 tokens")
+				// Estimate tokens
+				// Note: Gemini estimator makes an API call, others use heuristic
+				totalTokens, err := estimator.CountTokens(cmd.Context(), model, systemPrompt, diffContent)
+				if err != nil {
+					_, _ = fmt.Fprintf(out, "Error estimating tokens: %v\n", err)
+					// Fallback to heuristic if API call fails
+					fallback := &HeuristicTokenEstimator{}
+					totalTokens, _ = fallback.CountTokens(context.Background(), "", systemPrompt, diffContent)
+					_, _ = fmt.Fprintln(out, "Using heuristic fallback.")
+				}
+
+				originalLen := len(strings.Split(diffContent, "\n"))
+				cost := EstimateCost(model, totalTokens)
+
+				_, _ = fmt.Fprintln(out, "Token & Cost Estimation:")
+				_, _ = fmt.Fprintf(out, "- Model: %s\n", model)
+				_, _ = fmt.Fprintf(out, "- Diff lines: %d\n", originalLen)
+				_, _ = fmt.Fprintf(out, "- Estimated Input Tokens: %d\n", totalTokens)
+				_, _ = fmt.Fprintf(out, "- Estimated Input Cost: $%.6f\n", cost)
+				_, _ = fmt.Fprintln(out, "\nNote: Output tokens and cost depend on the generated response length.")
 				return nil
 			}
 
@@ -112,4 +124,19 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().BoolVar(&debug, "debug", false, "Estimate token usage")
 
 	return rootCmd
+}
+
+func getModelName(cfg *Config) string {
+	switch cfg.Provider {
+	case OpenAI:
+		return cfg.OpenAIModel
+	case Anthropic:
+		return cfg.AnthropicModel
+	case Gemini:
+		return cfg.GeminiModel
+	case Ollama:
+		return cfg.OllamaModel
+	default:
+		return "unknown"
+	}
 }
