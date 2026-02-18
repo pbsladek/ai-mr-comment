@@ -1,0 +1,2 @@
+go test fuzz v1
+string("diff --git a/old_feature.go b/old_feature.go\ndeleted file mode 100644\nindex a1b2c3d..0000000\n--- a/old_feature.go\n+++ /dev/null\n@@ -1,7 +0,0 @@\n-package main\n-\n-import \"fmt\"\n-\n-func OldFeature() {\n-\tfmt.Println(\"This is an old feature and is no longer needed.\")\n-}\n")

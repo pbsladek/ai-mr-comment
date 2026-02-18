@@ -1,0 +1,2 @@
+go test fuzz v1
+string("diff --git a/main.go b/main.go\nindex a1b2c3d..e4f5g6h 100644\n--- a/main.go\n+++ b/main.go\n@@ -5,7 +5,7 @@\n )\n \n func main() {\n-\tfmt.Println(\"Hello\")\n+\tfmt.Println(\"Hello, World!\")\n }\ndiff --git a/utils.go b/utils.go\nindex d1e2f3g..h4i5j6k 100644\n--- a/utils.go\n+++ b/utils.go\n@@ -1,5 +1,6 @@\n package main\n \n+// Add is a helpful function\n func Add(a, b int) int {\n \treturn a + b\n }\n")
