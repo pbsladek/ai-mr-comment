@@ -226,7 +226,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			}
 
 			if outputPath != "" {
-				return os.WriteFile(outputPath, []byte(comment), 0644)
+				return os.WriteFile(outputPath, []byte(comment), 0600)
 			}
 			return nil
 		},

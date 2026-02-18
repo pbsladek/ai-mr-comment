@@ -42,6 +42,17 @@ sboms:
     documents:
       - "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}.sbom.json"
 
+signs:
+  - cmd: cosign
+    args:
+      - sign-blob
+      - --yes
+      - --output-signature=${signature}
+      - --output-certificate=${certificate}
+      - ${artifact}
+    artifacts: checksum
+    output: true
+
 checksum:
   name_template: "checksums.txt"
 

@@ -3,13 +3,14 @@ module github.com/pbsladek/ai-mr-comment
 go 1.24.3
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.22.1
+	github.com/anthropics/anthropic-sdk-go v1.24.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/google/generative-ai-go v0.20.1
 	github.com/openai/openai-go v1.12.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
-	google.golang.org/api v0.266.0
+	golang.org/x/term v0.40.0
+	google.golang.org/api v0.267.0
 )
 
 require (
@@ -52,7 +53,6 @@ require (
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
-	golang.org/x/term v0.40.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260128011058-8636f8732409 // indirect
