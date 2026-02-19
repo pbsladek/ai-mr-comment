@@ -15,6 +15,8 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 - Exclude files from the diff by glob pattern (`--exclude`)
 - Smart chunking (`--smart-chunk`) for large diffs: summarizes each file, then synthesizes a final comment
 - Optional MR/PR title generation (`--title`) alongside the comment
+- **Generate comments directly from a GitHub PR or GitLab MR URL** (`--pr`) — no local checkout needed
+- Supports public **github.com**, **GitHub Enterprise**, public **gitlab.com**, and **self-hosted GitLab** instances
 - Supports OpenAI, Anthropic (Claude), Google Gemini, and Ollama APIs
 - Customizable API endpoints and models
 - Multiple prompt styles (Conventional, Technical, User-Focused)
@@ -82,7 +84,7 @@ gemini_api_key = "xxxx"
 gemini_model = "gemini-2.5-flash"
 
 # === OpenAI Settings ===
-openai_api_key = "xxxx"            
+openai_api_key = "xxxx"
 openai_model = "gpt-4o-mini"
 openai_endpoint = "https://api.openai.com/v1/chat/completions"
 
@@ -94,6 +96,14 @@ anthropic_endpoint = "https://api.anthropic.com/v1/messages"
 # === Ollama Settings ===
 ollama_model = "llama3"
 ollama_endpoint = "http://localhost:11434/api/generate"
+
+# === GitHub / GitHub Enterprise ===
+github_token = "xxxx"       # or set GITHUB_TOKEN env var (required for private repos)
+# github_base_url = ""      # set for GitHub Enterprise, e.g. https://github.mycompany.com
+
+# === GitLab / Self-Hosted GitLab ===
+gitlab_token = "xxxx"       # or set GITLAB_TOKEN env var (required for private projects)
+# gitlab_base_url = ""      # set for self-hosted GitLab, e.g. https://gitlab.mycompany.com
 
 # === Template Settings ===
 # Options: default, conventional, technical, user-focused
@@ -121,6 +131,20 @@ ai-mr-comment --provider anthropic --template technical
 # Generate comment for a specific commit range
 ai-mr-comment --commit "HEAD~3..HEAD"
 
+# Generate a comment from a GitHub PR URL (no local checkout needed)
+ai-mr-comment --pr https://github.com/owner/repo/pull/42
+
+# Generate a comment from a GitLab MR URL
+ai-mr-comment --pr https://gitlab.com/group/project/-/merge_requests/5
+
+# Generate a comment from a GitHub Enterprise or self-hosted GitLab URL
+# (set github_base_url / gitlab_base_url in config or env)
+GITHUB_BASE_URL=https://github.mycompany.com \
+  ai-mr-comment --pr https://github.mycompany.com/owner/repo/pull/42
+
+GITLAB_BASE_URL=https://gitlab.mycompany.com \
+  ai-mr-comment --pr https://gitlab.mycompany.com/group/project/-/merge_requests/5
+
 # Output structured JSON (useful for CI/scripting)
 ai-mr-comment --format json
 
@@ -146,6 +170,7 @@ ai-mr-comment init-config
 
 ### Options
 
+- `--pr <URL>`: GitHub PR or GitLab MR URL — fetches diff and metadata remotely, no local checkout needed. Works with `github.com`, GitHub Enterprise, `gitlab.com`, and self-hosted GitLab. Mutually exclusive with `--staged`, `--commit`, and `--file`.
 - `--commit <COMMIT>`: Specific commit or range
 - `--staged`: Diff staged changes only (`git diff --cached`); mutually exclusive with `--commit`
 - `--exclude <PATTERN>`: Exclude files matching glob pattern (e.g. `vendor/**`, `*.sum`). Can be repeated.
@@ -177,6 +202,48 @@ Streaming is automatically disabled and the output is fully buffered when:
 - stdout is not a TTY (piped output, CI, redirected to file)
 
 If a streaming call fails mid-flight, the tool transparently falls back to a standard buffered request and outputs the full comment normally.
+
+## GitHub & GitLab Integration (`--pr`)
+
+Point `--pr` at any GitHub pull request or GitLab merge request URL to generate a comment without needing the repository checked out locally.
+
+```bash
+# GitHub (public)
+ai-mr-comment --pr https://github.com/owner/repo/pull/42
+
+# GitLab (public)
+ai-mr-comment --pr https://gitlab.com/group/project/-/merge_requests/5
+```
+
+### Authentication
+
+Public repos and projects work without a token (subject to API rate limits). For private repos set the token via environment variable or config file:
+
+| Platform | Env var | Config key |
+|---|---|---|
+| GitHub / GitHub Enterprise | `GITHUB_TOKEN` | `github_token` |
+| GitLab / Self-Hosted GitLab | `GITLAB_TOKEN` | `gitlab_token` |
+
+### Self-Hosted Instances
+
+For GitHub Enterprise or self-hosted GitLab, pass the instance base URL. The SDKs automatically append the correct API path (`/api/v3/` for GitHub, `/api/v4/` for GitLab).
+
+**Environment variables:**
+```bash
+# GitHub Enterprise
+GITHUB_BASE_URL=https://github.mycompany.com \
+  ai-mr-comment --pr https://github.mycompany.com/owner/repo/pull/42
+
+# Self-hosted GitLab
+GITLAB_BASE_URL=https://gitlab.mycompany.com \
+  ai-mr-comment --pr https://gitlab.mycompany.com/group/project/-/merge_requests/5
+```
+
+**Config file (`.ai-mr-comment.toml`):**
+```toml
+github_base_url = "https://github.mycompany.com"
+gitlab_base_url = "https://gitlab.mycompany.com"
+```
 
 ## Token & Cost Estimation
 

@@ -26,7 +26,7 @@ func main() {
 // newRootCmd builds the root cobra command, wiring flags to the provided chatFn.
 // Accepting chatFn as a parameter allows tests to inject a mock without real API calls.
 func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
-	var commit, diffFilePath, outputPath, provider, templateName, format string
+	var commit, diffFilePath, outputPath, provider, templateName, format, prURL string
 	var debug, staged, clipboardFlag, smartChunk, generateTitle bool
 	var exclude []string
 
@@ -64,6 +64,9 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			if staged && commit != "" {
 				return errors.New("--staged and --commit are mutually exclusive")
 			}
+			if prURL != "" && (staged || commit != "" || diffFilePath != "") {
+				return errors.New("--pr cannot be combined with --staged, --commit, or --file")
+			}
 
 			if format != "text" && format != "json" {
 				return fmt.Errorf("unsupported format %q: must be text or json", format)
@@ -71,7 +74,16 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 
 			var diffContent string
 			var err error
-			if diffFilePath != "" {
+			if prURL != "" {
+				switch {
+				case isGitHubURL(prURL):
+					diffContent, err = getPRDiff(cmd.Context(), prURL, cfg.GitHubToken, cfg.GitHubBaseURL)
+				case isGitLabURL(prURL):
+					diffContent, err = getMRDiff(cmd.Context(), prURL, cfg.GitLabToken, cfg.GitLabBaseURL)
+				default:
+					return fmt.Errorf("unsupported URL %q: must be a GitHub PR (/pull/) or GitLab MR (/-/merge_requests/) URL", prURL)
+				}
+			} else if diffFilePath != "" {
 				diffContent, err = readDiffFromFile(diffFilePath)
 			} else {
 				if !isGitRepo() {
@@ -234,6 +246,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 
 	rootCmd.Flags().StringVar(&commit, "commit", "", "Commit or commit range")
 	rootCmd.Flags().StringVar(&diffFilePath, "file", "", "Path to diff file")
+	rootCmd.Flags().StringVar(&prURL, "pr", "", "GitHub PR or GitLab MR URL (e.g. https://github.com/owner/repo/pull/123 or https://gitlab.com/group/project/-/merge_requests/42)")
 	rootCmd.Flags().StringVar(&outputPath, "output", "", "Output file path")
 	rootCmd.Flags().StringVar(&provider, "provider", "openai", "API provider (openai, anthropic, gemini, ollama)")
 	rootCmd.Flags().StringVarP(&templateName, "template", "t", "default", "Prompt template to use (e.g., default, conventional, technical)")
@@ -299,6 +312,14 @@ gemini_model = "gemini-2.5-flash"
 # --- Ollama (local) ---
 ollama_model    = "llama3"
 ollama_endpoint = "http://localhost:11434/api/generate"
+
+# --- GitHub / GitHub Enterprise ---
+# github_token = ""    # or set GITHUB_TOKEN env var
+# github_base_url = "" # GitHub Enterprise host, e.g. https://github.mycompany.com
+
+# --- GitLab / Self-Hosted GitLab ---
+# gitlab_token = ""    # or set GITLAB_TOKEN env var
+# gitlab_base_url = "" # Self-hosted GitLab host, e.g. https://gitlab.mycompany.com
 `
 
 // newInitConfigCmd returns the init-config subcommand, which writes a commented
