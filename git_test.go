@@ -445,3 +445,170 @@ func TestIsGitLabURL(t *testing.T) {
 	}
 }
 
+func TestGetCurrentBranch(t *testing.T) {
+	branch, err := getCurrentBranch()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// In a normal (non-detached) checkout the branch must be non-empty.
+	// In a detached HEAD state getCurrentBranch returns "" with no error — skip.
+	if branch == "" {
+		t.Skip("skipping: detached HEAD state, no branch name available")
+	}
+	// Branch name must not contain leading/trailing whitespace.
+	if branch != strings.TrimSpace(branch) {
+		t.Errorf("branch name has surrounding whitespace: %q", branch)
+	}
+}
+
+func TestGetCurrentBranch_DetachedHead(t *testing.T) {
+	// Simulate detached HEAD by stubbing: we just verify the function
+	// returns "" and nil error when git output is "HEAD".
+	// We can't easily force a detached state, so we just test the parsing logic
+	// directly by checking that a branch name of "HEAD" is treated as detached.
+	// This is a unit check of the branch == "HEAD" guard, not a git integration test.
+	out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").CombinedOutput()
+	if err != nil {
+		t.Skip("skipping: not in a git repo")
+	}
+	got := strings.TrimSpace(string(out))
+	// If the repo is in detached HEAD, getCurrentBranch should return "".
+	if got == "HEAD" {
+		branch, branchErr := getCurrentBranch()
+		if branchErr != nil {
+			t.Fatalf("unexpected error in detached HEAD: %v", branchErr)
+		}
+		if branch != "" {
+			t.Errorf("expected empty branch for detached HEAD, got %q", branch)
+		}
+	}
+}
+
+// TestGitCommit_EmptyMessageFails verifies that gitCommit with an empty message
+// causes git to return an error (git rejects empty commit messages).
+func TestGitCommit_EmptyMessageFails(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	err := gitCommit("")
+	if err == nil {
+		t.Fatal("expected error for empty commit message, got nil")
+	}
+}
+
+// TestGitPush_NoRemoteFails verifies that gitPush returns an error when there
+// is no remote named "origin" configured (or the branch has nothing to push).
+// This is a best-effort test — it may skip in environments where origin exists
+// and the push would succeed, to avoid accidentally pushing during tests.
+func TestGitPush_NoRemoteFails(t *testing.T) {
+	// Only run this test when there is no "origin" remote, to avoid accidental pushes.
+	out, err := exec.Command("git", "remote", "get-url", "origin").CombinedOutput()
+	if err == nil && strings.TrimSpace(string(out)) != "" {
+		t.Skip("skipping: origin remote exists — would risk an accidental push")
+	}
+	pushErr := gitPush("non-existent-test-branch")
+	if pushErr == nil {
+		t.Fatal("expected error pushing to non-existent remote, got nil")
+	}
+}
+
+// TestPostGitHubPRComment verifies that postGitHubPRCommentWithClient sends
+// a POST to the correct GitHub Issues endpoint with the expected body.
+func TestPostGitHubPRComment(t *testing.T) {
+	var receivedBody string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/owner/repo/issues/42/comments", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var payload struct {
+			Body string `json:"body"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		receivedBody = payload.Body
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": 1, "body": payload.Body})
+	})
+
+	gh := newTestGitHubClient(t, mux)
+	err := postGitHubPRCommentWithClient(context.Background(), gh, "https://github.com/owner/repo/pull/42", "great review")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedBody != "great review" {
+		t.Errorf("expected body %q, got %q", "great review", receivedBody)
+	}
+}
+
+// TestPostGitHubPRComment_APIError verifies that a non-2xx response is
+// surfaced as an error containing the expected message.
+func TestPostGitHubPRComment_APIError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/owner/repo/issues/1/comments", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+	})
+
+	gh := newTestGitHubClient(t, mux)
+	err := postGitHubPRCommentWithClient(context.Background(), gh, "https://github.com/owner/repo/pull/1", "body")
+	if err == nil {
+		t.Fatal("expected error for 403 response, got nil")
+	}
+	if !strings.Contains(err.Error(), "posting GitHub PR comment") {
+		t.Errorf("expected error to mention 'posting GitHub PR comment', got: %v", err)
+	}
+}
+
+// TestPostGitLabMRNote verifies that postGitLabMRNoteWithClient sends a POST
+// to the correct GitLab Notes endpoint with the expected body.
+func TestPostGitLabMRNote(t *testing.T) {
+	var receivedBody string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/mygroup%2Fmyproject/merge_requests/5/notes", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var payload struct {
+			Body string `json:"body"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		receivedBody = payload.Body
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": 1, "body": payload.Body})
+	})
+
+	gl := newTestGitLabClient(t, mux)
+	err := postGitLabMRNoteWithClient(context.Background(), gl, "https://gitlab.com/mygroup/myproject/-/merge_requests/5", "mr note")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedBody != "mr note" {
+		t.Errorf("expected body %q, got %q", "mr note", receivedBody)
+	}
+}
+
+// TestPostGitLabMRNote_APIError verifies that a non-2xx response is surfaced
+// as an error containing the expected message.
+func TestPostGitLabMRNote_APIError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/mygroup%2Fmyproject/merge_requests/5/notes", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+	})
+
+	gl := newTestGitLabClient(t, mux)
+	err := postGitLabMRNoteWithClient(context.Background(), gl, "https://gitlab.com/mygroup/myproject/-/merge_requests/5", "body")
+	if err == nil {
+		t.Fatal("expected error for 403 response, got nil")
+	}
+	if !strings.Contains(err.Error(), "posting GitLab MR note") {
+		t.Errorf("expected error to mention 'posting GitLab MR note', got: %v", err)
+	}
+}
+

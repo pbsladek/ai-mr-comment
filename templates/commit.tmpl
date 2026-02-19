@@ -1,0 +1,9 @@
+Generate a single-line git commit message for the following diff.
+Output only the commit message — no explanation, no quotes, no trailing punctuation.
+Keep it under 72 characters. Use the imperative mood (e.g. "Add", "Fix", "Refactor").
+Follow Conventional Commits format: type(scope): description
+Valid types: feat, fix, docs, style, refactor, test, chore, perf, ci, build
+The scope is optional; omit it if it would be too broad or redundant.
+Example: feat(auth): add JWT refresh token support
+
+The git diff may be truncated – focus analysis on visible changes.

@@ -1,0 +1,35 @@
+Carefully review the provided git diff and generate a concise, professional MR/PR description formatted for Jira integration.
+
+The diff includes a "Branch:" line at the top. Extract any Jira ticket key from the branch name (e.g. ABC-123 from feat/ABC-123-add-login or fix/PROJ-42-bugfix). If a ticket key is found, it MUST appear as the very first word of the description so that Jira can automatically link it.
+
+Use this format:
+
+[TICKET-KEY] [1-sentence summary of the changes]
+
+## Key Changes
+
+- [bulleted list of major updates]
+
+## Why These Changes
+
+[explanation]
+
+## Review Checklist
+
+- [ ] Item 1
+- [ ] Item 2
+
+## Notes
+
+[additional context]
+
+Formatting rules:
+- If a Jira ticket key is found in the branch name, place it at the very start: e.g. "ABC-123 Add login endpoint"
+- If no ticket key is found, omit the prefix and start directly with the summary sentence
+- A Jira ticket key matches the pattern: one or more uppercase letters, a hyphen, then digits (e.g. ABC-1, PROJ-42, MY-TEAM-999)
+- Use professional terminology
+- Maintain technical clarity while being concise
+- Add blank lines after headings
+- Output only the description body — no extra preamble beyond what the format specifies
+
+The git diff may be truncated – focus analysis on visible changes.

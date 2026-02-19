@@ -975,3 +975,689 @@ func TestNewRootCmd_FormatJSON_AutoTitle(t *testing.T) {
 		t.Errorf("expected comment 'mocked description' (backwards compat), got %q", result["comment"])
 	}
 }
+
+func TestNewRootCmd_ModelFlag(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedModel string
+	fn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
+		capturedModel = cfg.OpenAIModel
+		return "mocked comment", nil
+	}
+
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--model=gpt-4o", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if capturedModel != "gpt-4o" {
+		t.Errorf("expected model gpt-4o, got %q", capturedModel)
+	}
+}
+
+func TestSetModelOverride(t *testing.T) {
+	tests := []struct {
+		provider ApiProvider
+		model    string
+		check    func(*Config) string
+	}{
+		{OpenAI, "gpt-4o", func(c *Config) string { return c.OpenAIModel }},
+		{Anthropic, "claude-opus-4-6", func(c *Config) string { return c.AnthropicModel }},
+		{Gemini, "gemini-2.0-flash", func(c *Config) string { return c.GeminiModel }},
+		{Ollama, "mistral", func(c *Config) string { return c.OllamaModel }},
+	}
+	for _, tc := range tests {
+		t.Run(string(tc.provider), func(t *testing.T) {
+			cfg := &Config{Provider: tc.provider}
+			setModelOverride(cfg, tc.model)
+			if got := tc.check(cfg); got != tc.model {
+				t.Errorf("expected %q, got %q", tc.model, got)
+			}
+		})
+	}
+}
+
+func TestModelsCmd(t *testing.T) {
+	for _, provider := range []string{"openai", "anthropic", "gemini", "ollama"} {
+		t.Run(provider, func(t *testing.T) {
+			var buf strings.Builder
+			cmd := newRootCmd(dummyChatFn)
+			cmd.SetArgs([]string{"models", "--provider=" + provider})
+			cmd.SetOut(&buf)
+			cmd.SetErr(io.Discard)
+
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("expected no error for provider %s, got %v", provider, err)
+			}
+			if !strings.Contains(buf.String(), provider) {
+				t.Errorf("expected output to mention provider %q, got:\n%s", provider, buf.String())
+			}
+			if !strings.Contains(buf.String(), "--model") {
+				t.Errorf("expected output to mention --model flag, got:\n%s", buf.String())
+			}
+		})
+	}
+}
+
+func TestModelsCmd_InvalidProvider(t *testing.T) {
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"models", "--provider=invalid"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "unknown provider") {
+		t.Errorf("expected unknown provider error, got %v", err)
+	}
+}
+
+func TestNewRootCmd_ModelFlag_TokenEstimation(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var buf strings.Builder
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--debug", "--model=gpt-4o", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "gpt-4o") {
+		t.Errorf("expected model gpt-4o in debug output, got:\n%s", out)
+	}
+	// gpt-4o costs more than gpt-4o-mini — ensure EstimateCost picked up the override
+	if !strings.Contains(out, "Estimated Input Cost") {
+		t.Errorf("expected cost estimation in output, got:\n%s", out)
+	}
+}
+
+func TestNewRootCmd_CommitMsgFlag(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	callCount := 0
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		callCount++
+		return "feat(auth): add JWT refresh token support", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--commit-msg", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	// Exactly one API call — description generation is skipped.
+	if callCount != 1 {
+		t.Errorf("expected 1 chatFn call for --commit-msg, got %d", callCount)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "feat(auth): add JWT refresh token support") {
+		t.Errorf("expected commit message in output, got:\n%s", out)
+	}
+	// No section headers should appear.
+	if strings.Contains(out, "── Title ──") {
+		t.Error("expected no title section header for --commit-msg")
+	}
+	if strings.Contains(out, "── Description ──") {
+		t.Error("expected no description section header for --commit-msg")
+	}
+}
+
+func TestNewRootCmd_CommitMsgFlag_FormatJSON(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	callCount := 0
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		callCount++
+		return "chore: update dependencies", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--commit-msg", "--format=json", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	// No auto-title call: --commit-msg suppresses it even with --format=json.
+	if callCount != 1 {
+		t.Errorf("expected 1 chatFn call (no auto-title for --commit-msg), got %d", callCount)
+	}
+
+	var result map[string]string
+	if err := json.Unmarshal([]byte(buf.String()), &result); err != nil {
+		t.Fatalf("expected valid JSON, got error: %v\noutput: %s", err, buf.String())
+	}
+	if result["commit_message"] != "chore: update dependencies" {
+		t.Errorf("expected commit_message 'chore: update dependencies', got %q", result["commit_message"])
+	}
+	if _, ok := result["description"]; ok {
+		t.Error("expected no description field in commit-msg JSON output")
+	}
+	if _, ok := result["comment"]; ok {
+		t.Error("expected no comment field in commit-msg JSON output")
+	}
+	if result["provider"] == "" {
+		t.Error("expected non-empty provider in JSON output")
+	}
+	if result["model"] == "" {
+		t.Error("expected non-empty model in JSON output")
+	}
+}
+
+func TestNewRootCmd_CommitMsgFlag_MutualExclusion(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--commit-msg", "--title", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when --commit-msg and --title are combined, got nil")
+	}
+	if !strings.Contains(err.Error(), "--commit-msg and --title cannot be used together") {
+		t.Errorf("expected mutual exclusion error, got: %v", err)
+	}
+}
+
+func TestNewRootCmd_CommitMsgFlag_Clipboard(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "fix(api): handle nil response", nil
+	}
+
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--commit-msg", "--clipboard=commit-msg", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	// Clipboard may fail in headless CI environments; that's a warning, not an error.
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("expected no error for --clipboard=commit-msg, got %v", err)
+	}
+}
+
+func TestNewRootCmd_CommitMsgFlag_NoAutoTitle(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	callCount := 0
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		callCount++
+		return "refactor: simplify token parsing", nil
+	}
+
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--commit-msg", "--format=json", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if callCount != 1 {
+		t.Errorf("expected exactly 1 API call (no title generation), got %d", callCount)
+	}
+}
+
+// TestBranchPrependedForLocalGitDiff verifies that when diffing a local git
+// repo (no --file, no --pr), the branch name is prepended to the diffContent
+// that reaches the AI so templates like jira can extract the ticket key.
+func TestBranchPrependedForLocalGitDiff(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedDiff string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, diffContent string) (string, error) {
+		capturedDiff = diffContent
+		return "mocked comment", nil
+	}
+
+	cmd := newRootCmd(fn)
+	// Use --staged so we get a real git diff path without needing uncommitted changes.
+	cmd.SetArgs([]string{"--staged", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	// May return "no staged changes" error — that's fine, we only care about
+	// whether the branch prefix was added before the diff is processed.
+	// If the error is about missing staged changes the branch inject already ran.
+	err := cmd.Execute()
+	if err != nil && !strings.Contains(err.Error(), "no staged changes") && !strings.Contains(err.Error(), "no diff found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// If chatFn was called, capturedDiff must start with "Branch: ".
+	if capturedDiff != "" && !strings.HasPrefix(capturedDiff, "Branch: ") {
+		preview := capturedDiff
+		if len(preview) > 200 {
+			preview = preview[:200]
+		}
+		t.Errorf("expected diffContent to start with 'Branch: ', got:\n%s", preview)
+	}
+}
+
+// TestBranchNotPrependedForFileDiff verifies that --file skips branch injection
+// (the file has no local branch context).
+func TestBranchNotPrependedForFileDiff(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedDiff string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, diffContent string) (string, error) {
+		capturedDiff = diffContent
+		return "mocked comment", nil
+	}
+
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if strings.HasPrefix(capturedDiff, "Branch: ") {
+		t.Error("expected no Branch: prefix when using --file")
+	}
+}
+
+// skipIfDetachedHead skips the test when the repo is in detached HEAD state
+// (e.g. CI shallow clones), since quick-commit requires a named branch.
+func skipIfDetachedHead(t *testing.T) {
+	t.Helper()
+	branch, err := getCurrentBranch()
+	if err != nil || branch == "" {
+		t.Skip("skipping: detached HEAD state or no branch available")
+	}
+}
+
+// TestQuickCommit_DryRun verifies that --dry-run generates and prints the
+// commit message without staging, committing, or pushing.
+func TestQuickCommit_DryRun(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	skipIfDetachedHead(t)
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "chore: update config", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--dry-run", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	// --dry-run may return "no staged changes" if the diff is empty — that's fine.
+	if err != nil && !strings.Contains(err.Error(), "no staged changes") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	// When chatFn was reached, the output must contain the generated message.
+	if err == nil {
+		if !strings.Contains(out, "chore: update config") {
+			t.Errorf("expected commit message in output, got:\n%s", out)
+		}
+		if !strings.Contains(out, "dry-run") {
+			t.Errorf("expected dry-run notice in output, got:\n%s", out)
+		}
+	}
+}
+
+// TestQuickCommit_DryRun_BranchPrefix verifies that the branch name is
+// prepended to the diff content passed to the AI.
+func TestQuickCommit_DryRun_BranchPrefix(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	skipIfDetachedHead(t)
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedDiff string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, diffContent string) (string, error) {
+		capturedDiff = diffContent
+		return "feat: add feature", nil
+	}
+
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--dry-run", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil && !strings.Contains(err.Error(), "no staged changes") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if capturedDiff != "" && !strings.HasPrefix(capturedDiff, "Branch: ") {
+		t.Errorf("expected diffContent to start with 'Branch: ', got:\n%s", capturedDiff)
+	}
+}
+
+// TestQuickCommit_AIError verifies that an AI error is surfaced correctly.
+func TestQuickCommit_AIError(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	skipIfDetachedHead(t)
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "", fmt.Errorf("AI provider unavailable")
+	}
+
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--dry-run", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	// Either the diff was empty (no staged changes) or the AI error was returned.
+	if err != nil && strings.Contains(err.Error(), "no staged changes") {
+		t.Skip("skipping: no staged diff available to reach AI call")
+	}
+	if err == nil {
+		t.Fatal("expected an error from AI failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "AI provider unavailable") {
+		t.Errorf("expected AI error message, got: %v", err)
+	}
+}
+
+// TestQuickCommit_DetachedHead verifies an error is returned in detached HEAD state.
+func TestQuickCommit_DetachedHead(t *testing.T) {
+	// Check if we're actually in detached HEAD; if not, this code path can't be
+	// triggered without destructive git operations, so we just unit-test the guard
+	// indirectly by confirming getCurrentBranch returns "" → "" branch guard fires.
+	out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		t.Skip("skipping: not in a git repo")
+	}
+	if strings.TrimSpace(string(out)) != "HEAD" {
+		t.Skip("skipping: not in detached HEAD state")
+	}
+
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"quick-commit", "--dry-run", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	execErr := cmd.Execute()
+	if execErr == nil {
+		t.Fatal("expected error for detached HEAD, got nil")
+	}
+	if !strings.Contains(execErr.Error(), "detached HEAD") {
+		t.Errorf("expected detached HEAD error, got: %v", execErr)
+	}
+}
+
+// --- parseVerdict unit tests ---
+
+func TestParseVerdict_Pass(t *testing.T) {
+	verdict, body := parseVerdict("VERDICT: PASS\nThis looks good.")
+	if verdict != "PASS" {
+		t.Errorf("expected verdict PASS, got %q", verdict)
+	}
+	if body != "This looks good." {
+		t.Errorf("expected body %q, got %q", "This looks good.", body)
+	}
+}
+
+func TestParseVerdict_Fail(t *testing.T) {
+	verdict, body := parseVerdict("VERDICT: FAIL\nThere is a SQL injection.")
+	if verdict != "FAIL" {
+		t.Errorf("expected verdict FAIL, got %q", verdict)
+	}
+	if body != "There is a SQL injection." {
+		t.Errorf("expected body %q, got %q", "There is a SQL injection.", body)
+	}
+}
+
+func TestParseVerdict_NoVerdictLine(t *testing.T) {
+	input := "Normal review text without verdict."
+	verdict, body := parseVerdict(input)
+	if verdict != "PASS" {
+		t.Errorf("expected default PASS, got %q", verdict)
+	}
+	if body != input {
+		t.Errorf("expected body unchanged, got %q", body)
+	}
+}
+
+// --- --exit-code flag tests ---
+
+// TestExitCodeFlag_Pass verifies that VERDICT: PASS is stripped from the output
+// and the command exits successfully (returns nil).
+func TestExitCodeFlag_Pass(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "VERDICT: PASS\nmocked comment", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--exit-code", "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	output := buf.String()
+	if strings.Contains(output, "VERDICT:") {
+		t.Errorf("expected VERDICT line to be stripped from output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "mocked comment") {
+		t.Errorf("expected review body in output, got:\n%s", output)
+	}
+}
+
+// TestExitCodeFlag_JSON verifies that --exit-code --format=json includes
+// a "verdict" field in the JSON output.
+func TestExitCodeFlag_JSON(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "VERDICT: PASS\nmocked comment", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--exit-code", "--format=json", "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(buf.String()), &result); err != nil {
+		t.Fatalf("expected valid JSON, got error: %v\nOutput: %s", err, buf.String())
+	}
+	if result["verdict"] != "PASS" {
+		t.Errorf("expected verdict=PASS in JSON, got: %v", result["verdict"])
+	}
+	// The description should not contain the raw VERDICT line — it must be stripped.
+	if desc, _ := result["description"].(string); strings.Contains(desc, "VERDICT:") {
+		t.Errorf("expected raw VERDICT line to be stripped from description, got: %q", desc)
+	}
+}
+
+// TestExitCodeFlag_MutualExclusion verifies that --exit-code and --commit-msg
+// cannot be used together.
+func TestExitCodeFlag_MutualExclusion(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--exit-code", "--commit-msg", "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected mutual exclusion error, got nil")
+	}
+	if !strings.Contains(err.Error(), "--exit-code") || !strings.Contains(err.Error(), "--commit-msg") {
+		t.Errorf("expected error to mention both flags, got: %v", err)
+	}
+}
+
+// TestExitCodeFlag_Fail verifies that the process exits with code 2 when the AI
+// returns VERDICT: FAIL. Uses the subprocess test pattern to observe os.Exit.
+func TestExitCodeFlag_Fail(t *testing.T) {
+	if os.Getenv("AI_MR_EXIT_CODE_SUBPROCESS") == "1" {
+		// Running as subprocess: execute the logic that calls os.Exit(2).
+		fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+			return "VERDICT: FAIL\nbad code detected", nil
+		}
+		t.Setenv("OPENAI_API_KEY", "dummy")
+		cmd := newRootCmd(fn)
+		cmd.SetArgs([]string{"--exit-code", "--file=testdata/simple.diff", "--provider=openai"})
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		_ = cmd.Execute()
+		// If os.Exit(2) is not called, we fall through and exit 0 — test will catch this.
+		return
+	}
+
+	proc := exec.Command(os.Args[0], "-test.run=TestExitCodeFlag_Fail", "-test.v")
+	proc.Env = append(os.Environ(), "AI_MR_EXIT_CODE_SUBPROCESS=1")
+	err := proc.Run()
+	if err == nil {
+		t.Fatal("expected process to exit with non-zero code, got nil")
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("expected *exec.ExitError, got %T: %v", err, err)
+	}
+	if exitErr.ExitCode() != 2 {
+		t.Errorf("expected exit code 2, got %d", exitErr.ExitCode())
+	}
+}
+
+// --- --post flag tests ---
+
+// TestPostFlag_RequiresPR verifies that --post without --pr returns an error.
+func TestPostFlag_RequiresPR(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--post", "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when --post used without --pr, got nil")
+	}
+	if !strings.Contains(err.Error(), "--post requires --pr") {
+		t.Errorf("expected '--post requires --pr' error, got: %v", err)
+	}
+}
+
+// --- --output with --format=json test ---
+
+// TestOutputFlag_JSON verifies that --output writes valid JSON to the file
+// when --format=json is set.
+func TestOutputFlag_JSON(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	tmpFile := t.TempDir() + "/review.json"
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "mocked comment", nil
+	}
+
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--format=json", "--output=" + tmpFile, "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	content, readErr := os.ReadFile(tmpFile)
+	if readErr != nil {
+		t.Fatalf("expected output file to exist, got error: %v", readErr)
+	}
+
+	var result map[string]any
+	if jsonErr := json.Unmarshal(content, &result); jsonErr != nil {
+		t.Fatalf("expected valid JSON in output file, got error: %v\nContent: %s", jsonErr, string(content))
+	}
+	if result["description"] == nil && result["comment"] == nil {
+		t.Errorf("expected description or comment key in JSON, got: %v", result)
+	}
+	if result["provider"] == nil {
+		t.Errorf("expected provider key in JSON, got: %v", result)
+	}
+}

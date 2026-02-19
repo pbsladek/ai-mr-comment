@@ -36,10 +36,17 @@ check-size: ## Verify linux/amd64 binary is within the size limit
 		echo "OK: binary is within size limit"; \
 	fi
 
-run: ## Build and run against current git diff
+ARGS ?=
+
+run: ## Build and run against current git diff (pass extra flags with ARGS="--flag value")
 	@mkdir -p $(BUILD_DIR)
 	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) .
-	./dist/ai-mr-comment
+	./dist/ai-mr-comment $(ARGS)
+
+quick-commit: ## Build and run quick-commit (pass extra flags with ARGS="--dry-run")
+	@mkdir -p $(BUILD_DIR)
+	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) .
+	./dist/ai-mr-comment quick-commit $(ARGS)
 
 run-debug: ## Build and run with --debug flag
 	@mkdir -p $(BUILD_DIR)
