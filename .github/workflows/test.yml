@@ -26,6 +26,12 @@ jobs:
         with:
           version: v2.9
 
+      - name: Verify Dependencies
+        run: |
+          go mod verify
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
       - name: Run Tests
         run: make test
 
