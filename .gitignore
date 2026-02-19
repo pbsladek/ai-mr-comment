@@ -24,3 +24,7 @@ go.work.sum
 
 # Dist
 dist/
+
+# Local binary (built by go build in repo root)
+/ai-mr-comment
+/ai-mr-comment.exe
