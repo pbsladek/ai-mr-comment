@@ -2,7 +2,12 @@ version: "2"
 
 linters:
   enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
     - gosec
+    - unused
 
   settings:
     gosec:

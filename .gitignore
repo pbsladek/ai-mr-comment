@@ -24,3 +24,18 @@ go.work.sum
 
 # Dist
 dist/
+
+# Local binary (built by go build in repo root)
+/ai-mr-comment
+/ai-mr-comment.exe
+
+# IDE and editor files
+.vscode/
+.zed/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
