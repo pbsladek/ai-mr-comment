@@ -332,18 +332,48 @@ func TestNewRootCmd_StagedAndCommitMutuallyExclusive(t *testing.T) {
 
 func TestNewRootCmd_ClipboardFlag(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "dummy")
-	cmd := newRootCmd(dummyChatFn)
-	cmd.SetArgs([]string{"--clipboard", "--file=testdata/diff.txt", "--provider=openai"})
+	for _, val := range []string{"description", "comment", "title", "all"} {
+		t.Run(val, func(t *testing.T) {
+			callCount := 0
+			fn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
+				callCount++
+				if callCount == 1 {
+					return "mocked comment", nil
+				}
+				return "mocked title", nil
+			}
+			cmd := newRootCmd(fn)
+			cmd.SetArgs([]string{"--clipboard=" + val, "--title", "--file=testdata/diff.txt", "--provider=openai"})
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
 
+			// Clipboard may fail in headless CI environments; that's a warning, not an error
+			err := cmd.Execute()
+			if err != nil {
+				t.Fatalf("expected no error for --clipboard=%s, got %v", val, err)
+			}
+		})
+	}
+}
+
+func TestNewRootCmd_ClipboardFlag_InvalidValue(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	var errBuf strings.Builder
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--clipboard=invalid", "--file=testdata/diff.txt", "--provider=openai"})
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
 	cmd.SetOut(io.Discard)
-	cmd.SetErr(io.Discard)
+	cmd.SetErr(&errBuf)
 
-	// Clipboard may fail in headless CI environments; that's a warning, not an error
 	err := cmd.Execute()
 	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+		t.Fatalf("expected no error (warning only), got %v", err)
+	}
+	if !strings.Contains(errBuf.String(), "unknown --clipboard value") {
+		t.Errorf("expected warning about unknown clipboard value, got: %s", errBuf.String())
 	}
 }
 
@@ -373,8 +403,15 @@ func TestNewRootCmd_TitleFlag(t *testing.T) {
 	if callCount != 2 {
 		t.Errorf("expected 2 chatFn calls (comment + title), got %d", callCount)
 	}
-	if !strings.Contains(buf.String(), "Add mocked feature") {
+	out := buf.String()
+	if !strings.Contains(out, "Add mocked feature") {
 		t.Error("expected title in output")
+	}
+	if !strings.Contains(out, "── Title ──") {
+		t.Error("expected title section header in output")
+	}
+	if !strings.Contains(out, "── Description ──") {
+		t.Error("expected description section header in output")
 	}
 }
 
@@ -409,8 +446,11 @@ func TestNewRootCmd_TitleFlagJSON(t *testing.T) {
 	if result["title"] != "Add mocked feature" {
 		t.Errorf("expected title 'Add mocked feature', got %q", result["title"])
 	}
+	if result["description"] != "mocked comment" {
+		t.Errorf("expected description 'mocked comment', got %q", result["description"])
+	}
 	if result["comment"] != "mocked comment" {
-		t.Errorf("expected comment 'mocked comment', got %q", result["comment"])
+		t.Errorf("expected comment 'mocked comment' (backwards compat), got %q", result["comment"])
 	}
 }
 
@@ -474,11 +514,17 @@ func TestNewRootCmd_FormatJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(buf.String()), &result); err != nil {
 		t.Fatalf("expected valid JSON output, got error: %v\noutput: %s", err, buf.String())
 	}
+	if result["description"] != "mocked comment" {
+		t.Errorf("expected description 'mocked comment', got %q", result["description"])
+	}
 	if result["comment"] != "mocked comment" {
-		t.Errorf("expected comment 'mocked comment', got %q", result["comment"])
+		t.Errorf("expected comment 'mocked comment' (backwards compat), got %q", result["comment"])
 	}
 	if result["provider"] == "" {
 		t.Error("expected non-empty provider in JSON output")
+	}
+	if _, ok := result["title"]; !ok {
+		t.Error("expected title field present in JSON output")
 	}
 }
 
@@ -545,8 +591,12 @@ func TestStreaming_NonTTYUsesBuffered(t *testing.T) {
 	if called != 1 {
 		t.Errorf("expected chatFn called once, got %d", called)
 	}
-	if !strings.Contains(buf.String(), "buffered comment") {
-		t.Errorf("expected buffered comment in output, got: %s", buf.String())
+	out := buf.String()
+	if !strings.Contains(out, "buffered comment") {
+		t.Errorf("expected buffered comment in output, got: %s", out)
+	}
+	if !strings.Contains(out, "── Description ──") {
+		t.Errorf("expected description section header in output, got: %s", out)
 	}
 }
 
@@ -712,5 +762,216 @@ func TestNewRootCmd_MissingGeminiKey(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "missing Gemini API key") {
 		t.Fatalf("expected missing API key error, got %v", err)
+	}
+}
+
+func TestVerboseFlag_BasicOutput(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var errBuf strings.Builder
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--verbose", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(&errBuf)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	stderr := errBuf.String()
+	checks := []string{
+		"[debug] config:",
+		"provider=openai",
+		"[debug] diff: source=",
+		"[debug] diff: lines before truncation=",
+		"[debug] template:",
+		"[debug] streaming:",
+		"[debug] output:",
+	}
+	for _, want := range checks {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("expected stderr to contain %q\nfull stderr:\n%s", want, stderr)
+		}
+	}
+}
+
+func TestVerboseFlag_NoOutputWithoutFlag(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var errBuf strings.Builder
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(&errBuf)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if strings.Contains(errBuf.String(), "[debug]") {
+		t.Errorf("expected no debug output without --verbose, got:\n%s", errBuf.String())
+	}
+}
+
+func TestVerboseFlag_SmartChunk(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var errBuf strings.Builder
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--verbose", "--smart-chunk", "--file=testdata/multiple-files.diff", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(&errBuf)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	stderr := errBuf.String()
+	if !strings.Contains(stderr, "[debug] smart-chunk:") {
+		t.Errorf("expected smart-chunk debug lines, got:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "files=2") {
+		t.Errorf("expected files=2 in smart-chunk debug, got:\n%s", stderr)
+	}
+}
+
+func TestVerboseFlag_DoesNotInterfereWithDebugFlag(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var outBuf, errBuf strings.Builder
+	cmd := newRootCmd(func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		t.Fatal("chatFn should not be called in --debug mode")
+		return "", nil
+	})
+	cmd.SetArgs([]string{"--debug", "--verbose", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(&outBuf)
+	cmd.SetErr(&errBuf)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if !strings.Contains(outBuf.String(), "Token & Cost Estimation:") {
+		t.Errorf("expected token estimation output on stdout, got:\n%s", outBuf.String())
+	}
+	if !strings.Contains(errBuf.String(), "[debug] config:") {
+		t.Errorf("expected verbose debug lines on stderr, got:\n%s", errBuf.String())
+	}
+}
+
+func TestVerboseFlag_ConfigFilePath(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	// Point HOME at a tempdir so no real config file is found.
+	t.Setenv("HOME", t.TempDir())
+
+	var errBuf strings.Builder
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--verbose", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(&errBuf)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if !strings.Contains(errBuf.String(), "file=(none)") {
+		t.Errorf("expected config file=(none) in debug output, got:\n%s", errBuf.String())
+	}
+}
+
+func TestVerboseFlag_ResponseTiming(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var errBuf strings.Builder
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--verbose", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(&errBuf)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	stderr := errBuf.String()
+	for _, want := range []string{"[debug] api:", "ms", "chars=", "lines="} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("expected stderr to contain %q\nfull stderr:\n%s", want, stderr)
+		}
+	}
+}
+
+func TestVerboseFlag_DiffBytes(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var errBuf strings.Builder
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--verbose", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(&errBuf)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if !strings.Contains(errBuf.String(), "bytes=") {
+		t.Errorf("expected bytes= in diff source debug line, got:\n%s", errBuf.String())
+	}
+}
+
+func TestNewRootCmd_FormatJSON_AutoTitle(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	callCount := 0
+	trackingFn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
+		callCount++
+		if callCount == 1 {
+			return "mocked description", nil
+		}
+		return "Add mocked feature", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(trackingFn)
+	// Note: no --title flag — title is implied by --format=json
+	cmd.SetArgs([]string{"--format=json", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if callCount != 2 {
+		t.Errorf("expected 2 chatFn calls (description + auto-title), got %d", callCount)
+	}
+
+	var result map[string]string
+	if err := json.Unmarshal([]byte(buf.String()), &result); err != nil {
+		t.Fatalf("expected valid JSON, got: %s", buf.String())
+	}
+	if result["title"] != "Add mocked feature" {
+		t.Errorf("expected auto-generated title 'Add mocked feature', got %q", result["title"])
+	}
+	if result["description"] != "mocked description" {
+		t.Errorf("expected description 'mocked description', got %q", result["description"])
+	}
+	if result["comment"] != "mocked description" {
+		t.Errorf("expected comment 'mocked description' (backwards compat), got %q", result["comment"])
 	}
 }

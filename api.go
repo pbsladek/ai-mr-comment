@@ -164,20 +164,24 @@ func callGemini(ctx context.Context, cfg *Config, systemPrompt, diffContent stri
 func chatCompletions(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
 	switch provider {
 	case OpenAI:
+		debugLog(cfg, "api: calling openai model=%s endpoint=%s mode=buffered", cfg.OpenAIModel, cfg.OpenAIEndpoint)
 		client := openai.NewClient(
 			openaiopt.WithAPIKey(cfg.OpenAIAPIKey),
 			openaiopt.WithBaseURL(cfg.OpenAIEndpoint),
 		)
 		return callOpenAI(ctx, &client, cfg, systemPrompt, diffContent)
 	case Anthropic:
+		debugLog(cfg, "api: calling anthropic model=%s endpoint=%s mode=buffered", cfg.AnthropicModel, cfg.AnthropicEndpoint)
 		client := anthropic.NewClient(
 			anthropicopt.WithAPIKey(cfg.AnthropicAPIKey),
 			anthropicopt.WithBaseURL(cfg.AnthropicEndpoint),
 		)
 		return callAnthropic(ctx, &client, cfg, systemPrompt, diffContent)
 	case Ollama:
+		debugLog(cfg, "api: calling ollama model=%s endpoint=%s mode=buffered", cfg.OllamaModel, cfg.OllamaEndpoint)
 		return callOllama(ctx, cfg, systemPrompt, diffContent)
 	case Gemini:
+		debugLog(cfg, "api: calling gemini model=%s mode=buffered", cfg.GeminiModel)
 		return callGemini(ctx, cfg, systemPrompt, diffContent)
 	default:
 		return "", errors.New("unsupported provider")
@@ -190,20 +194,24 @@ func chatCompletions(ctx context.Context, cfg *Config, provider ApiProvider, sys
 func streamToWriter(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string, w io.Writer) (string, error) {
 	switch provider {
 	case OpenAI:
+		debugLog(cfg, "api: calling openai model=%s endpoint=%s mode=stream", cfg.OpenAIModel, cfg.OpenAIEndpoint)
 		client := openai.NewClient(
 			openaiopt.WithAPIKey(cfg.OpenAIAPIKey),
 			openaiopt.WithBaseURL(cfg.OpenAIEndpoint),
 		)
 		return streamOpenAI(ctx, &client, cfg, systemPrompt, diffContent, w)
 	case Anthropic:
+		debugLog(cfg, "api: calling anthropic model=%s endpoint=%s mode=stream", cfg.AnthropicModel, cfg.AnthropicEndpoint)
 		client := anthropic.NewClient(
 			anthropicopt.WithAPIKey(cfg.AnthropicAPIKey),
 			anthropicopt.WithBaseURL(cfg.AnthropicEndpoint),
 		)
 		return streamAnthropic(ctx, &client, cfg, systemPrompt, diffContent, w)
 	case Ollama:
+		debugLog(cfg, "api: calling ollama model=%s endpoint=%s mode=stream", cfg.OllamaModel, cfg.OllamaEndpoint)
 		return streamOllama(ctx, cfg, systemPrompt, diffContent, w)
 	case Gemini:
+		debugLog(cfg, "api: calling gemini model=%s mode=stream", cfg.GeminiModel)
 		return streamGemini(ctx, cfg, systemPrompt, diffContent, w)
 	default:
 		return "", errors.New("unsupported provider")

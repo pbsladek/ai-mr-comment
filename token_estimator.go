@@ -98,9 +98,16 @@ func EstimateCost(model string, inputTokens int32) float64 {
 		"gpt-4-turbo":       {Input: 10.00, Output: 30.00},
 		"gpt-3.5-turbo":     {Input: 0.50, Output: 1.50},
 
-		// Anthropic
-		"claude-3-5-sonnet-20240620": {Input: 3.00, Output: 15.00},
+		// Anthropic (current)
+		"claude-opus-4-6":            {Input: 5.00, Output: 25.00},
+		"claude-sonnet-4-6":          {Input: 3.00, Output: 15.00},
+		"claude-haiku-4-5-20251001":  {Input: 1.00, Output: 5.00},
+		"claude-sonnet-4-5-20250929": {Input: 3.00, Output: 15.00},
+		"claude-opus-4-5-20251101":   {Input: 5.00, Output: 25.00},
+		"claude-sonnet-4-20250514":   {Input: 3.00, Output: 15.00},
+		// Anthropic (legacy)
 		"claude-3-7-sonnet-20250219": {Input: 3.00, Output: 15.00},
+		"claude-3-5-sonnet-20240620": {Input: 3.00, Output: 15.00},
 		"claude-3-opus-20240229":     {Input: 15.00, Output: 75.00},
 		"claude-3-sonnet-20240229":   {Input: 3.00, Output: 15.00},
 		"claude-3-haiku-20240307":    {Input: 0.25, Output: 1.25},
@@ -123,6 +130,16 @@ func EstimateCost(model string, inputTokens int32) float64 {
 	}
 	if strings.Contains(model, "gpt-4o") {
 		return float64(inputTokens) / 1_000_000 * 2.50
+	}
+	// Claude 4.x sonnet / sonnet-4-5 / sonnet-4-6 aliases
+	if strings.Contains(model, "claude-sonnet") || strings.Contains(model, "claude-opus-4") {
+		if strings.Contains(model, "opus") {
+			return float64(inputTokens) / 1_000_000 * 5.00
+		}
+		return float64(inputTokens) / 1_000_000 * 3.00
+	}
+	if strings.Contains(model, "claude-haiku") {
+		return float64(inputTokens) / 1_000_000 * 1.00
 	}
 	if strings.Contains(model, "claude-3-5") || strings.Contains(model, "claude-3-7") {
 		return float64(inputTokens) / 1_000_000 * 3.00

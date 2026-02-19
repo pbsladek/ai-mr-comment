@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/spf13/viper"
 )
@@ -39,6 +40,14 @@ type Config struct {
 	OllamaEndpoint    string      `mapstructure:"ollama_endpoint"`
 	Provider          ApiProvider `mapstructure:"provider"`
 	Template          string      `mapstructure:"template"`
+
+	// DebugWriter is the output destination for verbose debug messages.
+	// Nil when verbose mode is disabled. Set by the CLI after config load; never read from TOML.
+	DebugWriter io.Writer
+
+	// ConfigFile is the path of the TOML config file that was loaded, or "" if none was found.
+	// Set by loadConfigWith; never read from TOML.
+	ConfigFile string
 }
 
 // loadConfig reads configuration from ~/.ai-mr-comment.toml (or the current
@@ -80,9 +89,9 @@ func newViperFromFile(path string) *viper.Viper {
 func loadConfigWith(v *viper.Viper) (*Config, error) {
 	v.SetDefault("provider", OpenAI)
 	v.SetDefault("openai_model", "gpt-4o-mini")
-	v.SetDefault("openai_endpoint", "https://api.openai.com/v1/chat/completions")
-	v.SetDefault("anthropic_model", "claude-3-5-sonnet-20240620")
-	v.SetDefault("anthropic_endpoint", "https://api.anthropic.com/v1/messages")
+	v.SetDefault("openai_endpoint", "https://api.openai.com/v1/")
+	v.SetDefault("anthropic_model", "claude-sonnet-4-5")
+	v.SetDefault("anthropic_endpoint", "https://api.anthropic.com")
 	v.SetDefault("ollama_model", "llama3")
 	v.SetDefault("ollama_endpoint", "http://localhost:11434/api/generate")
 	v.SetDefault("gemini_model", "gemini-2.5-flash")
@@ -104,6 +113,7 @@ func loadConfigWith(v *viper.Viper) (*Config, error) {
 	if err := v.UnmarshalExact(cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
+	cfg.ConfigFile = v.ConfigFileUsed()
 
 	return cfg, nil
 }
