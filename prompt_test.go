@@ -11,8 +11,8 @@ func TestNewPromptTemplate_Default(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(prompt, "MR/PR Title:") {
-		t.Error("default template should contain MR/PR Title:")
+	if !strings.Contains(prompt, "## Key Changes") {
+		t.Error("default template should contain ## Key Changes")
 	}
 }
 

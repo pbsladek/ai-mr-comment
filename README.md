@@ -14,7 +14,7 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 - Staged-only diff (`--staged`) for reviewing changes before committing
 - Exclude files from the diff by glob pattern (`--exclude`)
 - Smart chunking (`--smart-chunk`) for large diffs: summarizes each file, then synthesizes a final comment
-- Optional MR/PR title generation (`--title`) alongside the comment
+- Optional MR/PR title generation (`--title`) alongside the comment, printed as a distinct section
 - **Generate comments directly from a GitHub PR or GitLab MR URL** (`--pr`) — no local checkout needed
 - Supports public **github.com**, **GitHub Enterprise**, public **gitlab.com**, and **self-hosted GitLab** instances
 - Supports OpenAI, Anthropic (Claude), Google Gemini, and Ollama APIs
@@ -22,8 +22,9 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 - Multiple prompt styles (Conventional, Technical, User-Focused)
 - Configuration file support (`~/.ai-mr-comment.toml`)
 - Environment variable configuration
-- Outputs to console, a file (`--output`), or the system clipboard (`--clipboard`)
-- Structured JSON output for scripting and CI (`--format json`)
+- Outputs to console, a file (`--output`), or the system clipboard (`--clipboard=title|description|all`)
+- Structured JSON output for scripting and CI (`--format json`) — always includes `title` and `description` fields
+- Verbose debug logging to stderr (`--verbose`) — API timing, diff stats, config details
 - Live streaming output to the terminal — tokens appear as they are generated
 - Bootstrap a config file with `init-config` (never edit TOML by hand again)
 - Shell completions for bash, zsh, fish, and PowerShell (`completion` subcommand)
@@ -86,12 +87,12 @@ gemini_model = "gemini-2.5-flash"
 # === OpenAI Settings ===
 openai_api_key = "xxxx"
 openai_model = "gpt-4o-mini"
-openai_endpoint = "https://api.openai.com/v1/chat/completions"
+openai_endpoint = "https://api.openai.com/v1/"
 
 # === Anthropic Settings ===
 anthropic_api_key = "xxxx"
-anthropic_model = "claude-3-5-sonnet-20240620"
-anthropic_endpoint = "https://api.anthropic.com/v1/messages"
+anthropic_model = "claude-sonnet-4-5"
+anthropic_endpoint = "https://api.anthropic.com"
 
 # === Ollama Settings ===
 ollama_model = "llama3"
@@ -146,16 +147,26 @@ GITLAB_BASE_URL=https://gitlab.mycompany.com \
   ai-mr-comment --pr https://gitlab.mycompany.com/group/project/-/merge_requests/5
 
 # Output structured JSON (useful for CI/scripting)
+# Always includes title, description, provider, and model fields
 ai-mr-comment --format json
 
-# Generate a title and comment together
+# Generate a title and comment together (shown as separate sections)
 ai-mr-comment --title
 
-# Generate title + comment as JSON
-ai-mr-comment --title --format json
+# Generate title + comment as JSON (--format=json implies title generation)
+ai-mr-comment --format json
 
-# Copy the output directly to the clipboard
-ai-mr-comment --clipboard
+# Copy the description to clipboard
+ai-mr-comment --clipboard=description
+
+# Copy the title to clipboard
+ai-mr-comment --title --clipboard=title
+
+# Copy title and description to clipboard
+ai-mr-comment --title --clipboard=all
+
+# Enable verbose debug logging to stderr (API timing, diff stats, config)
+ai-mr-comment --verbose
 
 # Show token and cost estimation without calling the API
 ai-mr-comment --debug
@@ -175,14 +186,15 @@ ai-mr-comment init-config
 - `--staged`: Diff staged changes only (`git diff --cached`); mutually exclusive with `--commit`
 - `--exclude <PATTERN>`: Exclude files matching glob pattern (e.g. `vendor/**`, `*.sum`). Can be repeated.
 - `--smart-chunk`: Split large diffs by file, summarize each, then synthesize a final comment
-- `--title`: Generate a concise MR/PR title in addition to the comment; included as `"title"` in JSON output
+- `--title`: Generate a concise MR/PR title alongside the comment; printed as a distinct `── Title ──` section in text mode. When `--format=json` is used, title is always generated automatically (no need for `--title`)
 - `--file <FILE>`: Read diff from file instead of git
 - `--output <FILE>`: Write output to file instead of stdout
-- `--clipboard`: Copy output to system clipboard (in addition to stdout)
-- `--format <FORMAT>`: Output format — `text` (default) or `json`
+- `--clipboard <WHAT>`: Copy to system clipboard — `title`, `description` (or `comment`), or `all` (title + description separated by a blank line)
+- `--format <FORMAT>`: Output format — `text` (default) or `json`. JSON always includes `title`, `description`, `comment`, `provider`, and `model` fields
 - `--provider <PROVIDER>`: Provider (openai, anthropic, gemini, ollama)
 - `-t, --template <NAME>`: Template style (default, conventional, technical, user-focused)
-- `--debug`: Debug mode - show precise token usage and cost estimation
+- `--debug`: Show precise token usage and cost estimation without calling the generation API
+- `--verbose`: Print detailed debug lines to stderr — config file path, diff stats, template source, streaming decision, and per-API-call timing and response size
 - `-h, --help`: Print help
 
 ### Subcommands
@@ -255,9 +267,15 @@ When running with the `--debug` flag, the tool provides a detailed breakdown of 
 
 ## Example Output
 
-```markdown
-MR Title: Implement user authentication system
-MR Summary: This change adds a complete user authentication system including secure password hashing and JWT-based session management.
+**Text mode (`--title`):**
+
+```
+── Title ────────────────────────────────
+
+feat: Add user authentication system
+
+
+── Description ──────────────────────────
 
 ## Key Changes
 
@@ -269,7 +287,22 @@ MR Summary: This change adds a complete user authentication system including sec
 ## Why These Changes
 
 Provides a secure foundation for user identity, allowing protected access to API resources.
+
 ```
+
+**JSON mode (`--format json`):**
+
+```json
+{
+  "title": "feat: Add user authentication system",
+  "description": "## Key Changes\n\n- Added user model...",
+  "comment": "## Key Changes\n\n- Added user model...",
+  "provider": "openai",
+  "model": "gpt-4o-mini"
+}
+```
+
+`description` and `comment` carry the same value; `comment` is kept for backwards compatibility.
 
 ## Development
 

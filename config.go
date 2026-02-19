@@ -89,9 +89,9 @@ func newViperFromFile(path string) *viper.Viper {
 func loadConfigWith(v *viper.Viper) (*Config, error) {
 	v.SetDefault("provider", OpenAI)
 	v.SetDefault("openai_model", "gpt-4o-mini")
-	v.SetDefault("openai_endpoint", "https://api.openai.com/v1/chat/completions")
-	v.SetDefault("anthropic_model", "claude-3-5-sonnet-20240620")
-	v.SetDefault("anthropic_endpoint", "https://api.anthropic.com/v1/messages")
+	v.SetDefault("openai_endpoint", "https://api.openai.com/v1/")
+	v.SetDefault("anthropic_model", "claude-sonnet-4-5")
+	v.SetDefault("anthropic_endpoint", "https://api.anthropic.com")
 	v.SetDefault("ollama_model", "llama3")
 	v.SetDefault("ollama_endpoint", "http://localhost:11434/api/generate")
 	v.SetDefault("gemini_model", "gemini-2.5-flash")

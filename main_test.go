@@ -332,18 +332,48 @@ func TestNewRootCmd_StagedAndCommitMutuallyExclusive(t *testing.T) {
 
 func TestNewRootCmd_ClipboardFlag(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "dummy")
-	cmd := newRootCmd(dummyChatFn)
-	cmd.SetArgs([]string{"--clipboard", "--file=testdata/diff.txt", "--provider=openai"})
+	for _, val := range []string{"description", "comment", "title", "all"} {
+		t.Run(val, func(t *testing.T) {
+			callCount := 0
+			fn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
+				callCount++
+				if callCount == 1 {
+					return "mocked comment", nil
+				}
+				return "mocked title", nil
+			}
+			cmd := newRootCmd(fn)
+			cmd.SetArgs([]string{"--clipboard=" + val, "--title", "--file=testdata/diff.txt", "--provider=openai"})
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
 
+			// Clipboard may fail in headless CI environments; that's a warning, not an error
+			err := cmd.Execute()
+			if err != nil {
+				t.Fatalf("expected no error for --clipboard=%s, got %v", val, err)
+			}
+		})
+	}
+}
+
+func TestNewRootCmd_ClipboardFlag_InvalidValue(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	var errBuf strings.Builder
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--clipboard=invalid", "--file=testdata/diff.txt", "--provider=openai"})
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
 	cmd.SetOut(io.Discard)
-	cmd.SetErr(io.Discard)
+	cmd.SetErr(&errBuf)
 
-	// Clipboard may fail in headless CI environments; that's a warning, not an error
 	err := cmd.Execute()
 	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+		t.Fatalf("expected no error (warning only), got %v", err)
+	}
+	if !strings.Contains(errBuf.String(), "unknown --clipboard value") {
+		t.Errorf("expected warning about unknown clipboard value, got: %s", errBuf.String())
 	}
 }
 
@@ -373,8 +403,15 @@ func TestNewRootCmd_TitleFlag(t *testing.T) {
 	if callCount != 2 {
 		t.Errorf("expected 2 chatFn calls (comment + title), got %d", callCount)
 	}
-	if !strings.Contains(buf.String(), "Add mocked feature") {
+	out := buf.String()
+	if !strings.Contains(out, "Add mocked feature") {
 		t.Error("expected title in output")
+	}
+	if !strings.Contains(out, "── Title ──") {
+		t.Error("expected title section header in output")
+	}
+	if !strings.Contains(out, "── Description ──") {
+		t.Error("expected description section header in output")
 	}
 }
 
@@ -554,8 +591,12 @@ func TestStreaming_NonTTYUsesBuffered(t *testing.T) {
 	if called != 1 {
 		t.Errorf("expected chatFn called once, got %d", called)
 	}
-	if !strings.Contains(buf.String(), "buffered comment") {
-		t.Errorf("expected buffered comment in output, got: %s", buf.String())
+	out := buf.String()
+	if !strings.Contains(out, "buffered comment") {
+		t.Errorf("expected buffered comment in output, got: %s", out)
+	}
+	if !strings.Contains(out, "── Description ──") {
+		t.Errorf("expected description section header in output, got: %s", out)
 	}
 }
 

@@ -27,8 +27,8 @@ func main() {
 // newRootCmd builds the root cobra command, wiring flags to the provided chatFn.
 // Accepting chatFn as a parameter allows tests to inject a mock without real API calls.
 func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
-	var commit, diffFilePath, outputPath, provider, templateName, format, prURL string
-	var debug, staged, clipboardFlag, smartChunk, generateTitle, verbose bool
+	var commit, diffFilePath, outputPath, provider, templateName, format, prURL, clipboardFlag string
+	var debug, staged, smartChunk, generateTitle, verbose bool
 	var exclude []string
 
 	rootCmd := &cobra.Command{
@@ -255,8 +255,8 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			dest := "stdout"
 			if outputPath != "" {
 				dest = "file: " + outputPath
-			} else if clipboardFlag {
-				dest = "stdout+clipboard"
+			} else if clipboardFlag != "" {
+				dest = "stdout+clipboard:" + clipboardFlag
 			}
 			debugLog(cfg, "output: format=%s destination=%s", format, dest)
 
@@ -282,26 +282,49 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				}
 			} else if streamedOK {
 				// Streaming succeeded: body was already written token-by-token.
-				// Print a trailing newline and the title if generated.
 				_, _ = fmt.Fprintln(out)
 				if title != "" {
+					_, _ = fmt.Fprintln(out)
+					_, _ = fmt.Fprintln(out, "── Title ────────────────────────────────")
+					_, _ = fmt.Fprintln(out)
 					_, _ = fmt.Fprintln(out, title)
 					_, _ = fmt.Fprintln(out)
 				}
 			} else {
-				_, _ = fmt.Fprintln(out)
-				_, _ = fmt.Fprintln(out, "----------------------------------------")
-				_, _ = fmt.Fprintln(out)
 				if title != "" {
+					_, _ = fmt.Fprintln(out)
+					_, _ = fmt.Fprintln(out, "── Title ────────────────────────────────")
+					_, _ = fmt.Fprintln(out)
 					_, _ = fmt.Fprintln(out, title)
 					_, _ = fmt.Fprintln(out)
 				}
+				_, _ = fmt.Fprintln(out)
+				_, _ = fmt.Fprintln(out, "── Description ──────────────────────────")
+				_, _ = fmt.Fprintln(out)
 				_, _ = fmt.Fprintln(out, comment)
+				_, _ = fmt.Fprintln(out)
 			}
 
-			if clipboardFlag {
-				if err := clipboard.WriteAll(comment); err != nil {
-					_, _ = fmt.Fprintf(os.Stderr, "Warning: could not copy to clipboard: %v\n", err)
+			if clipboardFlag != "" {
+				var clipContent string
+				switch clipboardFlag {
+				case "title":
+					clipContent = title
+				case "description", "comment":
+					clipContent = comment
+				case "all":
+					if title != "" {
+						clipContent = title + "\n\n" + comment
+					} else {
+						clipContent = comment
+					}
+				default:
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: unknown --clipboard value %q (use title, description, or all)\n", clipboardFlag)
+				}
+				if clipContent != "" {
+					if err := clipboard.WriteAll(clipContent); err != nil {
+						_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not copy to clipboard: %v\n", err)
+					}
 				}
 			}
 
@@ -321,7 +344,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().BoolVar(&debug, "debug", false, "Estimate token usage")
 	rootCmd.Flags().BoolVar(&verbose, "verbose", false, "Enable verbose debug logging to stderr")
 	rootCmd.Flags().BoolVar(&staged, "staged", false, "Diff staged changes only (git diff --cached)")
-	rootCmd.Flags().BoolVar(&clipboardFlag, "clipboard", false, "Copy output to clipboard")
+	rootCmd.Flags().StringVar(&clipboardFlag, "clipboard", "", "Copy to clipboard: title, description, or all")
 	rootCmd.Flags().StringArrayVar(&exclude, "exclude", nil, "Exclude files matching pattern (e.g. vendor/**, *.sum). Can be repeated.")
 	rootCmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")
 	rootCmd.Flags().BoolVar(&smartChunk, "smart-chunk", false, "Split large diffs by file, summarize each, then combine")
@@ -367,12 +390,12 @@ template = "default"
 # --- OpenAI ---
 # openai_api_key = ""   # or set OPENAI_API_KEY env var
 openai_model    = "gpt-4o-mini"
-openai_endpoint = "https://api.openai.com/v1/chat/completions"
+openai_endpoint = "https://api.openai.com/v1/"
 
 # --- Anthropic ---
 # anthropic_api_key = ""   # or set ANTHROPIC_API_KEY env var
-anthropic_model    = "claude-3-5-sonnet-20240620"
-anthropic_endpoint = "https://api.anthropic.com/v1/messages"
+anthropic_model    = "claude-sonnet-4-5"
+anthropic_endpoint = "https://api.anthropic.com"
 
 # --- Google Gemini ---
 # gemini_api_key = ""   # or set GEMINI_API_KEY env var
