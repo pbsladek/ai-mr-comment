@@ -17,6 +17,17 @@ Output only the title text — no explanation, no punctuation at the end, no quo
 Keep it under 72 characters. Use the imperative mood (e.g. "Add", "Fix", "Refactor").
 If the active template follows Conventional Commits style, prefix with the appropriate type (feat, fix, chore, etc.).`
 
+// commitMsgPrompt is the system prompt used when --commit-msg is set. It
+// instructs the model to produce a single conventional-style commit message
+// with no extra text, suitable for use in git commit -m "...".
+const commitMsgPrompt = `Generate a single-line git commit message for the following diff.
+Output only the commit message — no explanation, no quotes, no trailing punctuation.
+Keep it under 72 characters. Use the imperative mood (e.g. "Add", "Fix", "Refactor").
+Follow Conventional Commits format: type(scope): description
+Valid types: feat, fix, docs, style, refactor, test, chore, perf, ci, build
+The scope is optional; omit it if it would be too broad or redundant.
+Example: feat(auth): add JWT refresh token support`
+
 // NewPromptTemplate returns the system prompt for the given template name.
 // For "default" it returns the embedded template. For any other name it
 // searches ./templates/<name>.tmpl, ./<name>.tmpl, and

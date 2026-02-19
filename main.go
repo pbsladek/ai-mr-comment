@@ -27,8 +27,8 @@ func main() {
 // newRootCmd builds the root cobra command, wiring flags to the provided chatFn.
 // Accepting chatFn as a parameter allows tests to inject a mock without real API calls.
 func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
-	var commit, diffFilePath, outputPath, provider, templateName, format, prURL, clipboardFlag string
-	var debug, staged, smartChunk, generateTitle, verbose bool
+	var commit, diffFilePath, outputPath, provider, modelOverride, templateName, format, prURL, clipboardFlag string
+	var debug, staged, smartChunk, generateTitle, generateCommitMsg, verbose bool
 	var exclude []string
 
 	rootCmd := &cobra.Command{
@@ -40,6 +40,9 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			cfg, _ := loadConfig()
 			if cmd.Flags().Changed("provider") {
 				cfg.Provider = ApiProvider(provider)
+			}
+			if cmd.Flags().Changed("model") {
+				setModelOverride(cfg, modelOverride)
 			}
 			if cmd.Flags().Changed("template") {
 				cfg.Template = templateName
@@ -75,6 +78,9 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			}
 			if prURL != "" && (staged || commit != "" || diffFilePath != "") {
 				return errors.New("--pr cannot be combined with --staged, --commit, or --file")
+			}
+			if generateCommitMsg && generateTitle {
+				return errors.New("--commit-msg and --title cannot be used together")
 			}
 
 			if format != "text" && format != "json" {
@@ -122,6 +128,17 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				return fmt.Errorf("no diff found. Make sure you have uncommitted changes or specify a commit range with --commit")
 			}
 			debugLog(cfg, "diff: source=%s bytes=%d lines=%d", diffSource, len(diffContent), len(strings.Split(diffContent, "\n")))
+
+			// Prepend the current branch name when diffing a local git repo.
+			// This lets the AI and templates reference the branch/ticket number
+			// (e.g. "feat/ABC-123-add-login") for linking in systems like Jira.
+			// Skipped for --file and --pr since those have no local branch context.
+			if prURL == "" && diffFilePath == "" {
+				if branch, branchErr := getCurrentBranch(); branchErr == nil && branch != "" {
+					diffContent = "Branch: " + branch + "\n\n" + diffContent
+					debugLog(cfg, "branch: name=%s", branch)
+				}
+			}
 
 			out := cmd.OutOrStdout()
 			rawLines := len(strings.Split(diffContent, "\n"))
@@ -179,7 +196,21 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			var streamedOK bool
 
 			var comment string
-			if smartChunk {
+			var commitMessage string
+			if generateCommitMsg {
+				// Skip description generation; produce only a commit message.
+				debugLog(cfg, "commit-msg: generating commit message with separate API call")
+				commitMessage, err = timedCall(cfg, "commit-msg", func() (string, error) {
+					return chatFn(cmd.Context(), cfg, cfg.Provider, commitMsgPrompt, diffContent)
+				})
+				if err != nil {
+					if cfg.Provider == Ollama && strings.Contains(err.Error(), "connection refused") {
+						return fmt.Errorf("failed to connect to Ollama at %s.\nMake sure Ollama is running (try 'ollama serve') or check your configuration", cfg.OllamaEndpoint)
+					}
+					return err
+				}
+				commitMessage = strings.TrimSpace(commitMessage)
+			} else if smartChunk {
 				chunks := splitDiffByFile(diffContent)
 				debugLog(cfg, "smart-chunk: files=%d", len(chunks))
 				if len(chunks) > 1 {
@@ -228,7 +259,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 					return chatFn(cmd.Context(), cfg, cfg.Provider, systemPrompt, diffContent)
 				})
 			}
-			if err != nil {
+			if !generateCommitMsg && err != nil {
 				if cfg.Provider == Ollama && strings.Contains(err.Error(), "connection refused") {
 					return fmt.Errorf("failed to connect to Ollama at %s.\nMake sure Ollama is running (try 'ollama serve') or check your configuration", cfg.OllamaEndpoint)
 				}
@@ -237,8 +268,9 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 
 			// Generate a title when explicitly requested (--title) or when producing
 			// JSON output for pipeline consumers (--format=json implies title).
+			// Skip title generation entirely when --commit-msg is active.
 			var title string
-			if generateTitle || format == "json" {
+			if (generateTitle || format == "json") && !generateCommitMsg {
 				debugLog(cfg, "title: generating title with separate API call")
 				title, err = timedCall(cfg, "title", func() (string, error) {
 					return chatFn(cmd.Context(), cfg, cfg.Provider, titlePrompt, diffContent)
@@ -262,24 +294,39 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 
 			if format == "json" {
 				// outputJSON is the structured response emitted when --format=json is set.
-				// title and description are the primary fields for pipeline consumers.
+				// For --commit-msg: only commit_message, provider, model are populated.
+				// For normal description: title and description are the primary fields;
 				// comment mirrors description for backwards compatibility.
 				type outputJSON struct {
-					Title       string `json:"title"`
-					Description string `json:"description"`
-					Comment     string `json:"comment"`
-					Provider    string `json:"provider"`
-					Model       string `json:"model"`
+					Title         string `json:"title,omitempty"`
+					Description   string `json:"description,omitempty"`
+					Comment       string `json:"comment,omitempty"`
+					CommitMessage string `json:"commit_message,omitempty"`
+					Provider      string `json:"provider"`
+					Model         string `json:"model"`
 				}
-				if err := json.NewEncoder(out).Encode(outputJSON{
-					Title:       title,
-					Description: comment,
-					Comment:     comment,
-					Provider:    string(cfg.Provider),
-					Model:       getModelName(cfg),
-				}); err != nil {
+				var payload outputJSON
+				if generateCommitMsg {
+					payload = outputJSON{
+						CommitMessage: commitMessage,
+						Provider:      string(cfg.Provider),
+						Model:         getModelName(cfg),
+					}
+				} else {
+					payload = outputJSON{
+						Title:       title,
+						Description: comment,
+						Comment:     comment,
+						Provider:    string(cfg.Provider),
+						Model:       getModelName(cfg),
+					}
+				}
+				if err := json.NewEncoder(out).Encode(payload); err != nil {
 					return err
 				}
+			} else if generateCommitMsg {
+				// --commit-msg text output: just the message, no headers, clean for shell piping.
+				_, _ = fmt.Fprintln(out, commitMessage)
 			} else if streamedOK {
 				// Streaming succeeded: body was already written token-by-token.
 				_, _ = fmt.Fprintln(out)
@@ -312,6 +359,8 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 					clipContent = title
 				case "description", "comment":
 					clipContent = comment
+				case "commit-msg":
+					clipContent = commitMessage
 				case "all":
 					if title != "" {
 						clipContent = title + "\n\n" + comment
@@ -319,7 +368,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 						clipContent = comment
 					}
 				default:
-					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: unknown --clipboard value %q (use title, description, or all)\n", clipboardFlag)
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: unknown --clipboard value %q (use title, description, commit-msg, or all)\n", clipboardFlag)
 				}
 				if clipContent != "" {
 					if err := clipboard.WriteAll(clipContent); err != nil {
@@ -340,6 +389,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().StringVar(&prURL, "pr", "", "GitHub PR or GitLab MR URL (e.g. https://github.com/owner/repo/pull/123 or https://gitlab.com/group/project/-/merge_requests/42)")
 	rootCmd.Flags().StringVar(&outputPath, "output", "", "Output file path")
 	rootCmd.Flags().StringVar(&provider, "provider", "openai", "API provider (openai, anthropic, gemini, ollama)")
+	rootCmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this run (e.g. gpt-4o, claude-opus-4-6, gemini-2.5-flash)")
 	rootCmd.Flags().StringVarP(&templateName, "template", "t", "default", "Prompt template to use (e.g., default, conventional, technical)")
 	rootCmd.Flags().BoolVar(&debug, "debug", false, "Estimate token usage")
 	rootCmd.Flags().BoolVar(&verbose, "verbose", false, "Enable verbose debug logging to stderr")
@@ -349,8 +399,11 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")
 	rootCmd.Flags().BoolVar(&smartChunk, "smart-chunk", false, "Split large diffs by file, summarize each, then combine")
 	rootCmd.Flags().BoolVar(&generateTitle, "title", false, "Generate a concise MR/PR title in addition to the comment")
+	rootCmd.Flags().BoolVar(&generateCommitMsg, "commit-msg", false, "Generate a git commit message instead of a full MR/PR description")
 
 	rootCmd.AddCommand(newInitConfigCmd())
+	rootCmd.AddCommand(newModelsCmd())
+	rootCmd.AddCommand(newQuickCommitCmd(chatFn))
 
 	rootCmd.AddCommand(&cobra.Command{
 		Use:       "completion [bash|zsh|fish|powershell]",
@@ -384,26 +437,32 @@ const defaultConfigTOML = `# ai-mr-comment configuration
 # Default AI provider: openai | anthropic | gemini | ollama
 provider = "openai"
 
-# Default prompt template: default | conventional | technical
+# Default prompt template.
+# Built-in options: default | conventional | technical | user-focused | emoji | sassy | monday
+# You can also create custom templates in ~/.config/ai-mr-comment/templates/<name>.tmpl
 template = "default"
 
 # --- OpenAI ---
 # openai_api_key = ""   # or set OPENAI_API_KEY env var
 openai_model    = "gpt-4o-mini"
 openai_endpoint = "https://api.openai.com/v1/"
+# Other OpenAI models: gpt-4o, gpt-4-turbo, gpt-3.5-turbo
 
 # --- Anthropic ---
 # anthropic_api_key = ""   # or set ANTHROPIC_API_KEY env var
 anthropic_model    = "claude-sonnet-4-5"
 anthropic_endpoint = "https://api.anthropic.com"
+# Other Anthropic models: claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5-20251001
 
 # --- Google Gemini ---
 # gemini_api_key = ""   # or set GEMINI_API_KEY env var
 gemini_model = "gemini-2.5-flash"
+# Other Gemini models: gemini-2.0-flash, gemini-1.5-pro
 
 # --- Ollama (local) ---
 ollama_model    = "llama3"
 ollama_endpoint = "http://localhost:11434/api/generate"
+# Other Ollama models: llama3.1, llama3.2, mistral, codellama, phi3
 
 # --- GitHub / GitHub Enterprise ---
 # github_token = ""    # or set GITHUB_TOKEN env var
@@ -490,4 +549,209 @@ func timedCall(cfg *Config, label string, fn func() (string, error)) (string, er
 		debugLog(cfg, "api: %s failed in %dms: %v", label, elapsed, err)
 	}
 	return result, err
+}
+
+// setModelOverride applies a CLI --model value to the correct provider field in cfg.
+func setModelOverride(cfg *Config, model string) {
+	switch cfg.Provider {
+	case OpenAI:
+		cfg.OpenAIModel = model
+	case Anthropic:
+		cfg.AnthropicModel = model
+	case Gemini:
+		cfg.GeminiModel = model
+	case Ollama:
+		cfg.OllamaModel = model
+	}
+}
+
+// providerModels lists known models for each provider, used by the `models` subcommand.
+var providerModels = map[ApiProvider][]string{
+	OpenAI: {
+		"gpt-4o",
+		"gpt-4o-mini",
+		"gpt-4-turbo",
+		"gpt-3.5-turbo",
+	},
+	Anthropic: {
+		"claude-opus-4-6",
+		"claude-sonnet-4-6",
+		"claude-haiku-4-5-20251001",
+		"claude-sonnet-4-5-20250929",
+		"claude-opus-4-5-20251101",
+		"claude-sonnet-4-20250514",
+		"claude-3-7-sonnet-20250219",
+		"claude-3-haiku-20240307",
+	},
+	Gemini: {
+		"gemini-2.5-flash",
+		"gemini-2.0-flash",
+		"gemini-1.5-pro",
+		"gemini-1.5-flash",
+	},
+	Ollama: {
+		"llama3",
+		"llama3.1",
+		"llama3.2",
+		"mistral",
+		"codellama",
+		"phi3",
+	},
+}
+
+// newModelsCmd returns the models subcommand, which lists known models for the active provider.
+func newModelsCmd() *cobra.Command {
+	var provider string
+
+	cmd := &cobra.Command{
+		Use:   "models",
+		Short: "List available models for a provider",
+		Long:  `Prints the known model names for the given provider. Use --provider to select a provider (defaults to the configured one).`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p := ApiProvider(provider)
+			models, ok := providerModels[p]
+			if !ok {
+				return fmt.Errorf("unknown provider %q: choose from openai, anthropic, gemini, ollama", provider)
+			}
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Models for provider %s:\n\n", p)
+			for _, m := range models {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", m)
+			}
+			_, _ = fmt.Fprintln(cmd.OutOrStdout())
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Use --model <name> to select a model for a run.\n")
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&provider, "provider", "openai", "Provider to list models for (openai, anthropic, gemini, ollama)")
+	return cmd
+}
+
+// newQuickCommitCmd returns a command that stages all changes, generates an
+// AI commit message, commits, and pushes — all in one step.
+func newQuickCommitCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
+	var provider, modelOverride, format string
+	var dryRun, noPush bool
+
+	cmd := &cobra.Command{
+		Use:   "quick-commit",
+		Short: "Stage, AI-commit, and push in one step",
+		Long: `Stages all changes (git add .), generates a conventional commit message
+using AI, commits with that message, and pushes to the current branch's
+remote. Use --dry-run to preview the generated message without committing.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !isGitRepo() {
+				return fmt.Errorf("not a git repository")
+			}
+
+			cfg, _ := loadConfig()
+			if cmd.Flags().Changed("provider") {
+				cfg.Provider = ApiProvider(provider)
+			}
+			if cmd.Flags().Changed("model") {
+				setModelOverride(cfg, modelOverride)
+			}
+
+			branch, err := getCurrentBranch()
+			if err != nil {
+				return fmt.Errorf("could not determine current branch: %w", err)
+			}
+			if branch == "" {
+				return fmt.Errorf("cannot quick-commit in detached HEAD state")
+			}
+
+			out := cmd.OutOrStdout()
+
+			// Stage everything (skipped in dry-run).
+			if !dryRun {
+				_, _ = fmt.Fprintln(out, "Staging all changes (git add .)...")
+				if err := gitAdd(); err != nil {
+					return err
+				}
+			}
+
+			// Get the diff to feed to the AI.
+			// After a real git add the staged diff is the right source.
+			// In dry-run mode nothing was staged, so use the full working-tree diff
+			// (staged + unstaged) so the preview is still meaningful.
+			var diffContent string
+			if dryRun {
+				diffContent, err = getGitDiff("", false, nil)
+			} else {
+				diffContent, err = getGitDiff("", true, nil)
+			}
+			if err != nil {
+				return fmt.Errorf("reading diff: %w", err)
+			}
+			if strings.TrimSpace(diffContent) == "" {
+				return fmt.Errorf("no changes found to generate a commit message for")
+			}
+
+			// Prepend branch name so the AI can reference the ticket key.
+			diffContent = "Branch: " + branch + "\n\n" + diffContent
+			diffContent = processDiff(diffContent, 4000)
+
+			// Generate commit message via AI.
+			commitMessage, err := chatFn(cmd.Context(), cfg, cfg.Provider, commitMsgPrompt, diffContent)
+			if err != nil {
+				return fmt.Errorf("generating commit message: %w", err)
+			}
+			commitMessage = strings.TrimSpace(commitMessage)
+			if commitMessage == "" {
+				return fmt.Errorf("AI returned an empty commit message")
+			}
+
+			if format == "json" {
+				if err := json.NewEncoder(out).Encode(struct {
+					CommitMessage string `json:"commit_message"`
+				}{CommitMessage: commitMessage}); err != nil {
+					return err
+				}
+			} else {
+				_, _ = fmt.Fprintf(out, "%s\n\n", commitMessage)
+			}
+
+			if dryRun {
+				if format != "json" {
+					_, _ = fmt.Fprintln(out, "(dry-run: no changes committed)")
+				}
+				return nil
+			}
+
+			// Commit.
+			if format != "json" {
+				_, _ = fmt.Fprintln(out, "Committing...")
+			}
+			if err := gitCommit(commitMessage); err != nil {
+				return err
+			}
+
+			if noPush {
+				if format != "json" {
+					_, _ = fmt.Fprintln(out, "Done. (skipped push)")
+				}
+				return nil
+			}
+
+			// Push.
+			if format != "json" {
+				_, _ = fmt.Fprintf(out, "Pushing to origin/%s...\n", branch)
+			}
+			if err := gitPush(branch); err != nil {
+				return err
+			}
+
+			if format != "json" {
+				_, _ = fmt.Fprintln(out, "Done.")
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&provider, "provider", "openai", "AI provider to use (openai, anthropic, gemini, ollama)")
+	cmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this run")
+	cmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Generate and print the commit message without staging, committing, or pushing")
+	cmd.Flags().BoolVar(&noPush, "no-push", false, "Commit but skip the push step")
+	return cmd
 }

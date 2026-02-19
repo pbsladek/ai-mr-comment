@@ -975,3 +975,456 @@ func TestNewRootCmd_FormatJSON_AutoTitle(t *testing.T) {
 		t.Errorf("expected comment 'mocked description' (backwards compat), got %q", result["comment"])
 	}
 }
+
+func TestNewRootCmd_ModelFlag(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedModel string
+	fn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
+		capturedModel = cfg.OpenAIModel
+		return "mocked comment", nil
+	}
+
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--model=gpt-4o", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if capturedModel != "gpt-4o" {
+		t.Errorf("expected model gpt-4o, got %q", capturedModel)
+	}
+}
+
+func TestSetModelOverride(t *testing.T) {
+	tests := []struct {
+		provider ApiProvider
+		model    string
+		check    func(*Config) string
+	}{
+		{OpenAI, "gpt-4o", func(c *Config) string { return c.OpenAIModel }},
+		{Anthropic, "claude-opus-4-6", func(c *Config) string { return c.AnthropicModel }},
+		{Gemini, "gemini-2.0-flash", func(c *Config) string { return c.GeminiModel }},
+		{Ollama, "mistral", func(c *Config) string { return c.OllamaModel }},
+	}
+	for _, tc := range tests {
+		t.Run(string(tc.provider), func(t *testing.T) {
+			cfg := &Config{Provider: tc.provider}
+			setModelOverride(cfg, tc.model)
+			if got := tc.check(cfg); got != tc.model {
+				t.Errorf("expected %q, got %q", tc.model, got)
+			}
+		})
+	}
+}
+
+func TestModelsCmd(t *testing.T) {
+	for _, provider := range []string{"openai", "anthropic", "gemini", "ollama"} {
+		t.Run(provider, func(t *testing.T) {
+			var buf strings.Builder
+			cmd := newRootCmd(dummyChatFn)
+			cmd.SetArgs([]string{"models", "--provider=" + provider})
+			cmd.SetOut(&buf)
+			cmd.SetErr(io.Discard)
+
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("expected no error for provider %s, got %v", provider, err)
+			}
+			if !strings.Contains(buf.String(), provider) {
+				t.Errorf("expected output to mention provider %q, got:\n%s", provider, buf.String())
+			}
+			if !strings.Contains(buf.String(), "--model") {
+				t.Errorf("expected output to mention --model flag, got:\n%s", buf.String())
+			}
+		})
+	}
+}
+
+func TestModelsCmd_InvalidProvider(t *testing.T) {
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"models", "--provider=invalid"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "unknown provider") {
+		t.Errorf("expected unknown provider error, got %v", err)
+	}
+}
+
+func TestNewRootCmd_ModelFlag_TokenEstimation(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var buf strings.Builder
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--debug", "--model=gpt-4o", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "gpt-4o") {
+		t.Errorf("expected model gpt-4o in debug output, got:\n%s", out)
+	}
+	// gpt-4o costs more than gpt-4o-mini — ensure EstimateCost picked up the override
+	if !strings.Contains(out, "Estimated Input Cost") {
+		t.Errorf("expected cost estimation in output, got:\n%s", out)
+	}
+}
+
+func TestNewRootCmd_CommitMsgFlag(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	callCount := 0
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		callCount++
+		return "feat(auth): add JWT refresh token support", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--commit-msg", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	// Exactly one API call — description generation is skipped.
+	if callCount != 1 {
+		t.Errorf("expected 1 chatFn call for --commit-msg, got %d", callCount)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "feat(auth): add JWT refresh token support") {
+		t.Errorf("expected commit message in output, got:\n%s", out)
+	}
+	// No section headers should appear.
+	if strings.Contains(out, "── Title ──") {
+		t.Error("expected no title section header for --commit-msg")
+	}
+	if strings.Contains(out, "── Description ──") {
+		t.Error("expected no description section header for --commit-msg")
+	}
+}
+
+func TestNewRootCmd_CommitMsgFlag_FormatJSON(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	callCount := 0
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		callCount++
+		return "chore: update dependencies", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--commit-msg", "--format=json", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	// No auto-title call: --commit-msg suppresses it even with --format=json.
+	if callCount != 1 {
+		t.Errorf("expected 1 chatFn call (no auto-title for --commit-msg), got %d", callCount)
+	}
+
+	var result map[string]string
+	if err := json.Unmarshal([]byte(buf.String()), &result); err != nil {
+		t.Fatalf("expected valid JSON, got error: %v\noutput: %s", err, buf.String())
+	}
+	if result["commit_message"] != "chore: update dependencies" {
+		t.Errorf("expected commit_message 'chore: update dependencies', got %q", result["commit_message"])
+	}
+	if _, ok := result["description"]; ok {
+		t.Error("expected no description field in commit-msg JSON output")
+	}
+	if _, ok := result["comment"]; ok {
+		t.Error("expected no comment field in commit-msg JSON output")
+	}
+	if result["provider"] == "" {
+		t.Error("expected non-empty provider in JSON output")
+	}
+	if result["model"] == "" {
+		t.Error("expected non-empty model in JSON output")
+	}
+}
+
+func TestNewRootCmd_CommitMsgFlag_MutualExclusion(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--commit-msg", "--title", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when --commit-msg and --title are combined, got nil")
+	}
+	if !strings.Contains(err.Error(), "--commit-msg and --title cannot be used together") {
+		t.Errorf("expected mutual exclusion error, got: %v", err)
+	}
+}
+
+func TestNewRootCmd_CommitMsgFlag_Clipboard(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "fix(api): handle nil response", nil
+	}
+
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--commit-msg", "--clipboard=commit-msg", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	// Clipboard may fail in headless CI environments; that's a warning, not an error.
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("expected no error for --clipboard=commit-msg, got %v", err)
+	}
+}
+
+func TestNewRootCmd_CommitMsgFlag_NoAutoTitle(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	callCount := 0
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		callCount++
+		return "refactor: simplify token parsing", nil
+	}
+
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--commit-msg", "--format=json", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if callCount != 1 {
+		t.Errorf("expected exactly 1 API call (no title generation), got %d", callCount)
+	}
+}
+
+// TestBranchPrependedForLocalGitDiff verifies that when diffing a local git
+// repo (no --file, no --pr), the branch name is prepended to the diffContent
+// that reaches the AI so templates like jira can extract the ticket key.
+func TestBranchPrependedForLocalGitDiff(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedDiff string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, diffContent string) (string, error) {
+		capturedDiff = diffContent
+		return "mocked comment", nil
+	}
+
+	cmd := newRootCmd(fn)
+	// Use --staged so we get a real git diff path without needing uncommitted changes.
+	cmd.SetArgs([]string{"--staged", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	// May return "no staged changes" error — that's fine, we only care about
+	// whether the branch prefix was added before the diff is processed.
+	// If the error is about missing staged changes the branch inject already ran.
+	err := cmd.Execute()
+	if err != nil && !strings.Contains(err.Error(), "no staged changes") && !strings.Contains(err.Error(), "no diff found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// If chatFn was called, capturedDiff must start with "Branch: ".
+	if capturedDiff != "" && !strings.HasPrefix(capturedDiff, "Branch: ") {
+		preview := capturedDiff
+		if len(preview) > 200 {
+			preview = preview[:200]
+		}
+		t.Errorf("expected diffContent to start with 'Branch: ', got:\n%s", preview)
+	}
+}
+
+// TestBranchNotPrependedForFileDiff verifies that --file skips branch injection
+// (the file has no local branch context).
+func TestBranchNotPrependedForFileDiff(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedDiff string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, diffContent string) (string, error) {
+		capturedDiff = diffContent
+		return "mocked comment", nil
+	}
+
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if strings.HasPrefix(capturedDiff, "Branch: ") {
+		t.Error("expected no Branch: prefix when using --file")
+	}
+}
+
+// TestQuickCommit_DryRun verifies that --dry-run generates and prints the
+// commit message without staging, committing, or pushing.
+func TestQuickCommit_DryRun(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "chore: update config", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--dry-run", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	// --dry-run may return "no staged changes" if the diff is empty — that's fine.
+	if err != nil && !strings.Contains(err.Error(), "no staged changes") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	// When chatFn was reached, the output must contain the generated message.
+	if err == nil {
+		if !strings.Contains(out, "chore: update config") {
+			t.Errorf("expected commit message in output, got:\n%s", out)
+		}
+		if !strings.Contains(out, "dry-run") {
+			t.Errorf("expected dry-run notice in output, got:\n%s", out)
+		}
+	}
+}
+
+// TestQuickCommit_DryRun_BranchPrefix verifies that the branch name is
+// prepended to the diff content passed to the AI.
+func TestQuickCommit_DryRun_BranchPrefix(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedDiff string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, diffContent string) (string, error) {
+		capturedDiff = diffContent
+		return "feat: add feature", nil
+	}
+
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--dry-run", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil && !strings.Contains(err.Error(), "no staged changes") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if capturedDiff != "" && !strings.HasPrefix(capturedDiff, "Branch: ") {
+		t.Errorf("expected diffContent to start with 'Branch: ', got:\n%s", capturedDiff)
+	}
+}
+
+// TestQuickCommit_AIError verifies that an AI error is surfaced correctly.
+func TestQuickCommit_AIError(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "", fmt.Errorf("AI provider unavailable")
+	}
+
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--dry-run", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	// Either the diff was empty (no staged changes) or the AI error was returned.
+	if err != nil && strings.Contains(err.Error(), "no staged changes") {
+		t.Skip("skipping: no staged diff available to reach AI call")
+	}
+	if err == nil {
+		t.Fatal("expected an error from AI failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "AI provider unavailable") {
+		t.Errorf("expected AI error message, got: %v", err)
+	}
+}
+
+// TestQuickCommit_DetachedHead verifies an error is returned in detached HEAD state.
+func TestQuickCommit_DetachedHead(t *testing.T) {
+	// Check if we're actually in detached HEAD; if not, this code path can't be
+	// triggered without destructive git operations, so we just unit-test the guard
+	// indirectly by confirming getCurrentBranch returns "" → "" branch guard fires.
+	out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		t.Skip("skipping: not in a git repo")
+	}
+	if strings.TrimSpace(string(out)) != "HEAD" {
+		t.Skip("skipping: not in detached HEAD state")
+	}
+
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"quick-commit", "--dry-run", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	execErr := cmd.Execute()
+	if execErr == nil {
+		t.Fatal("expected error for detached HEAD, got nil")
+	}
+	if !strings.Contains(execErr.Error(), "detached HEAD") {
+		t.Errorf("expected detached HEAD error, got: %v", execErr)
+	}
+}

@@ -18,12 +18,15 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 - **Generate comments directly from a GitHub PR or GitLab MR URL** (`--pr`) — no local checkout needed
 - Supports public **github.com**, **GitHub Enterprise**, public **gitlab.com**, and **self-hosted GitLab** instances
 - Supports OpenAI, Anthropic (Claude), Google Gemini, and Ollama APIs
-- Customizable API endpoints and models
-- Multiple prompt styles (Conventional, Technical, User-Focused)
+- Customizable API endpoints and models via `--model` flag or config
+- Multiple prompt styles — `default`, `conventional`, `technical`, `user-focused`, `emoji`, `sassy`, `monday`, `jira`, `commit`, `commit-emoji`
+- **Jira-aware template** (`--template=jira`) — extracts ticket key from branch name and places it first so Jira auto-links
+- **Commit message generation** (`--commit-msg`) — outputs a single conventional-style line ready for `git commit -m`
+- **`quick-commit` subcommand** — stages all changes, generates a commit message, commits, and pushes in one step
 - Configuration file support (`~/.ai-mr-comment.toml`)
 - Environment variable configuration
-- Outputs to console, a file (`--output`), or the system clipboard (`--clipboard=title|description|all`)
-- Structured JSON output for scripting and CI (`--format json`) — always includes `title` and `description` fields
+- Outputs to console, a file (`--output`), or the system clipboard (`--clipboard=title|description|commit-msg|all`)
+- Structured JSON output for scripting and CI (`--format json`)
 - Verbose debug logging to stderr (`--verbose`) — API timing, diff stats, config details
 - Live streaming output to the terminal — tokens appear as they are generated
 - Bootstrap a config file with `init-config` (never edit TOML by hand again)
@@ -107,7 +110,8 @@ gitlab_token = "xxxx"       # or set GITLAB_TOKEN env var (required for private 
 # gitlab_base_url = ""      # set for self-hosted GitLab, e.g. https://gitlab.mycompany.com
 
 # === Template Settings ===
-# Options: default, conventional, technical, user-focused
+# Options: default, conventional, technical, user-focused, emoji, sassy, monday,
+#          jira, commit, commit-emoji
 template = "default"
 ```
 
@@ -129,6 +133,9 @@ ai-mr-comment --smart-chunk
 # Use a specific provider and template
 ai-mr-comment --provider anthropic --template technical
 
+# Override the model for a single run
+ai-mr-comment --model gpt-4o
+
 # Generate comment for a specific commit range
 ai-mr-comment --commit "HEAD~3..HEAD"
 
@@ -146,15 +153,18 @@ GITHUB_BASE_URL=https://github.mycompany.com \
 GITLAB_BASE_URL=https://gitlab.mycompany.com \
   ai-mr-comment --pr https://gitlab.mycompany.com/group/project/-/merge_requests/5
 
-# Output structured JSON (useful for CI/scripting)
-# Always includes title, description, provider, and model fields
-ai-mr-comment --format json
-
 # Generate a title and comment together (shown as separate sections)
 ai-mr-comment --title
 
-# Generate title + comment as JSON (--format=json implies title generation)
+# Output structured JSON for CI/scripting
+# Always includes title, description, provider, and model fields
 ai-mr-comment --format json
+
+# Generate only a git commit message (conventional commits style)
+ai-mr-comment --commit-msg --staged
+
+# Generate a commit message as JSON
+ai-mr-comment --commit-msg --format json | jq -r '.commit_message'
 
 # Copy the description to clipboard
 ai-mr-comment --clipboard=description
@@ -162,8 +172,8 @@ ai-mr-comment --clipboard=description
 # Copy the title to clipboard
 ai-mr-comment --title --clipboard=title
 
-# Copy title and description to clipboard
-ai-mr-comment --title --clipboard=all
+# Copy a commit message to clipboard
+ai-mr-comment --commit-msg --clipboard=commit-msg
 
 # Enable verbose debug logging to stderr (API timing, diff stats, config)
 ai-mr-comment --verbose
@@ -186,19 +196,23 @@ ai-mr-comment init-config
 - `--staged`: Diff staged changes only (`git diff --cached`); mutually exclusive with `--commit`
 - `--exclude <PATTERN>`: Exclude files matching glob pattern (e.g. `vendor/**`, `*.sum`). Can be repeated.
 - `--smart-chunk`: Split large diffs by file, summarize each, then synthesize a final comment
-- `--title`: Generate a concise MR/PR title alongside the comment; printed as a distinct `── Title ──` section in text mode. When `--format=json` is used, title is always generated automatically (no need for `--title`)
+- `--title`: Generate a concise MR/PR title alongside the comment; printed as a distinct `── Title ──` section in text mode. When `--format=json` is used, title is always generated automatically (no need for `--title`). Mutually exclusive with `--commit-msg`.
+- `--commit-msg`: Generate a single-line git commit message instead of a full MR/PR description. Output is clean text or `{"commit_message":"..."}` in JSON mode. Mutually exclusive with `--title`.
 - `--file <FILE>`: Read diff from file instead of git
 - `--output <FILE>`: Write output to file instead of stdout
-- `--clipboard <WHAT>`: Copy to system clipboard — `title`, `description` (or `comment`), or `all` (title + description separated by a blank line)
-- `--format <FORMAT>`: Output format — `text` (default) or `json`. JSON always includes `title`, `description`, `comment`, `provider`, and `model` fields
+- `--clipboard <WHAT>`: Copy to system clipboard — `title`, `description` (or `comment`), `commit-msg`, or `all` (title + description separated by a blank line)
+- `--format <FORMAT>`: Output format — `text` (default) or `json`
 - `--provider <PROVIDER>`: Provider (openai, anthropic, gemini, ollama)
-- `-t, --template <NAME>`: Template style (default, conventional, technical, user-focused)
+- `--model <NAME>`: Override the model for this run (e.g. `gpt-4o`, `claude-opus-4-6`, `gemini-2.5-flash`)
+- `-t, --template <NAME>`: Template style — `default`, `conventional`, `technical`, `user-focused`, `emoji`, `sassy`, `monday`, `jira`, `commit`, `commit-emoji`
 - `--debug`: Show precise token usage and cost estimation without calling the generation API
 - `--verbose`: Print detailed debug lines to stderr — config file path, diff stats, template source, streaming decision, and per-API-call timing and response size
 - `-h, --help`: Print help
 
 ### Subcommands
 
+- `quick-commit [flags]`: Stage all changes, generate an AI commit message, commit, and push in one step. See [Quick Commit](#quick-commit) below.
+- `models [--provider <NAME>]`: List known model names for a provider.
 - `init-config [--output <PATH>]`: Write a default config file to `~/.ai-mr-comment.toml` (or the given path). Refuses to overwrite an existing file.
 - `completion [bash|zsh|fish|powershell]`: Print a shell completion script to stdout.
 
@@ -265,6 +279,95 @@ When running with the `--debug` flag, the tool provides a detailed breakdown of 
 - **OpenAI/Anthropic/Ollama**: Uses a conservative character-based heuristic (~3.5 chars per token).
 - **Cost**: Calculates estimated input cost in USD based on current model pricing (Ollama is free).
 
+## Templates
+
+Select a template with `-t` / `--template`. All templates receive the branch name as context (useful for ticket key extraction).
+
+| Name | Description |
+|---|---|
+| `default` | Professional description with Key Changes, Why, Checklist, Notes |
+| `conventional` | Conventional Commits body with optional BREAKING CHANGE and Refs |
+| `technical` | Deep technical focus — Implementation Details, Rationale, Testing Strategy |
+| `user-focused` | Non-technical perspective — What's New, Why Important, Impact |
+| `emoji` | Fun emoji-rich format |
+| `sassy` | Dry-wit tone, technically accurate |
+| `monday` | Casual "pre-coffee" tone |
+| `jira` | Puts the Jira ticket key from the branch name first so Jira auto-links |
+| `commit` | Single-line conventional commit message (useful with `--commit-msg`) |
+| `commit-emoji` | Single-line gitmoji-style commit message (useful with `--commit-msg`) |
+
+### Jira Integration
+
+The `jira` template extracts the ticket key from your branch name (e.g. `feat/ABC-123-add-login` → `ABC-123`) and places it at the very start of the description so Jira's branch/commit linking picks it up automatically.
+
+```bash
+ai-mr-comment --template jira --staged
+# Output starts with: "ABC-123 Add login endpoint\n\n## Key Changes..."
+```
+
+This works because the current branch name is automatically prepended to the diff context for all local git operations (not `--file` or `--pr`).
+
+## Commit Messages
+
+Use `--commit-msg` to generate a single conventional-style commit message instead of a full PR description.
+
+```bash
+# Print the message (text mode)
+ai-mr-comment --commit-msg --staged
+
+# JSON output — single key, pipeline-friendly
+ai-mr-comment --commit-msg --format json
+# {"commit_message":"feat(auth): add JWT refresh token support"}
+
+# Pipe directly into git commit
+git commit -m "$(ai-mr-comment --commit-msg --staged)"
+
+# Copy to clipboard
+ai-mr-comment --commit-msg --staged --clipboard=commit-msg
+
+# Gitmoji style
+ai-mr-comment --commit-msg --template commit-emoji --staged
+```
+
+`--commit-msg` and `--title` are mutually exclusive. In JSON mode, the response contains only `commit_message` (no `description` or `title` fields).
+
+## Quick Commit
+
+`quick-commit` is a one-command shortcut for the full stage → AI message → commit → push workflow.
+
+```bash
+# Full workflow
+ai-mr-comment quick-commit
+
+# Preview the generated message without touching git
+ai-mr-comment quick-commit --dry-run
+
+# Commit but skip the push
+ai-mr-comment quick-commit --no-push
+
+# Use a specific provider or model
+ai-mr-comment quick-commit --provider anthropic --model claude-sonnet-4-5
+
+# JSON output — only commit_message is printed, all status lines suppressed
+ai-mr-comment quick-commit --format json
+# {"commit_message":"feat: add login endpoint"}
+```
+
+Steps performed:
+1. `git add .` — stages all changes
+2. Reads the staged diff; prepends branch name for ticket key context
+3. Calls AI with the conventional commits prompt
+4. `git commit -m "<message>"`
+5. `git push --set-upstream origin <branch>` — works for new branches too
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Generate and print the message, skip all git operations |
+| `--no-push` | Commit but skip the push |
+| `--format json` | Output `{"commit_message":"..."}` only; suppress status lines |
+| `--provider` | Override the AI provider |
+| `--model` | Override the model |
+
 ## Example Output
 
 **Text mode (`--title`):**
@@ -303,6 +406,12 @@ Provides a secure foundation for user identity, allowing protected access to API
 ```
 
 `description` and `comment` carry the same value; `comment` is kept for backwards compatibility.
+
+**Commit message mode (`--commit-msg --format json`):**
+
+```json
+{"commit_message":"feat(auth): add JWT refresh token support"}
+```
 
 ## Development
 

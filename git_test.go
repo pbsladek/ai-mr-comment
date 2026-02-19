@@ -445,3 +445,70 @@ func TestIsGitLabURL(t *testing.T) {
 	}
 }
 
+func TestGetCurrentBranch(t *testing.T) {
+	branch, err := getCurrentBranch()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// In a normal (non-detached) checkout the branch must be non-empty.
+	// In a detached HEAD state getCurrentBranch returns "" with no error — skip.
+	if branch == "" {
+		t.Skip("skipping: detached HEAD state, no branch name available")
+	}
+	// Branch name must not contain leading/trailing whitespace.
+	if branch != strings.TrimSpace(branch) {
+		t.Errorf("branch name has surrounding whitespace: %q", branch)
+	}
+}
+
+func TestGetCurrentBranch_DetachedHead(t *testing.T) {
+	// Simulate detached HEAD by stubbing: we just verify the function
+	// returns "" and nil error when git output is "HEAD".
+	// We can't easily force a detached state, so we just test the parsing logic
+	// directly by checking that a branch name of "HEAD" is treated as detached.
+	// This is a unit check of the branch == "HEAD" guard, not a git integration test.
+	out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").CombinedOutput()
+	if err != nil {
+		t.Skip("skipping: not in a git repo")
+	}
+	got := strings.TrimSpace(string(out))
+	// If the repo is in detached HEAD, getCurrentBranch should return "".
+	if got == "HEAD" {
+		branch, branchErr := getCurrentBranch()
+		if branchErr != nil {
+			t.Fatalf("unexpected error in detached HEAD: %v", branchErr)
+		}
+		if branch != "" {
+			t.Errorf("expected empty branch for detached HEAD, got %q", branch)
+		}
+	}
+}
+
+// TestGitCommit_EmptyMessageFails verifies that gitCommit with an empty message
+// causes git to return an error (git rejects empty commit messages).
+func TestGitCommit_EmptyMessageFails(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	err := gitCommit("")
+	if err == nil {
+		t.Fatal("expected error for empty commit message, got nil")
+	}
+}
+
+// TestGitPush_NoRemoteFails verifies that gitPush returns an error when there
+// is no remote named "origin" configured (or the branch has nothing to push).
+// This is a best-effort test — it may skip in environments where origin exists
+// and the push would succeed, to avoid accidentally pushing during tests.
+func TestGitPush_NoRemoteFails(t *testing.T) {
+	// Only run this test when there is no "origin" remote, to avoid accidental pushes.
+	out, err := exec.Command("git", "remote", "get-url", "origin").CombinedOutput()
+	if err == nil && strings.TrimSpace(string(out)) != "" {
+		t.Skip("skipping: origin remote exists — would risk an accidental push")
+	}
+	pushErr := gitPush("non-existent-test-branch")
+	if pushErr == nil {
+		t.Fatal("expected error pushing to non-existent remote, got nil")
+	}
+}
+

@@ -33,6 +33,50 @@ func isGitRepo() bool {
 	return err == nil
 }
 
+// getCurrentBranch returns the name of the current git branch (e.g. "feat/ABC-123-add-login").
+// Returns an empty string and no error when in a detached HEAD state.
+func getCurrentBranch() (string, error) {
+	out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").CombinedOutput() //nolint:gosec // G204: git is a fixed binary, args are internal constants
+	if err != nil {
+		return "", fmt.Errorf("getting current branch: %w", err)
+	}
+	branch := strings.TrimSpace(string(out))
+	if branch == "HEAD" {
+		// Detached HEAD state — no branch name available.
+		return "", nil
+	}
+	return branch, nil
+}
+
+// gitAdd stages all changes in the working tree (git add .).
+func gitAdd() error {
+	out, err := exec.Command("git", "add", ".").CombinedOutput() //nolint:gosec // G204: git is a fixed binary, args are internal constants
+	if err != nil {
+		return fmt.Errorf("git add: %w\n%s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// gitCommit creates a commit with the given message.
+func gitCommit(message string) error {
+	out, err := exec.Command("git", "commit", "-m", message).CombinedOutput() //nolint:gosec // G204: git is a fixed binary, message is user-provided commit text
+	if err != nil {
+		return fmt.Errorf("git commit: %w\n%s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// gitPush pushes the current branch to its upstream remote.
+// It uses --set-upstream origin <branch> so it works even on a branch with no
+// tracking ref yet (e.g. the first push of a new branch).
+func gitPush(branch string) error {
+	out, err := exec.Command("git", "push", "--set-upstream", "origin", branch).CombinedOutput() //nolint:gosec // G204: git is a fixed binary, branch is from getCurrentBranch
+	if err != nil {
+		return fmt.Errorf("git push: %w\n%s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // getGitDiff returns the git diff for the given mode.
 // Priority: staged > explicit commit > auto merge-base > unstaged working tree.
 // Patterns in exclude are passed as git pathspecs (":!pattern") to filter files at the source.
