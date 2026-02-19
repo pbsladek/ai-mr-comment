@@ -24,6 +24,10 @@ type Config struct {
 	OpenAIAPIKey    string `mapstructure:"openai_api_key"`
 	AnthropicAPIKey string `mapstructure:"anthropic_api_key"`
 	GeminiAPIKey    string `mapstructure:"gemini_api_key"`
+	GitHubToken     string `mapstructure:"github_token"`
+	GitLabToken     string `mapstructure:"gitlab_token"`
+	GitHubBaseURL   string `mapstructure:"github_base_url"`
+	GitLabBaseURL   string `mapstructure:"gitlab_base_url"`
 
 	OpenAIModel    string `mapstructure:"openai_model"`
 	AnthropicModel string `mapstructure:"anthropic_model"`
@@ -53,6 +57,10 @@ func loadConfig() (*Config, error) {
 	_ = v.BindEnv("openai_api_key", "OPENAI_API_KEY")
 	_ = v.BindEnv("anthropic_api_key", "ANTHROPIC_API_KEY")
 	_ = v.BindEnv("gemini_api_key", "GEMINI_API_KEY")
+	_ = v.BindEnv("github_token", "GITHUB_TOKEN")
+	_ = v.BindEnv("gitlab_token", "GITLAB_TOKEN")
+	_ = v.BindEnv("github_base_url", "GITHUB_BASE_URL")
+	_ = v.BindEnv("gitlab_base_url", "GITLAB_BASE_URL")
 
 	return loadConfigWith(v)
 }

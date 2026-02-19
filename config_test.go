@@ -136,6 +136,43 @@ func TestLoadConfig_Gemini(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_GitHubToken(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "gh-token-abc")
+
+	v := viper.New()
+	v.AutomaticEnv()
+	_ = v.BindEnv("github_token", "GITHUB_TOKEN")
+
+	cfg, err := loadConfigWith(v)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.GitHubToken != "gh-token-abc" {
+		t.Errorf("expected GitHubToken 'gh-token-abc', got %q", cfg.GitHubToken)
+	}
+}
+
+func TestLoadConfig_BaseURLs(t *testing.T) {
+	t.Setenv("GITHUB_BASE_URL", "https://github.myco.com")
+	t.Setenv("GITLAB_BASE_URL", "https://gitlab.myco.com")
+
+	v := viper.New()
+	v.AutomaticEnv()
+	_ = v.BindEnv("github_base_url", "GITHUB_BASE_URL")
+	_ = v.BindEnv("gitlab_base_url", "GITLAB_BASE_URL")
+
+	cfg, err := loadConfigWith(v)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.GitHubBaseURL != "https://github.myco.com" {
+		t.Errorf("expected GitHubBaseURL 'https://github.myco.com', got %q", cfg.GitHubBaseURL)
+	}
+	if cfg.GitLabBaseURL != "https://gitlab.myco.com" {
+		t.Errorf("expected GitLabBaseURL 'https://gitlab.myco.com', got %q", cfg.GitLabBaseURL)
+	}
+}
+
 func TestLoadConfig_MalformedTOML(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, ".ai-mr-comment.toml")

@@ -6,9 +6,12 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.24.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/google/generative-ai-go v0.20.1
+	github.com/google/go-github/v68 v68.0.0
 	github.com/openai/openai-go v1.12.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
+	gitlab.com/gitlab-org/api/client-go v1.36.0
+	golang.org/x/oauth2 v0.35.0
 	golang.org/x/term v0.40.0
 	google.golang.org/api v0.267.0
 )
@@ -26,10 +29,13 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
+	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.11 // indirect
 	github.com/googleapis/gax-go/v2 v2.17.0 // indirect
+	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
+	github.com/hashicorp/go-retryablehttp v0.7.8 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/sagikazarmark/locafero v0.12.0 // indirect
@@ -50,7 +56,6 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/crypto v0.47.0 // indirect
 	golang.org/x/net v0.49.0 // indirect
-	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
