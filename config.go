@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/spf13/viper"
 )
@@ -39,6 +40,14 @@ type Config struct {
 	OllamaEndpoint    string      `mapstructure:"ollama_endpoint"`
 	Provider          ApiProvider `mapstructure:"provider"`
 	Template          string      `mapstructure:"template"`
+
+	// DebugWriter is the output destination for verbose debug messages.
+	// Nil when verbose mode is disabled. Set by the CLI after config load; never read from TOML.
+	DebugWriter io.Writer
+
+	// ConfigFile is the path of the TOML config file that was loaded, or "" if none was found.
+	// Set by loadConfigWith; never read from TOML.
+	ConfigFile string
 }
 
 // loadConfig reads configuration from ~/.ai-mr-comment.toml (or the current
@@ -104,6 +113,7 @@ func loadConfigWith(v *viper.Viper) (*Config, error) {
 	if err := v.UnmarshalExact(cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
+	cfg.ConfigFile = v.ConfigFileUsed()
 
 	return cfg, nil
 }

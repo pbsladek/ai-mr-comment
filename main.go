@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/spf13/cobra"
@@ -27,7 +28,7 @@ func main() {
 // Accepting chatFn as a parameter allows tests to inject a mock without real API calls.
 func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
 	var commit, diffFilePath, outputPath, provider, templateName, format, prURL string
-	var debug, staged, clipboardFlag, smartChunk, generateTitle bool
+	var debug, staged, clipboardFlag, smartChunk, generateTitle, verbose bool
 	var exclude []string
 
 	rootCmd := &cobra.Command{
@@ -43,6 +44,14 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			if cmd.Flags().Changed("template") {
 				cfg.Template = templateName
 			}
+			if verbose {
+				cfg.DebugWriter = cmd.ErrOrStderr()
+			}
+			configFile := cfg.ConfigFile
+			if configFile == "" {
+				configFile = "(none)"
+			}
+			debugLog(cfg, "config: file=%s provider=%s model=%s template=%s", configFile, cfg.Provider, getModelName(cfg), cfg.Template)
 
 			if cfg.Provider != OpenAI && cfg.Provider != Anthropic && cfg.Provider != Ollama && cfg.Provider != Gemini {
 				return errors.New("unsupported provider: " + string(cfg.Provider))
@@ -73,21 +82,33 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			}
 
 			var diffContent string
+			var diffSource string
 			var err error
 			if prURL != "" {
 				switch {
 				case isGitHubURL(prURL):
+					diffSource = "github-pr: " + prURL
 					diffContent, err = getPRDiff(cmd.Context(), prURL, cfg.GitHubToken, cfg.GitHubBaseURL)
 				case isGitLabURL(prURL):
+					diffSource = "gitlab-mr: " + prURL
 					diffContent, err = getMRDiff(cmd.Context(), prURL, cfg.GitLabToken, cfg.GitLabBaseURL)
 				default:
 					return fmt.Errorf("unsupported URL %q: must be a GitHub PR (/pull/) or GitLab MR (/-/merge_requests/) URL", prURL)
 				}
 			} else if diffFilePath != "" {
+				diffSource = "file: " + diffFilePath
 				diffContent, err = readDiffFromFile(diffFilePath)
 			} else {
 				if !isGitRepo() {
 					return fmt.Errorf("not a git repository. Run from inside a git repo or use --file to provide a diff")
+				}
+				switch {
+				case staged:
+					diffSource = "git (staged)"
+				case commit != "":
+					diffSource = "git (commit: " + commit + ")"
+				default:
+					diffSource = "git"
 				}
 				diffContent, err = getGitDiff(commit, staged, exclude)
 			}
@@ -100,13 +121,26 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				}
 				return fmt.Errorf("no diff found. Make sure you have uncommitted changes or specify a commit range with --commit")
 			}
+			debugLog(cfg, "diff: source=%s bytes=%d lines=%d", diffSource, len(diffContent), len(strings.Split(diffContent, "\n")))
 
 			out := cmd.OutOrStdout()
+			rawLines := len(strings.Split(diffContent, "\n"))
 			diffContent = processDiff(diffContent, 4000)
-			systemPrompt, err := NewPromptTemplate(cfg.Template)
-			if err != nil {
-				_, _ = fmt.Fprintln(os.Stderr, "Warning:", err)
+			debugLog(cfg, "diff: lines before truncation=%d after=%d (max=4000)", rawLines, len(strings.Split(diffContent, "\n")))
+
+			systemPrompt, templateErr := NewPromptTemplate(cfg.Template)
+			if templateErr != nil {
+				_, _ = fmt.Fprintln(os.Stderr, "Warning:", templateErr)
 			}
+			templateSource := "embedded"
+			if cfg.Template != "default" {
+				if templateErr == nil {
+					templateSource = "filesystem"
+				} else {
+					templateSource = "embedded (fallback)"
+				}
+			}
+			debugLog(cfg, "template: name=%q source=%s length=%d", cfg.Template, templateSource, len(systemPrompt))
 
 			if debug {
 				estimator := NewTokenEstimator(cfg)
@@ -138,6 +172,8 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			// All other paths use the buffered chatFn to get the full response first.
 			isTTY := term.IsTerminal(int(os.Stdout.Fd()))
 			shouldStream := isTTY && format == "text" && !smartChunk && outputPath == ""
+			debugLog(cfg, "streaming: tty=%v format=%s smart-chunk=%v output-file=%q → enabled=%v",
+				isTTY, format, smartChunk, outputPath, shouldStream)
 			// streamedOK is set to true only when streaming completes successfully.
 			// The output block uses it to decide whether body was already written.
 			var streamedOK bool
@@ -145,12 +181,17 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			var comment string
 			if smartChunk {
 				chunks := splitDiffByFile(diffContent)
+				debugLog(cfg, "smart-chunk: files=%d", len(chunks))
 				if len(chunks) > 1 {
 					// Summarize each file chunk independently, then do a final synthesis call.
 					const chunkPrompt = "Summarize the changes in this file diff in 3-5 bullet points. Be concise and technical."
 					var summaries []string
-					for _, chunk := range chunks {
-						summary, chunkErr := chatFn(cmd.Context(), cfg, cfg.Provider, chunkPrompt, processDiff(chunk, 1000))
+					for i, chunk := range chunks {
+						debugLog(cfg, "smart-chunk: processing chunk %d/%d", i+1, len(chunks))
+						chunkCopy := chunk
+						summary, chunkErr := timedCall(cfg, "chunk-summary", func() (string, error) {
+							return chatFn(cmd.Context(), cfg, cfg.Provider, chunkPrompt, processDiff(chunkCopy, 1000))
+						})
 						if chunkErr != nil {
 							if cfg.Provider == Ollama && strings.Contains(chunkErr.Error(), "connection refused") {
 								return fmt.Errorf("failed to connect to Ollama at %s.\nMake sure Ollama is running (try 'ollama serve') or check your configuration", cfg.OllamaEndpoint)
@@ -159,22 +200,33 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 						}
 						summaries = append(summaries, summary)
 					}
+					debugLog(cfg, "smart-chunk: all chunks summarized, running synthesis call")
 					combinedSummaries := strings.Join(summaries, "\n\n---\n\n")
-					comment, err = chatFn(cmd.Context(), cfg, cfg.Provider, systemPrompt, combinedSummaries)
+					comment, err = timedCall(cfg, "synthesis", func() (string, error) {
+						return chatFn(cmd.Context(), cfg, cfg.Provider, systemPrompt, combinedSummaries)
+					})
 				} else {
-					comment, err = chatFn(cmd.Context(), cfg, cfg.Provider, systemPrompt, diffContent)
+					comment, err = timedCall(cfg, "comment", func() (string, error) {
+						return chatFn(cmd.Context(), cfg, cfg.Provider, systemPrompt, diffContent)
+					})
 				}
 			} else if shouldStream {
-				comment, err = streamToWriter(cmd.Context(), cfg, cfg.Provider, systemPrompt, diffContent, out)
+				comment, err = timedCall(cfg, "comment (stream)", func() (string, error) {
+					return streamToWriter(cmd.Context(), cfg, cfg.Provider, systemPrompt, diffContent, out)
+				})
 				if err != nil {
 					// Streaming failed; fall back to the buffered call.
 					// headerPrinted=true tells the output block to skip reprinting the separator.
-					comment, err = chatFn(cmd.Context(), cfg, cfg.Provider, systemPrompt, diffContent)
+					comment, err = timedCall(cfg, "comment (fallback)", func() (string, error) {
+						return chatFn(cmd.Context(), cfg, cfg.Provider, systemPrompt, diffContent)
+					})
 				} else {
 					streamedOK = true
 				}
 			} else {
-				comment, err = chatFn(cmd.Context(), cfg, cfg.Provider, systemPrompt, diffContent)
+				comment, err = timedCall(cfg, "comment", func() (string, error) {
+					return chatFn(cmd.Context(), cfg, cfg.Provider, systemPrompt, diffContent)
+				})
 			}
 			if err != nil {
 				if cfg.Provider == Ollama && strings.Contains(err.Error(), "connection refused") {
@@ -183,10 +235,14 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				return err
 			}
 
-			// Optionally generate a title with a separate focused API call.
+			// Generate a title when explicitly requested (--title) or when producing
+			// JSON output for pipeline consumers (--format=json implies title).
 			var title string
-			if generateTitle {
-				title, err = chatFn(cmd.Context(), cfg, cfg.Provider, titlePrompt, diffContent)
+			if generateTitle || format == "json" {
+				debugLog(cfg, "title: generating title with separate API call")
+				title, err = timedCall(cfg, "title", func() (string, error) {
+					return chatFn(cmd.Context(), cfg, cfg.Provider, titlePrompt, diffContent)
+				})
 				if err != nil {
 					if cfg.Provider == Ollama && strings.Contains(err.Error(), "connection refused") {
 						return fmt.Errorf("failed to connect to Ollama at %s.\nMake sure Ollama is running (try 'ollama serve') or check your configuration", cfg.OllamaEndpoint)
@@ -196,19 +252,31 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				title = strings.TrimSpace(title)
 			}
 
+			dest := "stdout"
+			if outputPath != "" {
+				dest = "file: " + outputPath
+			} else if clipboardFlag {
+				dest = "stdout+clipboard"
+			}
+			debugLog(cfg, "output: format=%s destination=%s", format, dest)
+
 			if format == "json" {
 				// outputJSON is the structured response emitted when --format=json is set.
+				// title and description are the primary fields for pipeline consumers.
+				// comment mirrors description for backwards compatibility.
 				type outputJSON struct {
-					Title    string `json:"title,omitempty"`
-					Comment  string `json:"comment"`
-					Provider string `json:"provider"`
-					Model    string `json:"model"`
+					Title       string `json:"title"`
+					Description string `json:"description"`
+					Comment     string `json:"comment"`
+					Provider    string `json:"provider"`
+					Model       string `json:"model"`
 				}
 				if err := json.NewEncoder(out).Encode(outputJSON{
-					Title:    title,
-					Comment:  comment,
-					Provider: string(cfg.Provider),
-					Model:    getModelName(cfg),
+					Title:       title,
+					Description: comment,
+					Comment:     comment,
+					Provider:    string(cfg.Provider),
+					Model:       getModelName(cfg),
 				}); err != nil {
 					return err
 				}
@@ -251,6 +319,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().StringVar(&provider, "provider", "openai", "API provider (openai, anthropic, gemini, ollama)")
 	rootCmd.Flags().StringVarP(&templateName, "template", "t", "default", "Prompt template to use (e.g., default, conventional, technical)")
 	rootCmd.Flags().BoolVar(&debug, "debug", false, "Estimate token usage")
+	rootCmd.Flags().BoolVar(&verbose, "verbose", false, "Enable verbose debug logging to stderr")
 	rootCmd.Flags().BoolVar(&staged, "staged", false, "Diff staged changes only (git diff --cached)")
 	rootCmd.Flags().BoolVar(&clipboardFlag, "clipboard", false, "Copy output to clipboard")
 	rootCmd.Flags().StringArrayVar(&exclude, "exclude", nil, "Exclude files matching pattern (e.g. vendor/**, *.sum). Can be repeated.")
@@ -374,4 +443,28 @@ func getModelName(cfg *Config) string {
 	default:
 		return "unknown"
 	}
+}
+
+// debugLog writes a formatted debug message to cfg.DebugWriter when verbose mode is enabled.
+// The message is prefixed with "[debug] " and terminated with a newline.
+func debugLog(cfg *Config, format string, args ...any) {
+	if cfg.DebugWriter == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(cfg.DebugWriter, "[debug] "+format+"\n", args...)
+}
+
+// timedCall invokes fn, then logs the elapsed time, response size, and any error.
+// It is a no-op when verbose mode is disabled (cfg.DebugWriter == nil).
+func timedCall(cfg *Config, label string, fn func() (string, error)) (string, error) {
+	start := time.Now()
+	result, err := fn()
+	elapsed := time.Since(start).Milliseconds()
+	if err == nil {
+		debugLog(cfg, "api: %s completed in %dms chars=%d lines=%d",
+			label, elapsed, len(result), len(strings.Split(result, "\n")))
+	} else {
+		debugLog(cfg, "api: %s failed in %dms: %v", label, elapsed, err)
+	}
+	return result, err
 }
