@@ -1,6 +1,6 @@
 module github.com/pbsladek/ai-mr-comment
 
-go 1.24.3
+go 1.26
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.24.0

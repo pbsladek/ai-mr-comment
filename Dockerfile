@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ── Build stage ──────────────────────────────────────────────────────────────
-FROM golang:1.24-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 # git is needed by 'go build' to embed VCS info and by tests.
 RUN apk add --no-cache git
@@ -23,7 +23,7 @@ RUN CGO_ENABLED=0 go build \
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 # alpine gives us git (required for all local-diff commands) plus a small
 # footprint. The final image is typically ~30 MB.
-FROM alpine:3.21
+FROM alpine:3.23
 
 # git: required for diff/commit/push commands
 # ca-certificates: required for HTTPS calls to AI provider APIs and GitHub/GitLab

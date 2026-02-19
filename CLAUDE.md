@@ -2,6 +2,11 @@
 
 A command-line tool written in Go that generates professional MR/PR comments based on git diffs using AI (OpenAI, Anthropic, Gemini, or Ollama).
 
+## Go Version
+
+- This project uses **Go 1.26**.
+- The Dockerfile builder image is `golang:1.26-alpine`. Keep this in sync with `go.mod`.
+
 ## Build & Run
 
 - **Build**: `make build` (creates binary in `./dist/ai-mr-comment`)
