@@ -1331,8 +1331,11 @@ func TestQuickCommit_DryRun(t *testing.T) {
 	cmd.SilenceErrors = true
 
 	err := cmd.Execute()
-	// --dry-run may return "no staged changes" if the diff is empty — that's fine.
-	if err != nil && !strings.Contains(err.Error(), "no staged changes") {
+	// Skip when the working tree is clean — no diff to feed the AI.
+	if err != nil && (strings.Contains(err.Error(), "no staged changes") || strings.Contains(err.Error(), "no changes found")) {
+		t.Skip("skipping: no diff available in working tree")
+	}
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -1371,7 +1374,11 @@ func TestQuickCommit_DryRun_BranchPrefix(t *testing.T) {
 	cmd.SilenceErrors = true
 
 	err := cmd.Execute()
-	if err != nil && !strings.Contains(err.Error(), "no staged changes") {
+	// Skip when the working tree is clean — no diff to feed the AI.
+	if err != nil && (strings.Contains(err.Error(), "no staged changes") || strings.Contains(err.Error(), "no changes found")) {
+		t.Skip("skipping: no diff available in working tree")
+	}
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -1400,9 +1407,9 @@ func TestQuickCommit_AIError(t *testing.T) {
 	cmd.SilenceErrors = true
 
 	err := cmd.Execute()
-	// Either the diff was empty (no staged changes) or the AI error was returned.
-	if err != nil && strings.Contains(err.Error(), "no staged changes") {
-		t.Skip("skipping: no staged diff available to reach AI call")
+	// Skip when the working tree is clean — no diff to reach the AI call.
+	if err != nil && (strings.Contains(err.Error(), "no staged changes") || strings.Contains(err.Error(), "no changes found")) {
+		t.Skip("skipping: no diff available in working tree")
 	}
 	if err == nil {
 		t.Fatal("expected an error from AI failure, got nil")
