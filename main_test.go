@@ -1299,12 +1299,23 @@ func TestBranchNotPrependedForFileDiff(t *testing.T) {
 	}
 }
 
+// skipIfDetachedHead skips the test when the repo is in detached HEAD state
+// (e.g. CI shallow clones), since quick-commit requires a named branch.
+func skipIfDetachedHead(t *testing.T) {
+	t.Helper()
+	branch, err := getCurrentBranch()
+	if err != nil || branch == "" {
+		t.Skip("skipping: detached HEAD state or no branch available")
+	}
+}
+
 // TestQuickCommit_DryRun verifies that --dry-run generates and prints the
 // commit message without staging, committing, or pushing.
 func TestQuickCommit_DryRun(t *testing.T) {
 	if !isGitRepo() {
 		t.Skip("skipping: not inside a git repository")
 	}
+	skipIfDetachedHead(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
 	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
@@ -1343,6 +1354,7 @@ func TestQuickCommit_DryRun_BranchPrefix(t *testing.T) {
 	if !isGitRepo() {
 		t.Skip("skipping: not inside a git repository")
 	}
+	skipIfDetachedHead(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
 	var capturedDiff string
@@ -1373,6 +1385,7 @@ func TestQuickCommit_AIError(t *testing.T) {
 	if !isGitRepo() {
 		t.Skip("skipping: not inside a git repository")
 	}
+	skipIfDetachedHead(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
 	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
