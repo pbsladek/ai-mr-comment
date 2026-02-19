@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -24,11 +25,27 @@ func main() {
 	}
 }
 
+// parseVerdict extracts the VERDICT line prepended by the AI when --exit-code is
+// active. Returns the verdict token ("PASS" or "FAIL") and the body with the
+// verdict line stripped. If no VERDICT prefix is found, returns ("PASS", comment)
+// so the exit-code logic is always safe to call.
+func parseVerdict(comment string) (verdict, body string) {
+	if strings.HasPrefix(comment, "VERDICT: ") {
+		lines := strings.SplitN(comment, "\n", 2)
+		verdict = strings.TrimSpace(strings.TrimPrefix(lines[0], "VERDICT: "))
+		if len(lines) > 1 {
+			body = strings.TrimSpace(lines[1])
+		}
+		return verdict, body
+	}
+	return "PASS", comment
+}
+
 // newRootCmd builds the root cobra command, wiring flags to the provided chatFn.
 // Accepting chatFn as a parameter allows tests to inject a mock without real API calls.
 func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
 	var commit, diffFilePath, outputPath, provider, modelOverride, templateName, format, prURL, clipboardFlag string
-	var debug, staged, smartChunk, generateTitle, generateCommitMsg, verbose bool
+	var debug, staged, smartChunk, generateTitle, generateCommitMsg, verbose, exitCodeFlag, postFlag bool
 	var exclude []string
 
 	rootCmd := &cobra.Command{
@@ -81,6 +98,12 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			}
 			if generateCommitMsg && generateTitle {
 				return errors.New("--commit-msg and --title cannot be used together")
+			}
+			if exitCodeFlag && generateCommitMsg {
+				return errors.New("--exit-code cannot be used with --commit-msg")
+			}
+			if postFlag && prURL == "" {
+				return errors.New("--post requires --pr to specify a GitHub PR or GitLab MR URL")
 			}
 
 			if format != "text" && format != "json" {
@@ -158,6 +181,13 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				}
 			}
 			debugLog(cfg, "template: name=%q source=%s length=%d", cfg.Template, templateSource, len(systemPrompt))
+
+			// When --exit-code is set, prepend a verdict instruction so the AI starts
+			// its response with "VERDICT: PASS" or "VERDICT: FAIL".
+			const exitCodePreamble = "Before your review, output a verdict on the very first line in exactly this format:\nVERDICT: PASS\nor\nVERDICT: FAIL\nUse FAIL if the diff contains critical bugs, security vulnerabilities, data loss risks, or broken public APIs. Use PASS for everything else. Then continue with your normal review on the next line.\n\n"
+			if exitCodeFlag {
+				systemPrompt = exitCodePreamble + systemPrompt
+			}
 
 			if debug {
 				estimator := NewTokenEstimator(cfg)
@@ -284,6 +314,13 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				title = strings.TrimSpace(title)
 			}
 
+			// Parse and strip the VERDICT line when --exit-code is active.
+			var verdict string
+			if exitCodeFlag && comment != "" {
+				verdict, comment = parseVerdict(comment)
+				debugLog(cfg, "exit-code: verdict=%s", verdict)
+			}
+
 			dest := "stdout"
 			if outputPath != "" {
 				dest = "file: " + outputPath
@@ -292,35 +329,39 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			}
 			debugLog(cfg, "output: format=%s destination=%s", format, dest)
 
+			// outputJSON is the structured response emitted when --format=json is set.
+			// For --commit-msg: only commit_message, provider, model are populated.
+			// For normal description: title and description are the primary fields;
+			// comment mirrors description for backwards compatibility.
+			// Hoisted to outer scope so --output file can reference it when format=json.
+			type outputJSON struct {
+				Title         string `json:"title,omitempty"`
+				Description   string `json:"description,omitempty"`
+				Comment       string `json:"comment,omitempty"`
+				CommitMessage string `json:"commit_message,omitempty"`
+				Verdict       string `json:"verdict,omitempty"`
+				Provider      string `json:"provider"`
+				Model         string `json:"model"`
+			}
+			var payload outputJSON
+			if generateCommitMsg {
+				payload = outputJSON{
+					CommitMessage: commitMessage,
+					Provider:      string(cfg.Provider),
+					Model:         getModelName(cfg),
+				}
+			} else {
+				payload = outputJSON{
+					Title:       title,
+					Description: comment,
+					Comment:     comment,
+					Verdict:     verdict,
+					Provider:    string(cfg.Provider),
+					Model:       getModelName(cfg),
+				}
+			}
+
 			if format == "json" {
-				// outputJSON is the structured response emitted when --format=json is set.
-				// For --commit-msg: only commit_message, provider, model are populated.
-				// For normal description: title and description are the primary fields;
-				// comment mirrors description for backwards compatibility.
-				type outputJSON struct {
-					Title         string `json:"title,omitempty"`
-					Description   string `json:"description,omitempty"`
-					Comment       string `json:"comment,omitempty"`
-					CommitMessage string `json:"commit_message,omitempty"`
-					Provider      string `json:"provider"`
-					Model         string `json:"model"`
-				}
-				var payload outputJSON
-				if generateCommitMsg {
-					payload = outputJSON{
-						CommitMessage: commitMessage,
-						Provider:      string(cfg.Provider),
-						Model:         getModelName(cfg),
-					}
-				} else {
-					payload = outputJSON{
-						Title:       title,
-						Description: comment,
-						Comment:     comment,
-						Provider:    string(cfg.Provider),
-						Model:       getModelName(cfg),
-					}
-				}
 				if err := json.NewEncoder(out).Encode(payload); err != nil {
 					return err
 				}
@@ -378,7 +419,44 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			}
 
 			if outputPath != "" {
-				return os.WriteFile(outputPath, []byte(comment), 0600)
+				var fileContent []byte
+				if format == "json" {
+					var buf bytes.Buffer
+					if encErr := json.NewEncoder(&buf).Encode(payload); encErr != nil {
+						return encErr
+					}
+					fileContent = buf.Bytes()
+				} else if generateCommitMsg {
+					fileContent = []byte(commitMessage + "\n")
+				} else {
+					fileContent = []byte(comment)
+				}
+				return os.WriteFile(outputPath, fileContent, 0600)
+			}
+
+			// --post: publish the generated comment back to the GitHub PR or GitLab MR.
+			if postFlag {
+				postBody := comment
+				if title != "" {
+					postBody = "**" + title + "**\n\n" + comment
+				}
+				switch {
+				case isGitHubURL(prURL):
+					if err := postGitHubPRComment(cmd.Context(), prURL, cfg.GitHubToken, cfg.GitHubBaseURL, postBody); err != nil {
+						return err
+					}
+					_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Posted comment to GitHub PR.")
+				case isGitLabURL(prURL):
+					if err := postGitLabMRNote(cmd.Context(), prURL, cfg.GitLabToken, cfg.GitLabBaseURL, postBody); err != nil {
+						return err
+					}
+					_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Posted note to GitLab MR.")
+				}
+			}
+
+			// --exit-code: non-zero exit when AI verdict is FAIL.
+			if exitCodeFlag && verdict == "FAIL" {
+				os.Exit(2)
 			}
 			return nil
 		},
@@ -400,6 +478,8 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().BoolVar(&smartChunk, "smart-chunk", false, "Split large diffs by file, summarize each, then combine")
 	rootCmd.Flags().BoolVar(&generateTitle, "title", false, "Generate a concise MR/PR title in addition to the comment")
 	rootCmd.Flags().BoolVar(&generateCommitMsg, "commit-msg", false, "Generate a git commit message instead of a full MR/PR description")
+	rootCmd.Flags().BoolVar(&exitCodeFlag, "exit-code", false, "Exit with code 2 if the AI detects critical issues in the diff")
+	rootCmd.Flags().BoolVar(&postFlag, "post", false, "Post the generated comment back to the GitHub PR or GitLab MR (requires --pr)")
 
 	rootCmd.AddCommand(newInitConfigCmd())
 	rootCmd.AddCommand(newModelsCmd())

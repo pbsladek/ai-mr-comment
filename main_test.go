@@ -1441,3 +1441,223 @@ func TestQuickCommit_DetachedHead(t *testing.T) {
 		t.Errorf("expected detached HEAD error, got: %v", execErr)
 	}
 }
+
+// --- parseVerdict unit tests ---
+
+func TestParseVerdict_Pass(t *testing.T) {
+	verdict, body := parseVerdict("VERDICT: PASS\nThis looks good.")
+	if verdict != "PASS" {
+		t.Errorf("expected verdict PASS, got %q", verdict)
+	}
+	if body != "This looks good." {
+		t.Errorf("expected body %q, got %q", "This looks good.", body)
+	}
+}
+
+func TestParseVerdict_Fail(t *testing.T) {
+	verdict, body := parseVerdict("VERDICT: FAIL\nThere is a SQL injection.")
+	if verdict != "FAIL" {
+		t.Errorf("expected verdict FAIL, got %q", verdict)
+	}
+	if body != "There is a SQL injection." {
+		t.Errorf("expected body %q, got %q", "There is a SQL injection.", body)
+	}
+}
+
+func TestParseVerdict_NoVerdictLine(t *testing.T) {
+	input := "Normal review text without verdict."
+	verdict, body := parseVerdict(input)
+	if verdict != "PASS" {
+		t.Errorf("expected default PASS, got %q", verdict)
+	}
+	if body != input {
+		t.Errorf("expected body unchanged, got %q", body)
+	}
+}
+
+// --- --exit-code flag tests ---
+
+// TestExitCodeFlag_Pass verifies that VERDICT: PASS is stripped from the output
+// and the command exits successfully (returns nil).
+func TestExitCodeFlag_Pass(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "VERDICT: PASS\nmocked comment", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--exit-code", "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	output := buf.String()
+	if strings.Contains(output, "VERDICT:") {
+		t.Errorf("expected VERDICT line to be stripped from output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "mocked comment") {
+		t.Errorf("expected review body in output, got:\n%s", output)
+	}
+}
+
+// TestExitCodeFlag_JSON verifies that --exit-code --format=json includes
+// a "verdict" field in the JSON output.
+func TestExitCodeFlag_JSON(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "VERDICT: PASS\nmocked comment", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--exit-code", "--format=json", "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(buf.String()), &result); err != nil {
+		t.Fatalf("expected valid JSON, got error: %v\nOutput: %s", err, buf.String())
+	}
+	if result["verdict"] != "PASS" {
+		t.Errorf("expected verdict=PASS in JSON, got: %v", result["verdict"])
+	}
+	// The description should not contain the raw VERDICT line — it must be stripped.
+	if desc, _ := result["description"].(string); strings.Contains(desc, "VERDICT:") {
+		t.Errorf("expected raw VERDICT line to be stripped from description, got: %q", desc)
+	}
+}
+
+// TestExitCodeFlag_MutualExclusion verifies that --exit-code and --commit-msg
+// cannot be used together.
+func TestExitCodeFlag_MutualExclusion(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--exit-code", "--commit-msg", "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected mutual exclusion error, got nil")
+	}
+	if !strings.Contains(err.Error(), "--exit-code") || !strings.Contains(err.Error(), "--commit-msg") {
+		t.Errorf("expected error to mention both flags, got: %v", err)
+	}
+}
+
+// TestExitCodeFlag_Fail verifies that the process exits with code 2 when the AI
+// returns VERDICT: FAIL. Uses the subprocess test pattern to observe os.Exit.
+func TestExitCodeFlag_Fail(t *testing.T) {
+	if os.Getenv("AI_MR_EXIT_CODE_SUBPROCESS") == "1" {
+		// Running as subprocess: execute the logic that calls os.Exit(2).
+		fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+			return "VERDICT: FAIL\nbad code detected", nil
+		}
+		t.Setenv("OPENAI_API_KEY", "dummy")
+		cmd := newRootCmd(fn)
+		cmd.SetArgs([]string{"--exit-code", "--file=testdata/simple.diff", "--provider=openai"})
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		_ = cmd.Execute()
+		// If os.Exit(2) is not called, we fall through and exit 0 — test will catch this.
+		return
+	}
+
+	proc := exec.Command(os.Args[0], "-test.run=TestExitCodeFlag_Fail", "-test.v")
+	proc.Env = append(os.Environ(), "AI_MR_EXIT_CODE_SUBPROCESS=1")
+	err := proc.Run()
+	if err == nil {
+		t.Fatal("expected process to exit with non-zero code, got nil")
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("expected *exec.ExitError, got %T: %v", err, err)
+	}
+	if exitErr.ExitCode() != 2 {
+		t.Errorf("expected exit code 2, got %d", exitErr.ExitCode())
+	}
+}
+
+// --- --post flag tests ---
+
+// TestPostFlag_RequiresPR verifies that --post without --pr returns an error.
+func TestPostFlag_RequiresPR(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--post", "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when --post used without --pr, got nil")
+	}
+	if !strings.Contains(err.Error(), "--post requires --pr") {
+		t.Errorf("expected '--post requires --pr' error, got: %v", err)
+	}
+}
+
+// --- --output with --format=json test ---
+
+// TestOutputFlag_JSON verifies that --output writes valid JSON to the file
+// when --format=json is set.
+func TestOutputFlag_JSON(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	tmpFile := t.TempDir() + "/review.json"
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "mocked comment", nil
+	}
+
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--format=json", "--output=" + tmpFile, "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	content, readErr := os.ReadFile(tmpFile)
+	if readErr != nil {
+		t.Fatalf("expected output file to exist, got error: %v", readErr)
+	}
+
+	var result map[string]any
+	if jsonErr := json.Unmarshal(content, &result); jsonErr != nil {
+		t.Fatalf("expected valid JSON in output file, got error: %v\nContent: %s", jsonErr, string(content))
+	}
+	if result["description"] == nil && result["comment"] == nil {
+		t.Errorf("expected description or comment key in JSON, got: %v", result)
+	}
+	if result["provider"] == nil {
+		t.Errorf("expected provider key in JSON, got: %v", result)
+	}
+}

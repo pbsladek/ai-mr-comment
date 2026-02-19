@@ -23,9 +23,12 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 - **Jira-aware template** (`--template=jira`) — extracts ticket key from branch name and places it first so Jira auto-links
 - **Commit message generation** (`--commit-msg`) — outputs a single conventional-style line ready for `git commit -m`
 - **`quick-commit` subcommand** — stages all changes, generates a commit message, commits, and pushes in one step
+- **CI/CD gate** (`--exit-code`) — exits with code 2 when the AI flags critical issues, enabling pipeline enforcement
+- **Auto-post comments** (`--post`) — publishes the generated comment directly to the GitHub PR or GitLab MR via API
 - Configuration file support (`~/.ai-mr-comment.toml`)
 - Environment variable configuration
 - Outputs to console, a file (`--output`), or the system clipboard (`--clipboard=title|description|commit-msg|all`)
+- `--output` writes JSON when `--format=json` is set — ideal for saving structured review artifacts
 - Structured JSON output for scripting and CI (`--format json`)
 - Verbose debug logging to stderr (`--verbose`) — API timing, diff stats, config details
 - Live streaming output to the terminal — tokens appear as they are generated
@@ -175,6 +178,15 @@ ai-mr-comment --title --clipboard=title
 # Copy a commit message to clipboard
 ai-mr-comment --commit-msg --clipboard=commit-msg
 
+# Gate CI on AI review — exits 2 if critical issues are detected
+ai-mr-comment --exit-code --pr https://github.com/owner/repo/pull/42
+
+# Generate and immediately post the comment back to the PR/MR
+ai-mr-comment --pr https://github.com/owner/repo/pull/42 --post
+
+# Save JSON review to a file (for artifact upload in CI)
+ai-mr-comment --format json --output /tmp/review.json --pr https://github.com/owner/repo/pull/42
+
 # Enable verbose debug logging to stderr (API timing, diff stats, config)
 ai-mr-comment --verbose
 
@@ -198,8 +210,10 @@ ai-mr-comment init-config
 - `--smart-chunk`: Split large diffs by file, summarize each, then synthesize a final comment
 - `--title`: Generate a concise MR/PR title alongside the comment; printed as a distinct `── Title ──` section in text mode. When `--format=json` is used, title is always generated automatically (no need for `--title`). Mutually exclusive with `--commit-msg`.
 - `--commit-msg`: Generate a single-line git commit message instead of a full MR/PR description. Output is clean text or `{"commit_message":"..."}` in JSON mode. Mutually exclusive with `--title`.
+- `--exit-code`: Exit with code 2 when the AI detects critical issues (bugs, security vulnerabilities, data loss risks). Exit 0 = pass, exit 2 = AI-flagged fail, exit 1 = tool error. Mutually exclusive with `--commit-msg`.
+- `--post`: Post the generated comment back to the GitHub PR or GitLab MR via API (requires `--pr`). Uses the same token as diff fetching.
 - `--file <FILE>`: Read diff from file instead of git
-- `--output <FILE>`: Write output to file instead of stdout
+- `--output <FILE>`: Write output to file instead of stdout. Writes JSON when `--format=json` is set; writes the commit message when `--commit-msg` is set.
 - `--clipboard <WHAT>`: Copy to system clipboard — `title`, `description` (or `comment`), `commit-msg`, or `all` (title + description separated by a blank line)
 - `--format <FORMAT>`: Output format — `text` (default) or `json`
 - `--provider <PROVIDER>`: Provider (openai, anthropic, gemini, ollama)
@@ -368,6 +382,73 @@ Steps performed:
 | `--provider` | Override the AI provider |
 | `--model` | Override the model |
 
+## CI/CD Usage
+
+Three flags are designed specifically for pipeline integration:
+
+### `--exit-code` — Gate merges on AI review
+
+Instruct the AI to output a `VERDICT: PASS` or `VERDICT: FAIL` line before its review. If FAIL, the process exits with code 2, failing your pipeline step.
+
+```bash
+# Fail the pipeline if the AI detects critical issues
+ai-mr-comment --exit-code --pr "$PR_URL"
+echo $?  # 0 = PASS, 2 = FAIL, 1 = tool error
+
+# JSON includes the verdict field for downstream processing
+ai-mr-comment --exit-code --format json --pr "$PR_URL" | jq .verdict
+```
+
+**GitHub Actions example:**
+```yaml
+- name: AI Code Review
+  run: ai-mr-comment --exit-code --pr "${{ github.event.pull_request.html_url }}"
+  env:
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # Step fails (exit 2) if AI detects critical issues
+```
+
+### `--post` — Auto-post comments to PRs/MRs
+
+After generating the comment, post it directly to the PR or MR via the GitHub/GitLab API. Uses the same token as diff fetching — no extra setup needed.
+
+```bash
+# Generate and post in one step
+ai-mr-comment --pr "$PR_URL" --post
+
+# Combine with exit-code: review, post, and gate in one command
+ai-mr-comment --exit-code --post --pr "$PR_URL"
+```
+
+**GitHub Actions example:**
+```yaml
+- name: AI Review & Comment
+  run: ai-mr-comment --post --pr "${{ github.event.pull_request.html_url }}"
+  env:
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+### `--output` with `--format json` — Save review artifacts
+
+Write the full JSON review to a file. Useful for artifact upload, audit trails, or passing data between pipeline jobs.
+
+```bash
+# Write JSON to file
+ai-mr-comment --format json --output review.json --pr "$PR_URL"
+
+# Upload as artifact (GitHub Actions)
+# - uses: actions/upload-artifact@v4
+#   with: { name: ai-review, path: review.json }
+
+# Read in a later job
+cat review.json | jq -r '.description'
+cat review.json | jq -r '.verdict'  # when --exit-code was used
+```
+
+When `--commit-msg` is set, `--output` writes the commit message (with a trailing newline) rather than JSON.
+
 ## Example Output
 
 **Text mode (`--title`):**
@@ -405,7 +486,7 @@ Provides a secure foundation for user identity, allowing protected access to API
 }
 ```
 
-`description` and `comment` carry the same value; `comment` is kept for backwards compatibility.
+`description` and `comment` carry the same value; `comment` is kept for backwards compatibility. When `--exit-code` is set, a `"verdict": "PASS"` or `"verdict": "FAIL"` field is also included.
 
 **Commit message mode (`--commit-msg --format json`):**
 

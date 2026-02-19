@@ -286,6 +286,57 @@ func getMRDiff(ctx context.Context, mrURL, token, baseURL string) (string, error
 	return getMRDiffWithClient(ctx, gl, mrURL)
 }
 
+// postGitHubPRCommentWithClient posts body as a PR comment using the given client.
+// Separated from postGitHubPRComment to allow tests to inject a client pointed
+// at a local httptest server.
+func postGitHubPRCommentWithClient(ctx context.Context, gh *gogithub.Client, prURL, body string) error {
+	owner, repo, number, err := parsePRURL(prURL)
+	if err != nil {
+		return err
+	}
+	_, _, err = gh.Issues.CreateComment(ctx, owner, repo, number, &gogithub.IssueComment{Body: &body})
+	if err != nil {
+		return fmt.Errorf("posting GitHub PR comment: %w", err)
+	}
+	return nil
+}
+
+// postGitHubPRComment posts body as a comment on the GitHub PR at prURL.
+func postGitHubPRComment(ctx context.Context, prURL, token, baseURL, body string) error {
+	gh, err := newGitHubClient(ctx, token, baseURL)
+	if err != nil {
+		return err
+	}
+	return postGitHubPRCommentWithClient(ctx, gh, prURL, body)
+}
+
+// postGitLabMRNoteWithClient posts body as an MR note using the given client.
+// Separated from postGitLabMRNote to allow tests to inject a client pointed
+// at a local httptest server.
+func postGitLabMRNoteWithClient(ctx context.Context, gl *gogitlab.Client, mrURL, body string) error {
+	namespace, project, iid, err := parseMRURL(mrURL)
+	if err != nil {
+		return err
+	}
+	projectPath := namespace + "/" + project
+	_, _, err = gl.Notes.CreateMergeRequestNote(projectPath, iid, &gogitlab.CreateMergeRequestNoteOptions{
+		Body: &body,
+	}, gogitlab.WithContext(ctx))
+	if err != nil {
+		return fmt.Errorf("posting GitLab MR note: %w", err)
+	}
+	return nil
+}
+
+// postGitLabMRNote posts body as a note on the GitLab MR at mrURL.
+func postGitLabMRNote(ctx context.Context, mrURL, token, baseURL, body string) error {
+	gl, err := newGitLabClient(token, baseURL)
+	if err != nil {
+		return fmt.Errorf("creating GitLab client: %w", err)
+	}
+	return postGitLabMRNoteWithClient(ctx, gl, mrURL, body)
+}
+
 // formatPRContent builds the combined title + description + diff string that is
 // passed to the AI provider.
 func formatPRContent(title, body, rawDiff string) string {

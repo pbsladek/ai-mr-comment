@@ -512,3 +512,103 @@ func TestGitPush_NoRemoteFails(t *testing.T) {
 	}
 }
 
+// TestPostGitHubPRComment verifies that postGitHubPRCommentWithClient sends
+// a POST to the correct GitHub Issues endpoint with the expected body.
+func TestPostGitHubPRComment(t *testing.T) {
+	var receivedBody string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/owner/repo/issues/42/comments", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var payload struct {
+			Body string `json:"body"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		receivedBody = payload.Body
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": 1, "body": payload.Body})
+	})
+
+	gh := newTestGitHubClient(t, mux)
+	err := postGitHubPRCommentWithClient(context.Background(), gh, "https://github.com/owner/repo/pull/42", "great review")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedBody != "great review" {
+		t.Errorf("expected body %q, got %q", "great review", receivedBody)
+	}
+}
+
+// TestPostGitHubPRComment_APIError verifies that a non-2xx response is
+// surfaced as an error containing the expected message.
+func TestPostGitHubPRComment_APIError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/owner/repo/issues/1/comments", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+	})
+
+	gh := newTestGitHubClient(t, mux)
+	err := postGitHubPRCommentWithClient(context.Background(), gh, "https://github.com/owner/repo/pull/1", "body")
+	if err == nil {
+		t.Fatal("expected error for 403 response, got nil")
+	}
+	if !strings.Contains(err.Error(), "posting GitHub PR comment") {
+		t.Errorf("expected error to mention 'posting GitHub PR comment', got: %v", err)
+	}
+}
+
+// TestPostGitLabMRNote verifies that postGitLabMRNoteWithClient sends a POST
+// to the correct GitLab Notes endpoint with the expected body.
+func TestPostGitLabMRNote(t *testing.T) {
+	var receivedBody string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/mygroup%2Fmyproject/merge_requests/5/notes", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var payload struct {
+			Body string `json:"body"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		receivedBody = payload.Body
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": 1, "body": payload.Body})
+	})
+
+	gl := newTestGitLabClient(t, mux)
+	err := postGitLabMRNoteWithClient(context.Background(), gl, "https://gitlab.com/mygroup/myproject/-/merge_requests/5", "mr note")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedBody != "mr note" {
+		t.Errorf("expected body %q, got %q", "mr note", receivedBody)
+	}
+}
+
+// TestPostGitLabMRNote_APIError verifies that a non-2xx response is surfaced
+// as an error containing the expected message.
+func TestPostGitLabMRNote_APIError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/mygroup%2Fmyproject/merge_requests/5/notes", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+	})
+
+	gl := newTestGitLabClient(t, mux)
+	err := postGitLabMRNoteWithClient(context.Background(), gl, "https://gitlab.com/mygroup/myproject/-/merge_requests/5", "body")
+	if err == nil {
+		t.Fatal("expected error for 403 response, got nil")
+	}
+	if !strings.Contains(err.Error(), "posting GitLab MR note") {
+		t.Errorf("expected error to mention 'posting GitLab MR note', got: %v", err)
+	}
+}
+
