@@ -222,6 +222,9 @@ make test
 # Run integration tests (requires GEMINI_API_KEY)
 make test-integration
 
+# Run fuzz tests (30s per target)
+make test-fuzz
+
 # Run linter
 make lint
 ```
@@ -238,6 +241,40 @@ make install-completion-zsh
 # Or generate manually for any shell
 ai-mr-comment completion [bash|zsh|fish|powershell]
 ```
+
+## Contributing
+
+### Commit Convention
+
+This project uses [Conventional Commits](https://www.conventionalcommits.org/) to drive automatic semantic versioning. Every commit merged to `main` must follow the format:
+
+```
+<type>[optional scope]: <description>
+```
+
+| Type | Description | Version bump |
+|---|---|---|
+| `fix:` | Bug fix | patch (`0.0.x`) |
+| `feat:` | New feature | minor (`0.x.0`) |
+| `feat!:` or `BREAKING CHANGE:` footer | Breaking change | major (`x.0.0`) |
+| `chore:`, `docs:`, `ci:`, `test:`, `refactor:`, `style:`, `perf:` | Non-functional | none |
+
+**Examples:**
+```
+fix: handle empty diff gracefully
+feat: add clipboard output support
+feat!: redesign config file format
+chore: update dependencies
+```
+
+### Release Process
+
+Merging to `main` automatically creates a version tag (e.g. `v0.2.0`) based on the commits since the last release — no GitHub Release is created yet.
+
+When ready to publish a release:
+1. Go to **GitHub → Releases → Draft a new release**
+2. Pick the pre-created tag from the dropdown
+3. Click **Publish release** — GoReleaser builds and attaches signed binaries automatically
 
 ## License
 

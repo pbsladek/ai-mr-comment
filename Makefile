@@ -8,17 +8,6 @@ PLATFORMS := linux/amd64 darwin/amd64 darwin/arm64 windows/amd64
 # Current baseline ~23.4 MB; gRPC+protobuf from generative-ai-go dominate.
 # Raise this ceiling deliberately if you add large deps; shrink it to lock in gains.
 MAX_BINARY_BYTES := 36700160
-NEXT_VERSION := $(shell \
-  git fetch --tags >/dev/null 2>&1; \
-  latest=$$(git tag --sort=-v:refname | grep '^v[0-9]' | head -n1); \
-  if [ -z "$$latest" ]; then echo v0.0.1; \
-  else \
-    major=$$(echo $$latest | cut -d. -f1 | tr -d 'v'); \
-    minor=$$(echo $$latest | cut -d. -f2); \
-    patch=$$(echo $$latest | cut -d. -f3); \
-    echo v$$major.$$minor.$$((patch + 1)); \
-  fi \
-)
 
 .PHONY: all clean build release test test-cover test-integration test-fuzz lint test-run install install-completion-bash install-completion-zsh check-size
 
@@ -92,14 +81,6 @@ install-completion-zsh: build
 
 clean:
 	rm -rf $(BUILD_DIR) coverage.out
-
-next-version:
-	@echo "Next version: $(NEXT_VERSION)"
-
-tag-release:
-	@git tag $(NEXT_VERSION)
-	@git push origin $(NEXT_VERSION)
-	@echo "Tagged and pushed: $(NEXT_VERSION)"
 
 release: clean
 	@mkdir -p $(BUILD_DIR)
