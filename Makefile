@@ -9,7 +9,7 @@ PLATFORMS := linux/amd64 darwin/amd64 darwin/arm64 windows/amd64
 # Raise this ceiling deliberately if you add large deps; shrink it to lock in gains.
 MAX_BINARY_BYTES := 36700160
 
-.PHONY: all clean build release test test-cover test-integration test-fuzz lint test-run install install-completion-bash install-completion-zsh check-size help
+.PHONY: all clean build release test test-cover test-integration test-fuzz lint test-run install install-completion-bash install-completion-zsh check-size help docker-build docker-run docker-quick-commit
 
 all: build
 
@@ -88,6 +88,40 @@ install-completion-zsh: build ## Generate zsh completion script to /tmp/
 	./dist/ai-mr-comment completion zsh > /tmp/_ai-mr-comment
 	@echo "Move to your zsh functions path, e.g.:"
 	@echo "  mv /tmp/_ai-mr-comment ~/.zsh/completions/_ai-mr-comment"
+
+DOCKER_IMAGE ?= ai-mr-comment
+DOCKER_TAG   ?= latest
+
+# Common docker run flags:
+#   -it                           interactive terminal (for streaming output)
+#   --rm                          remove container on exit
+#   -v $(PWD):/repo               mount current repo so git diffs work
+#   -v ~/.ai-mr-comment.toml:...  optional: mount config file
+#   -e OPENAI_API_KEY=...         pass API key from host env
+DOCKER_RUN_FLAGS ?= \
+  -it --rm \
+  -v "$(PWD):/repo" \
+  -w /repo \
+  -e OPENAI_API_KEY \
+  -e ANTHROPIC_API_KEY \
+  -e GEMINI_API_KEY \
+  -e GITHUB_TOKEN \
+  -e GITLAB_TOKEN
+
+docker-build: ## Build the Docker image (IMAGE=name TAG=tag)
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		-t $(DOCKER_IMAGE):$(DOCKER_TAG) .
+
+docker-run: docker-build ## Build image and run with current repo mounted (ARGS="--provider openai")
+	docker run $(DOCKER_RUN_FLAGS) \
+		$(shell [ -f ~/.ai-mr-comment.toml ] && echo '-v $(HOME)/.ai-mr-comment.toml:/home/aiuser/.ai-mr-comment.toml:ro') \
+		$(DOCKER_IMAGE):$(DOCKER_TAG) $(ARGS)
+
+docker-quick-commit: docker-build ## Build image and run quick-commit with current repo mounted (ARGS="--dry-run")
+	docker run $(DOCKER_RUN_FLAGS) \
+		$(shell [ -f ~/.ai-mr-comment.toml ] && echo '-v $(HOME)/.ai-mr-comment.toml:/home/aiuser/.ai-mr-comment.toml:ro') \
+		$(DOCKER_IMAGE):$(DOCKER_TAG) quick-commit $(ARGS)
 
 clean: ## Remove build artifacts and coverage output
 	rm -rf $(BUILD_DIR) coverage.out
