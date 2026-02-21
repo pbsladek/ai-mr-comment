@@ -1858,3 +1858,276 @@ func TestSmartChunk_ChunkError(t *testing.T) {
 	}
 }
 
+// ── changelog subcommand tests ────────────────────────────────────────────────
+
+func TestChangelog_TextOutput(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	mockFn := func(_ context.Context, _ *Config, _ ApiProvider, systemPrompt, _ string) (string, error) {
+		if strings.HasPrefix(systemPrompt, "You are writing a user-facing changelog") {
+			return "### Added\n- New feature added.", nil
+		}
+		return "unexpected call", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(mockFn)
+	cmd.SetArgs([]string{
+		"changelog",
+		"--file=testdata/simple.diff",
+		"--provider=openai",
+	})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "### Added") {
+		t.Errorf("expected changelog output, got: %q", out)
+	}
+}
+
+func TestChangelog_JSONOutput(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	mockFn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "### Fixed\n- Bug squashed.", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(mockFn)
+	cmd.SetArgs([]string{
+		"changelog",
+		"--file=testdata/simple.diff",
+		"--provider=openai",
+		"--format=json",
+	})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result struct {
+		Changelog string `json:"changelog"`
+		Provider  string `json:"provider"`
+		Model     string `json:"model"`
+	}
+	if err := json.NewDecoder(strings.NewReader(buf.String())).Decode(&result); err != nil {
+		t.Fatalf("invalid JSON output: %v\nraw: %s", err, buf.String())
+	}
+	if !strings.Contains(result.Changelog, "### Fixed") {
+		t.Errorf("expected changelog in JSON, got: %q", result.Changelog)
+	}
+	if result.Provider != "openai" {
+		t.Errorf("expected provider=openai, got %q", result.Provider)
+	}
+}
+
+func TestChangelog_APIError(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	mockFn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "", errors.New("api failure")
+	}
+
+	cmd := newRootCmd(mockFn)
+	cmd.SetArgs([]string{
+		"changelog",
+		"--file=testdata/simple.diff",
+		"--provider=openai",
+	})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "api failure") {
+		t.Fatalf("expected api failure error, got %v", err)
+	}
+}
+
+func TestChangelog_OutputToFile(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	mockFn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "### Added\n- Feature X.", nil
+	}
+
+	outFile := "testdata/changelog-output.md"
+	defer func() { _ = os.Remove(outFile) }()
+
+	cmd := newRootCmd(mockFn)
+	cmd.SetArgs([]string{
+		"changelog",
+		"--file=testdata/simple.diff",
+		"--provider=openai",
+		"--output=" + outFile,
+	})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("expected output file: %v", err)
+	}
+	if !strings.Contains(string(data), "### Added") {
+		t.Errorf("expected changelog in file, got: %q", string(data))
+	}
+}
+
+func TestChangelog_UnsupportedProvider(t *testing.T) {
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{
+		"changelog",
+		"--file=testdata/simple.diff",
+		"--provider=invalid",
+	})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "unsupported provider") {
+		t.Fatalf("expected unsupported provider error, got %v", err)
+	}
+}
+
+func TestChangelog_InvalidFormat(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{
+		"changelog",
+		"--file=testdata/simple.diff",
+		"--provider=openai",
+		"--format=xml",
+	})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "unsupported format") {
+		t.Fatalf("expected unsupported format error, got %v", err)
+	}
+}
+
+// ── gen-aliases subcommand tests ──────────────────────────────────────────────
+
+func TestGenAliases_DefaultOutput(t *testing.T) {
+	var buf strings.Builder
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"gen-aliases"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"alias amc=",
+		"alias amc-review=",
+		"alias amc-staged=",
+		"alias amc-commit=",
+		"alias amc-qc=",
+		"alias amc-cl=",
+		"alias amc-models=",
+		"alias amc-init=",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected alias %q in output, not found:\n%s", want, out)
+		}
+	}
+}
+
+func TestGenAliases_ZshShell(t *testing.T) {
+	var buf strings.Builder
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"gen-aliases", "--shell=zsh"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "alias amc=") {
+		t.Error("expected alias block for zsh")
+	}
+}
+
+func TestGenAliases_UnsupportedShell(t *testing.T) {
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"gen-aliases", "--shell=fish"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "unsupported shell") {
+		t.Fatalf("expected unsupported shell error, got %v", err)
+	}
+}
+
+func TestGenAliases_OutputToFile(t *testing.T) {
+	outFile := "testdata/aliases-output.sh"
+	defer func() { _ = os.Remove(outFile) }()
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"gen-aliases", "--output=" + outFile})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("expected output file: %v", err)
+	}
+	if !strings.Contains(string(data), "alias amc=") {
+		t.Errorf("expected alias block in file, got: %q", string(data))
+	}
+}
+
+func TestGenAliases_MatchesConstant(t *testing.T) {
+	var buf strings.Builder
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"gen-aliases"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if buf.String() != aliasBlock {
+		t.Errorf("output does not match aliasBlock constant.\ngot:\n%s\nwant:\n%s", buf.String(), aliasBlock)
+	}
+}
+
