@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	anthropicopt "github.com/anthropics/anthropic-sdk-go/option"
@@ -25,6 +26,40 @@ import (
 // geminiClientOptions allows tests to inject a custom endpoint and HTTP client
 // for the Gemini SDK without modifying call sites.
 var geminiClientOptions []option.ClientOption
+
+// geminiClient caches a single Gemini SDK client per process. The client is
+// safe for concurrent use; creating one per call would waste TLS handshakes.
+var (
+	geminiCachedClient    *genai.Client
+	geminiCachedClientKey string
+	geminiClientMu        sync.Mutex
+)
+
+// getGeminiClient returns a cached *genai.Client for apiKey, creating it on
+// first use. If the API key changes (rare in practice) the cache is refreshed.
+func getGeminiClient(ctx context.Context, apiKey string) (*genai.Client, error) {
+	geminiClientMu.Lock()
+	defer geminiClientMu.Unlock()
+
+	if geminiCachedClient != nil && geminiCachedClientKey == apiKey && len(geminiClientOptions) == 0 {
+		return geminiCachedClient, nil
+	}
+
+	// Build a fresh client (key changed, first call, or test options injected).
+	opts := []option.ClientOption{option.WithAPIKey(apiKey)}
+	opts = append(opts, geminiClientOptions...)
+	client, err := genai.NewClient(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	// Close the old client if we're replacing it.
+	if geminiCachedClient != nil {
+		_ = geminiCachedClient.Close()
+	}
+	geminiCachedClient = client
+	geminiCachedClientKey = apiKey
+	return client, nil
+}
 
 // callOpenAI sends a chat completion request to the OpenAI API and returns the
 // generated message content.
@@ -127,14 +162,10 @@ func callOllama(ctx context.Context, cfg *Config, systemPrompt, diffContent stri
 // callGemini sends a content generation request to the Google Gemini API and
 // returns the concatenated text from all response parts.
 func callGemini(ctx context.Context, cfg *Config, systemPrompt, diffContent string) (string, error) {
-	opts := []option.ClientOption{option.WithAPIKey(cfg.GeminiAPIKey)}
-	opts = append(opts, geminiClientOptions...)
-
-	client, err := genai.NewClient(ctx, opts...)
+	client, err := getGeminiClient(ctx, cfg.GeminiAPIKey)
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = client.Close() }()
 
 	model := client.GenerativeModel(cfg.GeminiModel)
 	model.SystemInstruction = &genai.Content{
@@ -150,13 +181,13 @@ func callGemini(ctx context.Context, cfg *Config, systemPrompt, diffContent stri
 		return "", errors.New("no content returned from Gemini")
 	}
 
-	var result string
+	var sb strings.Builder
 	for _, part := range resp.Candidates[0].Content.Parts {
 		if txt, ok := part.(genai.Text); ok {
-			result += string(txt)
+			sb.WriteString(string(txt))
 		}
 	}
-	return result, nil
+	return sb.String(), nil
 }
 
 // chatCompletions dispatches a prompt and diff to the appropriate provider and
@@ -285,14 +316,10 @@ func streamAnthropic(ctx context.Context, client *anthropic.Client, cfg *Config,
 // streamGemini streams a content generation response from Gemini, writing each
 // text part to w.
 func streamGemini(ctx context.Context, cfg *Config, systemPrompt, diffContent string, w io.Writer) (string, error) {
-	opts := []option.ClientOption{option.WithAPIKey(cfg.GeminiAPIKey)}
-	opts = append(opts, geminiClientOptions...)
-
-	client, err := genai.NewClient(ctx, opts...)
+	client, err := getGeminiClient(ctx, cfg.GeminiAPIKey)
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = client.Close() }()
 
 	model := client.GenerativeModel(cfg.GeminiModel)
 	model.SystemInstruction = &genai.Content{
@@ -361,12 +388,14 @@ func streamOllama(ctx context.Context, cfg *Config, systemPrompt, diffContent st
 	}
 
 	var sb strings.Builder
+	var chunk struct {
+		Response string `json:"response"`
+		Done     bool   `json:"done"`
+	}
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
-		var chunk struct {
-			Response string `json:"response"`
-			Done     bool   `json:"done"`
-		}
+		chunk.Response = ""
+		chunk.Done = false
 		if err := json.Unmarshal(scanner.Bytes(), &chunk); err != nil {
 			continue
 		}

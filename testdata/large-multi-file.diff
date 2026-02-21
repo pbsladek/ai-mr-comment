@@ -1,0 +1,376 @@
+diff --git a/api/handler.go b/api/handler.go
+index 1a2b3c4..5d6e7f8 100644
+--- a/api/handler.go
++++ b/api/handler.go
+@@ -1,10 +1,25 @@
+ package api
+
+ import (
++	"encoding/json"
+ 	"net/http"
++	"time"
+ )
+
+-func Handler(w http.ResponseWriter, r *http.Request) {
+-	w.WriteHeader(http.StatusOK)
++type Response struct {
++	Status    string    `json:"status"`
++	Timestamp time.Time `json:"timestamp"`
++	Data      any       `json:"data,omitempty"`
++}
++
++func Handler(w http.ResponseWriter, r *http.Request) {
++	resp := Response{
++		Status:    "ok",
++		Timestamp: time.Now(),
++	}
++	w.Header().Set("Content-Type", "application/json")
++	w.WriteHeader(http.StatusOK)
++	if err := json.NewEncoder(w).Encode(resp); err != nil {
++		http.Error(w, "encoding error", http.StatusInternalServerError)
++	}
+ }
+diff --git a/api/middleware.go b/api/middleware.go
+new file mode 100644
+index 0000000..abc1234
+--- /dev/null
++++ b/api/middleware.go
+@@ -0,0 +1,30 @@
++package api
++
++import (
++	"log"
++	"net/http"
++	"time"
++)
++
++// LoggingMiddleware logs each request method, path, and duration.
++func LoggingMiddleware(next http.Handler) http.Handler {
++	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		start := time.Now()
++		next.ServeHTTP(w, r)
++		log.Printf("%s %s %s", r.Method, r.URL.Path, time.Since(start))
++	})
++}
++
++// AuthMiddleware checks for a bearer token in the Authorization header.
++func AuthMiddleware(token string) func(http.Handler) http.Handler {
++	return func(next http.Handler) http.Handler {
++		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++			if r.Header.Get("Authorization") != "Bearer "+token {
++				http.Error(w, "unauthorized", http.StatusUnauthorized)
++				return
++			}
++			next.ServeHTTP(w, r)
++		})
++	}
++}
+diff --git a/auth/jwt.go b/auth/jwt.go
+new file mode 100644
+index 0000000..def5678
+--- /dev/null
++++ b/auth/jwt.go
+@@ -0,0 +1,40 @@
++package auth
++
++import (
++	"errors"
++	"time"
++)
++
++// Claims holds the JWT payload fields.
++type Claims struct {
++	UserID    string    `json:"user_id"`
++	Email     string    `json:"email"`
++	ExpiresAt time.Time `json:"expires_at"`
++}
++
++// Validate returns an error if the token claims are expired or malformed.
++func (c *Claims) Validate() error {
++	if c.UserID == "" {
++		return errors.New("missing user_id")
++	}
++	if c.Email == "" {
++		return errors.New("missing email")
++	}
++	if time.Now().After(c.ExpiresAt) {
++		return errors.New("token expired")
++	}
++	return nil
++}
++
++// NewClaims creates a Claims object valid for the given duration.
++func NewClaims(userID, email string, ttl time.Duration) *Claims {
++	return &Claims{
++		UserID:    userID,
++		Email:     email,
++		ExpiresAt: time.Now().Add(ttl),
++	}
++}
+diff --git a/config/config.go b/config/config.go
+index 9876543..abcdef0 100644
+--- a/config/config.go
++++ b/config/config.go
+@@ -1,12 +1,28 @@
+ package config
+
+ import (
++	"fmt"
+ 	"os"
+ )
+
+ type Config struct {
+-	Port string
++	Port     string
++	Host     string
++	LogLevel string
++	Debug    bool
+ }
+
+-func Load() *Config {
+-	return &Config{Port: os.Getenv("PORT")}
++func Load() (*Config, error) {
++	port := os.Getenv("PORT")
++	if port == "" {
++		port = "8080"
++	}
++	host := os.Getenv("HOST")
++	if host == "" {
++		host = "0.0.0.0"
++	}
++	logLevel := os.Getenv("LOG_LEVEL")
++	if logLevel == "" {
++		logLevel = "info"
++	}
++	if logLevel != "debug" && logLevel != "info" && logLevel != "warn" && logLevel != "error" {
++		return nil, fmt.Errorf("invalid LOG_LEVEL %q", logLevel)
++	}
++	return &Config{Port: port, Host: host, LogLevel: logLevel}, nil
+ }
+diff --git a/db/migrations/001_create_users.sql b/db/migrations/001_create_users.sql
+new file mode 100644
+index 0000000..aaa1111
+--- /dev/null
++++ b/db/migrations/001_create_users.sql
+@@ -0,0 +1,12 @@
++CREATE TABLE users (
++    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++    email       TEXT NOT NULL UNIQUE,
++    password    TEXT NOT NULL,
++    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
++    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
++);
++
++CREATE INDEX idx_users_email ON users(email);
++
++-- trigger to keep updated_at current
++CREATE TRIGGER set_updated_at BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+diff --git a/db/repository.go b/db/repository.go
+new file mode 100644
+index 0000000..bbb2222
+--- /dev/null
++++ b/db/repository.go
+@@ -0,0 +1,45 @@
++package db
++
++import (
++	"context"
++	"database/sql"
++	"errors"
++)
++
++var ErrNotFound = errors.New("record not found")
++
++type User struct {
++	ID    string
++	Email string
++}
++
++type UserRepository struct {
++	db *sql.DB
++}
++
++func NewUserRepository(db *sql.DB) *UserRepository {
++	return &UserRepository{db: db}
++}
++
++func (r *UserRepository) FindByID(ctx context.Context, id string) (*User, error) {
++	var u User
++	err := r.db.QueryRowContext(ctx,
++		"SELECT id, email FROM users WHERE id = $1", id,
++	).Scan(&u.ID, &u.Email)
++	if errors.Is(err, sql.ErrNoRows) {
++		return nil, ErrNotFound
++	}
++	if err != nil {
++		return nil, err
++	}
++	return &u, nil
++}
++
++func (r *UserRepository) Create(ctx context.Context, email, password string) (*User, error) {
++	var u User
++	err := r.db.QueryRowContext(ctx,
++		"INSERT INTO users (email, password) VALUES ($1, $2) RETURNING id, email",
++		email, password,
++	).Scan(&u.ID, &u.Email)
++	return &u, err
++}
+diff --git a/internal/cache/cache.go b/internal/cache/cache.go
+new file mode 100644
+index 0000000..ccc3333
+--- /dev/null
++++ b/internal/cache/cache.go
+@@ -0,0 +1,35 @@
++package cache
++
++import (
++	"sync"
++	"time"
++)
++
++type entry struct {
++	value     any
++	expiresAt time.Time
++}
++
++// TTLCache is a simple in-memory cache with per-entry TTL expiration.
++type TTLCache struct {
++	mu      sync.RWMutex
++	entries map[string]entry
++}
++
++func New() *TTLCache {
++	return &TTLCache{entries: make(map[string]entry)}
++}
++
++func (c *TTLCache) Set(key string, value any, ttl time.Duration) {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	c.entries[key] = entry{value: value, expiresAt: time.Now().Add(ttl)}
++}
++
++func (c *TTLCache) Get(key string) (any, bool) {
++	c.mu.RLock()
++	defer c.mu.RUnlock()
++	e, ok := c.entries[key]
++	if !ok || time.Now().After(e.expiresAt) {
++		return nil, false
++	}
++	return e.value, true
++}
+diff --git a/internal/metrics/metrics.go b/internal/metrics/metrics.go
+new file mode 100644
+index 0000000..ddd4444
+--- /dev/null
++++ b/internal/metrics/metrics.go
+@@ -0,0 +1,28 @@
++package metrics
++
++import (
++	"sync/atomic"
++)
++
++// Counter is a monotonically increasing uint64 counter safe for concurrent use.
++type Counter struct {
++	value atomic.Uint64
++}
++
++func (c *Counter) Inc() {
++	c.value.Add(1)
++}
++
++func (c *Counter) Value() uint64 {
++	return c.value.Load()
++}
++
++// Registry holds named counters.
++type Registry struct {
++	RequestsTotal Counter
++	ErrorsTotal   Counter
++	CacheHits     Counter
++	CacheMisses   Counter
++}
++
++func New() *Registry { return &Registry{} }
+diff --git a/main.go b/main.go
+index 1111111..2222222 100644
+--- a/main.go
++++ b/main.go
+@@ -1,10 +1,30 @@
+ package main
+
+ import (
+-	"fmt"
++	"log"
+ 	"net/http"
++
++	"example.com/app/api"
++	"example.com/app/config"
+ )
+
+ func main() {
+-	fmt.Println("Hello, World!")
++	cfg, err := config.Load()
++	if err != nil {
++		log.Fatalf("config error: %v", err)
++	}
++
++	mux := http.NewServeMux()
++	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
++		w.WriteHeader(http.StatusOK)
++		_, _ = w.Write([]byte("ok"))
++	})
++	mux.HandleFunc("/api/v1/", api.Handler)
++
++	addr := cfg.Host + ":" + cfg.Port
++	log.Printf("listening on %s", addr)
++	if err := http.ListenAndServe(addr, api.LoggingMiddleware(mux)); err != nil {
++		log.Fatalf("server error: %v", err)
++	}
+ }
+diff --git a/scripts/migrate.sh b/scripts/migrate.sh
+new file mode 100755
+index 0000000..eee5555
+--- /dev/null
++++ b/scripts/migrate.sh
+@@ -0,0 +1,15 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++DB_URL="${DATABASE_URL:?DATABASE_URL must be set}"
++MIGRATIONS_DIR="$(dirname "$0")/../db/migrations"
++
++echo "Running migrations from $MIGRATIONS_DIR"
++
++for f in "$MIGRATIONS_DIR"/*.sql; do
++    echo "Applying: $f"
++    psql "$DB_URL" -f "$f"
++done
++
++echo "All migrations applied."
+diff --git a/tests/integration_test.go b/tests/integration_test.go
+new file mode 100644
+index 0000000..fff6666
+--- /dev/null
++++ b/tests/integration_test.go
+@@ -0,0 +1,22 @@
++//go:build integration
++
++package tests
++
++import (
++	"net/http"
++	"testing"
++)
++
++func TestHealthEndpoint(t *testing.T) {
++	resp, err := http.Get("http://localhost:8080/health")
++	if err != nil {
++		t.Skipf("server not running: %v", err)
++	}
++	defer resp.Body.Close()
++	if resp.StatusCode != http.StatusOK {
++		t.Errorf("expected 200, got %d", resp.StatusCode)
++	}
++}

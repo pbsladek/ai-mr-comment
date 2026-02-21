@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -103,4 +104,84 @@ func TestIntegration_Anthropic(t *testing.T) {
 	}
 
 	t.Logf("Anthropic Response:\n%s", response)
+}
+
+// TestIntegration_SmartChunk_Gemini verifies that --smart-chunk processes a
+// large multi-file diff end-to-end using the real Gemini API: each file is
+// summarised independently (in parallel), the summaries are synthesised into a
+// final comment, and the output is non-empty.
+func TestIntegration_SmartChunk_Gemini(t *testing.T) {
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		t.Skip("Skipping smart-chunk integration test: GEMINI_API_KEY not set")
+	}
+
+	t.Setenv("GEMINI_API_KEY", apiKey)
+
+	var buf strings.Builder
+	cmd := newRootCmd(chatCompletions)
+	cmd.SetArgs([]string{
+		"--smart-chunk",
+		"--file=testdata/large-multi-file.diff",
+		"--provider=gemini",
+		"--model=gemini-2.5-flash",
+		"--verbose",
+	})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "400") {
+			t.Logf("Skipping: model unavailable (%v)", err)
+			t.SkipNow()
+		}
+		t.Fatalf("smart-chunk command failed: %v", err)
+	}
+
+	out := buf.String()
+	if strings.TrimSpace(out) == "" {
+		t.Error("expected non-empty output from smart-chunk synthesis")
+	}
+	t.Logf("Smart-chunk synthesis output:\n%s", out)
+}
+
+// TestIntegration_SmartChunk_OpenAI verifies the same end-to-end behaviour
+// against the real OpenAI API.
+func TestIntegration_SmartChunk_OpenAI(t *testing.T) {
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" {
+		t.Skip("Skipping smart-chunk integration test: OPENAI_API_KEY not set")
+	}
+
+	t.Setenv("OPENAI_API_KEY", apiKey)
+
+	var buf strings.Builder
+	cmd := newRootCmd(chatCompletions)
+	cmd.SetArgs([]string{
+		"--smart-chunk",
+		"--file=testdata/large-multi-file.diff",
+		"--provider=openai",
+		"--model=gpt-4o-mini",
+		"--verbose",
+	})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "400") {
+			t.Logf("Skipping: model unavailable (%v)", err)
+			t.SkipNow()
+		}
+		t.Fatalf("smart-chunk command failed: %v", err)
+	}
+
+	out := buf.String()
+	if strings.TrimSpace(out) == "" {
+		t.Error("expected non-empty output from smart-chunk synthesis")
+	}
+	t.Logf("Smart-chunk synthesis output:\n%s", out)
 }
