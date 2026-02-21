@@ -37,10 +37,11 @@ jobs:
           bash -n scripts/install.sh
           bash -n scripts/bootstrap-install.sh
           bash -n scripts/generate-installer-manifest.sh
+          bash -n evals/providers/run-ai-mr-comment.sh
           bash scripts/install_test.sh
           bash scripts/manifest_test.sh
-          pwsh -NoProfile -Command '$tokens = $null; $parseErrors = $null; [void][System.Management.Automation.Language.Parser]::ParseFile("scripts/install.ps1",[ref]$tokens,[ref]$parseErrors); if ($null -ne $parseErrors -and $parseErrors.Count -gt 0) { $parseErrors; exit 1 }'
-          pwsh -NoProfile -Command '$tokens = $null; $parseErrors = $null; [void][System.Management.Automation.Language.Parser]::ParseFile("scripts/bootstrap-install.ps1",[ref]$tokens,[ref]$parseErrors); if ($null -ne $parseErrors -and $parseErrors.Count -gt 0) { $parseErrors; exit 1 }'
+          pwsh -NoProfile -Command '$parseTokens = $null; $parseErrors = $null; [void][System.Management.Automation.Language.Parser]::ParseFile("scripts/install.ps1",[ref]$parseTokens,[ref]$parseErrors); if ($null -ne $parseErrors -and $parseErrors.Count -gt 0) { $parseErrors; exit 1 }'
+          pwsh -NoProfile -Command '$parseTokens = $null; $parseErrors = $null; [void][System.Management.Automation.Language.Parser]::ParseFile("scripts/bootstrap-install.ps1",[ref]$parseTokens,[ref]$parseErrors); if ($null -ne $parseErrors -and $parseErrors.Count -gt 0) { $parseErrors; exit 1 }'
           pwsh -NoProfile -File scripts/install_test.ps1
 
       - name: Run Tests
@@ -65,17 +66,19 @@ jobs:
   integration-ollama:
     runs-on: ubuntu-latest
     needs: test
-    timeout-minutes: 35
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
-          - lane: tiny-full
-            model: llama3.2:1b-instruct-q3_K_M
+          - lane: model-qwen2.5-7b-full
+            model: qwen2.5:7b-instruct-q4_K_M
             test_pattern: "^TestIntegration_Ollama"
-          - lane: small-smoke
-            model: llama3.2:3b-instruct-q4_K_M
-            test_pattern: "^TestIntegration_Ollama(_MainCmd_Text|_MainCmd_JSONTitle|_CommitMsg)$"
+            run_evals: true
+          - lane: model-8b-full
+            model: llama3.1:8b
+            test_pattern: "^TestIntegration_Ollama"
+            run_evals: true
     name: Integration (Ollama, ${{ matrix.lane }})
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -120,6 +123,14 @@ jobs:
           OLLAMA_MODEL: ${{ matrix.model }}
           INTEGRATION_TEST_PATTERN: ${{ matrix.test_pattern }}
         run: make test-integration-ollama
+
+      - name: Run quality evals (promptfoo)
+        if: ${{ matrix.run_evals }}
+        env:
+          AMC_EVAL_PROVIDER: ollama
+          AMC_EVAL_MODEL: ${{ matrix.model }}
+          AI_MR_COMMENT_OLLAMA_ENDPOINT: http://127.0.0.1:11434/api/generate
+        run: make eval-quality
 
       - name: Ollama logs on failure
         if: failure()

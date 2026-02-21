@@ -1306,6 +1306,34 @@ func TestNewRootCmd_CommitMsgFlag_NoAutoTitle(t *testing.T) {
 	}
 }
 
+func TestNewRootCmd_CommitMsgFlag_NormalizesMultilineOutput(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "feat(auth): add JWT refresh token support\n" +
+			"docs: update README format", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--commit-msg", "--file=testdata/diff.txt", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	got := strings.TrimSpace(buf.String())
+	if got != "feat(auth): add JWT refresh token support" {
+		t.Fatalf("expected normalized first commit message line, got %q", got)
+	}
+	if strings.Contains(got, "\n") {
+		t.Fatalf("expected single-line commit message, got %q", got)
+	}
+}
+
 // TestBranchPrependedForLocalGitDiff verifies that when diffing a local git
 // repo (no --file, no --pr), the branch name is prepended to the diffContent
 // that reaches the AI so templates like jira can extract the ticket key.
@@ -1551,6 +1579,22 @@ func TestParseVerdict_NoVerdictLine(t *testing.T) {
 	}
 	if body != input {
 		t.Errorf("expected body unchanged, got %q", body)
+	}
+}
+
+func TestNormalizeCommitMessage_PrefersConventionalLine(t *testing.T) {
+	raw := "Commit message:\nrefactor(parser): simplify token handling\nextra note"
+	got := normalizeCommitMessage(raw)
+	if got != "refactor(parser): simplify token handling" {
+		t.Fatalf("expected conventional commit line, got %q", got)
+	}
+}
+
+func TestNormalizeCommitMessage_FallsBackToFirstCleanLine(t *testing.T) {
+	raw := "```text\n- Improve parser performance\n```"
+	got := normalizeCommitMessage(raw)
+	if got != "Improve parser performance" {
+		t.Fatalf("expected first cleaned line, got %q", got)
 	}
 }
 

@@ -9,7 +9,7 @@ PLATFORMS := linux/amd64 darwin/amd64 darwin/arm64 windows/amd64
 # Raise this ceiling deliberately if you add large deps; shrink it to lock in gains.
 MAX_BINARY_BYTES := 36700160
 
-.PHONY: all clean build release test test-cover test-integration test-integration-ollama test-fuzz lint test-run quick-commit run-debug changelog gen-aliases install install-completion-bash install-completion-zsh check-size help docker-build docker-run docker-quick-commit profile-cpu profile-mem profile-bench
+.PHONY: all clean build release test test-cover test-integration test-integration-ollama test-fuzz lint test-run quick-commit run-debug changelog gen-aliases install install-completion-bash install-completion-zsh check-size help docker-build docker-run docker-quick-commit profile-cpu profile-mem profile-bench eval-quality eval-quality-view
 
 all: build
 
@@ -78,6 +78,15 @@ INTEGRATION_TEST_PATTERN ?= ^TestIntegration_Ollama
 
 test-integration-ollama: ## Run only Ollama integration tests (set OLLAMA_MODEL/OLLAMA_ENDPOINT as needed)
 	go test -v -tags=integration -run '$(INTEGRATION_TEST_PATTERN)' ./...
+
+PROMPTFOO ?= npx --yes promptfoo@latest
+EVAL_CONFIG ?= evals/promptfooconfig.yaml
+
+eval-quality: build ## Run response-quality evals on curated diff fixtures
+	AMC_BIN=./dist/$(APP) $(PROMPTFOO) eval -c $(EVAL_CONFIG)
+
+eval-quality-view: ## Open the latest promptfoo eval report
+	$(PROMPTFOO) view
 
 test-fuzz: ## Run fuzz tests (30s per target)
 	go test -fuzz=FuzzSplitDiffByFile -fuzztime=30s .

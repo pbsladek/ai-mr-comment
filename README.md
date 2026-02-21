@@ -769,11 +769,47 @@ make test
 # Run integration tests (requires GEMINI_API_KEY)
 make test-integration
 
+# Run Ollama-only integration tests (CPU-friendly small model)
+OLLAMA_ENDPOINT=http://127.0.0.1:11434/api/generate \
+OLLAMA_MODEL=llama3.2:1b \
+make test-integration-ollama
+
 # Run fuzz tests (30s per target)
 make test-fuzz
 
+# Run response-quality evals on curated diff fixtures (promptfoo)
+make eval-quality
+
 # Run linter
 make lint
+```
+
+CI coverage on PRs includes:
+- Ollama `Qwen2.5 7b` full integration suite
+- Ollama `8b` full integration suite
+- Promptfoo quality evals on both `Qwen2.5 7b` and `8b` lanes (`make eval-quality`)
+
+### Response Quality Evals
+
+`make eval-quality` runs end-to-end evals against fixture diffs in `evals/` and scores the generated review for recall, severity coverage, actionability, and false positives.
+
+Prerequisites:
+- Node.js + `npx` (for `promptfoo`)
+- A reachable model provider (defaults to local Ollama)
+- Built binary (handled automatically by `make eval-quality`)
+
+Useful overrides:
+- `AMC_EVAL_PROVIDER` (default `ollama`)
+- `AMC_EVAL_MODEL` (default `llama3.2:1b`)
+- `AMC_EVAL_TEMPLATE` (default `technical`)
+- `AMC_EVAL_FLAGS` (additional CLI flags)
+
+```bash
+# Example: run evals against local Ollama 1B model
+AMC_EVAL_PROVIDER=ollama AMC_EVAL_MODEL=llama3.2:1b make eval-quality
+
+# Open the latest promptfoo report UI
+make eval-quality-view
 ```
 
 ### Shell Completions

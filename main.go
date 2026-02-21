@@ -46,6 +46,74 @@ func parseVerdict(comment string) (verdict, body string) {
 	return "UNKNOWN", comment
 }
 
+// normalizeCommitMessage reduces model output to a single-line commit message.
+// Some smaller models may return multiple lines or small preambles despite the prompt.
+func normalizeCommitMessage(raw string) string {
+	normalized := strings.ReplaceAll(raw, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+
+	lines := strings.Split(normalized, "\n")
+	candidates := make([]string, 0, len(lines))
+	for _, line := range lines {
+		clean := strings.TrimSpace(line)
+		if clean == "" || strings.HasPrefix(clean, "```") {
+			continue
+		}
+
+		// Strip common list markers and quote wrappers.
+		switch {
+		case strings.HasPrefix(clean, "- "):
+			clean = strings.TrimSpace(strings.TrimPrefix(clean, "- "))
+		case strings.HasPrefix(clean, "* "):
+			clean = strings.TrimSpace(strings.TrimPrefix(clean, "* "))
+		case strings.HasPrefix(clean, "+ "):
+			clean = strings.TrimSpace(strings.TrimPrefix(clean, "+ "))
+		}
+		clean = strings.Trim(clean, "\"'`")
+
+		// Strip common labels like "Commit message: ...".
+		if idx := strings.Index(clean, ":"); idx > 0 {
+			label := strings.ToLower(strings.TrimSpace(clean[:idx]))
+			if label == "commit message" || label == "message" {
+				clean = strings.TrimSpace(clean[idx+1:])
+			}
+		}
+
+		clean = strings.Join(strings.Fields(clean), " ")
+		if clean != "" {
+			candidates = append(candidates, clean)
+		}
+	}
+
+	if len(candidates) == 0 {
+		return ""
+	}
+	for _, c := range candidates {
+		if isConventionalCommitLine(c) {
+			return c
+		}
+	}
+	return candidates[0]
+}
+
+func isConventionalCommitLine(line string) bool {
+	l := strings.ToLower(strings.TrimSpace(line))
+	types := []string{"feat", "fix", "docs", "style", "refactor", "test", "chore", "perf", "ci", "build", "revert"}
+	for _, typ := range types {
+		if strings.HasPrefix(l, typ+":") {
+			return true
+		}
+		prefix := typ + "("
+		if strings.HasPrefix(l, prefix) {
+			rest := l[len(prefix):]
+			if close := strings.Index(rest, ")"); close > 0 && close+1 < len(rest) && rest[close+1] == ':' {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // newRootCmd builds the root cobra command, wiring flags to the provided chatFn.
 // Accepting chatFn as a parameter allows tests to inject a mock without real API calls.
 func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
@@ -246,7 +314,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 					}
 					return err
 				}
-				commitMessage = strings.TrimSpace(commitMessage)
+				commitMessage = normalizeCommitMessage(commitMessage)
 			} else if smartChunk {
 				chunks := splitDiffByFile(diffContent)
 				debugLog(cfg, "smart-chunk: files=%d", len(chunks))
@@ -902,7 +970,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			if err != nil {
 				return fmt.Errorf("generating commit message: %w", err)
 			}
-			commitMessage = strings.TrimSpace(commitMessage)
+			commitMessage = normalizeCommitMessage(commitMessage)
 			if commitMessage == "" {
 				return fmt.Errorf("AI returned an empty commit message")
 			}

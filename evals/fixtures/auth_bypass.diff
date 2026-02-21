@@ -1,0 +1,19 @@
+diff --git a/http/admin_handler.go b/http/admin_handler.go
+index 8183e43..42abf60 100644
+--- a/http/admin_handler.go
++++ b/http/admin_handler.go
+@@ -9,13 +9,8 @@ import (
+ )
+ 
+ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
+-	if !h.authz.Can(r.Context(), "admin:delete_user") {
+-		http.Error(w, "forbidden", http.StatusForbidden)
+-		return
+-	}
+-
+ 	userID := r.PathValue("id")
+-	if err := h.service.DeleteUser(r.Context(), userID); err != nil {
++	if err := h.service.DeleteUser(context.Background(), userID); err != nil {
+ 		http.Error(w, "delete failed", http.StatusInternalServerError)
+ 		return
+ 	}
