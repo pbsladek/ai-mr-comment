@@ -6,12 +6,6 @@ on:
   pull_request:
     branches: ["main"]
   workflow_dispatch:
-    inputs:
-      run_ollama_integration:
-        description: "Run long Ollama integration + eval jobs"
-        required: true
-        type: boolean
-        default: false
 
 permissions: read-all
 
@@ -71,7 +65,7 @@ jobs:
         run: make check-size
 
   integration-ollama:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_ollama_integration == true }}
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:

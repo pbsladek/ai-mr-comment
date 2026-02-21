@@ -788,7 +788,7 @@ make lint
 ```
 
 CI coverage on PRs includes fast unit/lint/fuzz checks.
-Long Ollama integration + promptfoo quality eval lanes are manual-only via `workflow_dispatch` (set `run_ollama_integration=true`).
+Long Ollama integration + promptfoo quality eval lanes are manual-only via `workflow_dispatch` (run the workflow from the Actions tab).
 
 ### Response Quality Evals
 
