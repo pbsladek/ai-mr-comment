@@ -1,0 +1,117 @@
+name: Ollama Integration (Manual)
+
+on:
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  integration-ollama:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: model-qwen2.5-7b-full
+            model: qwen2.5:7b-instruct-q4_K_M
+            test_pattern: "^TestIntegration_Ollama"
+            run_evals: true
+          - lane: model-8b-full
+            model: llama3.1:8b
+            test_pattern: "^TestIntegration_Ollama"
+            run_evals: true
+    name: Integration (Ollama, ${{ matrix.lane }})
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Install Ollama (pinned version)
+        env:
+          OLLAMA_VERSION: "0.16.3"
+          OLLAMA_SHA256: "0c0bb0ff7cc77079f259e75ba4f3494e4ab3d33af49b62644f9880ec50329fed"
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/ollama/ollama/releases/download/v${OLLAMA_VERSION}/ollama-linux-amd64.tar.zst" -o /tmp/ollama-linux-amd64.tar.zst
+          echo "${OLLAMA_SHA256}  /tmp/ollama-linux-amd64.tar.zst" | sha256sum -c -
+          sudo tar --zstd -xvf /tmp/ollama-linux-amd64.tar.zst -C /usr
+          ollama --version
+
+      - name: Start Ollama
+        run: |
+          set -euo pipefail
+          nohup ollama serve > /tmp/ollama.log 2>&1 &
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Ollama failed to start"
+          tail -n 200 /tmp/ollama.log || true
+          exit 1
+
+      - name: Pull matrix model
+        run: ollama pull ${{ matrix.model }}
+
+      - name: Run Ollama integration tests
+        env:
+          OLLAMA_ENDPOINT: http://127.0.0.1:11434/api/generate
+          OLLAMA_MODEL: ${{ matrix.model }}
+          INTEGRATION_TEST_PATTERN: ${{ matrix.test_pattern }}
+        run: make test-integration-ollama
+
+      - name: Run quality evals (promptfoo)
+        if: ${{ matrix.run_evals }}
+        id: quality_evals
+        continue-on-error: true
+        env:
+          AMC_EVAL_PROVIDER: ollama
+          AMC_EVAL_MODEL: ${{ matrix.model }}
+          AI_MR_COMMENT_OLLAMA_ENDPOINT: http://127.0.0.1:11434/api/generate
+        run: make eval-quality
+
+      - name: Summarize quality evals
+        if: ${{ matrix.run_evals }}
+        run: |
+          set -euo pipefail
+          RESULT_FILE="evals/promptfoo-results.json"
+
+          if [ -f "$RESULT_FILE" ]; then
+            jq -r '
+              .results as $r |
+              "Promptfoo summary: total=\($r|length) pass=\($r|map(select((.gradingResult.pass // .pass // false)==true))|length) fail=\($r|map(select((.gradingResult.pass // .pass // true)==false and (.error == null)))|length) error=\($r|map(select(.error != null))|length)"
+            ' "$RESULT_FILE" | tee /tmp/promptfoo-summary.txt
+
+            {
+              echo "### Promptfoo Eval Summary (${{ matrix.lane }})"
+              cat /tmp/promptfoo-summary.txt
+              echo ""
+              echo "Top failures/errors:"
+              jq -r '
+                .results[]
+                | select(.error != null or ((.gradingResult.pass // .pass // true)==false))
+                | "- " + (.description // .test?.description // "unnamed test") + " :: " + (.error?.message // .gradingResult?.reason // .failureReason // "failed")
+              ' "$RESULT_FILE" | head -n 15
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "promptfoo results file not found at $RESULT_FILE" | tee /tmp/promptfoo-summary.txt
+            {
+              echo "### Promptfoo Eval Summary (${{ matrix.lane }})"
+              cat /tmp/promptfoo-summary.txt
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [ "${{ steps.quality_evals.outcome }}" != "success" ]; then
+            echo "promptfoo eval failed; see summary above and evals/promptfoo-results.json in workspace" >&2
+            exit 1
+          fi
+
+      - name: Ollama logs on failure
+        if: failure()
+        run: tail -n 300 /tmp/ollama.log || true
