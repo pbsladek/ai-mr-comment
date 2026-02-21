@@ -579,20 +579,20 @@ template = "default"
 
 # --- OpenAI ---
 # openai_api_key = ""   # or set OPENAI_API_KEY env var
-openai_model    = "gpt-4o-mini"
+openai_model    = "gpt-4.1-mini"
 openai_endpoint = "https://api.openai.com/v1/"
-# Other OpenAI models: gpt-4o, gpt-4-turbo, gpt-3.5-turbo
+# Other OpenAI models: gpt-4.1, o3, o3-mini, gpt-4o, gpt-4o-mini
 
 # --- Anthropic ---
 # anthropic_api_key = ""   # or set ANTHROPIC_API_KEY env var
-anthropic_model    = "claude-sonnet-4-5"
+anthropic_model    = "claude-sonnet-4-6"
 anthropic_endpoint = "https://api.anthropic.com"
-# Other Anthropic models: claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5-20251001
+# Other Anthropic models: claude-opus-4-6, claude-haiku-4-5-20251001
 
 # --- Google Gemini ---
 # gemini_api_key = ""   # or set GEMINI_API_KEY env var
 gemini_model = "gemini-2.5-flash"
-# Other Gemini models: gemini-2.0-flash, gemini-1.5-pro
+# Other Gemini models: gemini-2.5-pro, gemini-3-flash-preview, gemini-3-pro-preview
 
 # --- Ollama (local) ---
 ollama_model    = "llama3"
@@ -747,26 +747,31 @@ func setModelOverride(cfg *Config, model string) {
 // providerModels lists known models for each provider, used by the `models` subcommand.
 var providerModels = map[ApiProvider][]string{
 	OpenAI: {
+		"gpt-4.1",
+		"gpt-4.1-mini",
+		"gpt-4.1-nano",
+		"o3",
+		"o3-mini",
 		"gpt-4o",
 		"gpt-4o-mini",
-		"gpt-4-turbo",
-		"gpt-3.5-turbo",
 	},
 	Anthropic: {
 		"claude-opus-4-6",
 		"claude-sonnet-4-6",
 		"claude-haiku-4-5-20251001",
-		"claude-sonnet-4-5-20250929",
 		"claude-opus-4-5-20251101",
+		"claude-sonnet-4-5-20250929",
 		"claude-sonnet-4-20250514",
 		"claude-3-7-sonnet-20250219",
 		"claude-3-haiku-20240307",
 	},
 	Gemini: {
+		"gemini-2.5-pro",
 		"gemini-2.5-flash",
+		"gemini-2.5-flash-lite",
+		"gemini-3-flash-preview",
+		"gemini-3-pro-preview",
 		"gemini-2.0-flash",
-		"gemini-1.5-pro",
-		"gemini-1.5-flash",
 	},
 	Ollama: {
 		"llama3",

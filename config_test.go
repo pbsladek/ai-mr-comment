@@ -55,11 +55,11 @@ func TestLoadConfig_DefaultsWhenMissingFile(t *testing.T) {
 	if cfg.Provider != OpenAI {
 		t.Errorf("expected provider OpenAI, got %v", cfg.Provider)
 	}
-	if cfg.OpenAIModel != "gpt-4o-mini" {
-		t.Errorf("expected OpenAI model gpt-4o-mini, got %v", cfg.OpenAIModel)
+	if cfg.OpenAIModel != "gpt-4.1-mini" {
+		t.Errorf("expected OpenAI model gpt-4.1-mini, got %v", cfg.OpenAIModel)
 	}
-	if cfg.AnthropicModel != "claude-sonnet-4-5" {
-		t.Errorf("expected Anthropic model claude-sonnet-4-5, got %v", cfg.AnthropicModel)
+	if cfg.AnthropicModel != "claude-sonnet-4-6" {
+		t.Errorf("expected Anthropic model claude-sonnet-4-6, got %v", cfg.AnthropicModel)
 	}
 }
 
@@ -195,4 +195,13 @@ func TestLoadConfig_MalformedTOML(t *testing.T) {
 	if !strings.Contains(err.Error(), "malformed config file") {
 		t.Errorf("expected error to contain 'malformed config file', got '%v'", err)
 	}
+}
+
+// newViperFromFile returns a Viper instance pre-configured to read from path.
+// Used in tests to validate generated config files.
+func newViperFromFile(path string) *viper.Viper {
+	v := viper.New()
+	v.SetConfigFile(path)
+	v.SetConfigType("toml")
+	return v
 }

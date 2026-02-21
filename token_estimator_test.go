@@ -75,9 +75,9 @@ func TestEstimateCost(t *testing.T) {
 		{"custom-gpt-4o-v2", 1_000_000, 2.50, "Fuzzy gpt-4o"},
 		{"claude-3-7-sonnet-custom", 1_000_000, 3.00, "Fuzzy claude-3-7"},
 		{"gemini-2.0-flash-custom", 1_000_000, 0.10, "Fuzzy flash 2.0"},
-		{"gemini-2.5-flash-custom", 1_000_000, 0.10, "Fuzzy flash 2.5"},
-		{"custom-flash-model", 1_000_000, 0.075, "Fuzzy flash generic"},
-		{"gemini-pro-custom", 1_000_000, 3.50, "Fuzzy gemini pro"},
+		{"gemini-2.5-flash-custom", 1_000_000, 0.30, "Fuzzy flash 2.5"},
+		{"custom-flash-model", 1_000_000, 0.0, "Non-gemini flash (unknown)"},
+		{"gemini-pro-custom", 1_000_000, 1.25, "Fuzzy gemini pro"},
 	}
 
 	for _, tc := range tests {
