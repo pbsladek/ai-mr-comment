@@ -11,8 +11,12 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/../.." && pwd)"
 
 if [ ! -f "${diff_path}" ]; then
-  if [ -f "${repo_root}/${diff_path}" ]; then
-    diff_path="${repo_root}/${diff_path}"
+  alt_repo="${repo_root}/${diff_path}"
+  alt_evals="${repo_root}/evals/${diff_path#./}"
+  if [ -f "${alt_repo}" ]; then
+    diff_path="${alt_repo}"
+  elif [ -f "${alt_evals}" ]; then
+    diff_path="${alt_evals}"
   else
     echo "diff file not found: ${diff_path}" >&2
     exit 1

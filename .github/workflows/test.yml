@@ -5,6 +5,13 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      run_ollama_integration:
+        description: "Run long Ollama integration + eval jobs"
+        required: true
+        type: boolean
+        default: false
 
 permissions: read-all
 
@@ -64,6 +71,7 @@ jobs:
         run: make check-size
 
   integration-ollama:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_ollama_integration == true }}
     runs-on: ubuntu-latest
     needs: test
     timeout-minutes: 30
@@ -126,11 +134,49 @@ jobs:
 
       - name: Run quality evals (promptfoo)
         if: ${{ matrix.run_evals }}
+        id: quality_evals
+        continue-on-error: true
         env:
           AMC_EVAL_PROVIDER: ollama
           AMC_EVAL_MODEL: ${{ matrix.model }}
           AI_MR_COMMENT_OLLAMA_ENDPOINT: http://127.0.0.1:11434/api/generate
         run: make eval-quality
+
+      - name: Summarize quality evals
+        if: ${{ matrix.run_evals }}
+        run: |
+          set -euo pipefail
+          RESULT_FILE="evals/promptfoo-results.json"
+
+          if [ -f "$RESULT_FILE" ]; then
+            jq -r '
+              .results as $r |
+              "Promptfoo summary: total=\($r|length) pass=\($r|map(select((.gradingResult.pass // .pass // false)==true))|length) fail=\($r|map(select((.gradingResult.pass // .pass // true)==false and (.error == null)))|length) error=\($r|map(select(.error != null))|length)"
+            ' "$RESULT_FILE" | tee /tmp/promptfoo-summary.txt
+
+            {
+              echo "### Promptfoo Eval Summary (${{ matrix.lane }})"
+              cat /tmp/promptfoo-summary.txt
+              echo ""
+              echo "Top failures/errors:"
+              jq -r '
+                .results[]
+                | select(.error != null or ((.gradingResult.pass // .pass // true)==false))
+                | "- " + (.description // .test?.description // "unnamed test") + " :: " + (.error?.message // .gradingResult?.reason // .failureReason // "failed")
+              ' "$RESULT_FILE" | head -n 15
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "promptfoo results file not found at $RESULT_FILE" | tee /tmp/promptfoo-summary.txt
+            {
+              echo "### Promptfoo Eval Summary (${{ matrix.lane }})"
+              cat /tmp/promptfoo-summary.txt
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [ "${{ steps.quality_evals.outcome }}" != "success" ]; then
+            echo "promptfoo eval failed; see summary above and evals/promptfoo-results.json in workspace" >&2
+            exit 1
+          fi
 
       - name: Ollama logs on failure
         if: failure()

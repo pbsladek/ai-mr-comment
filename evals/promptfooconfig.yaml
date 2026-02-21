@@ -4,13 +4,13 @@ prompts:
   - "{{diff_path}}"
 
 providers:
-  - id: "exec:./evals/providers/run-ai-mr-comment.sh"
+  - id: "exec:./providers/run-ai-mr-comment.sh"
     label: "ai-mr-comment-e2e"
 
 tests:
   - description: "Detect SQL injection and suggest parameterized query fix"
     vars:
-      diff_path: "evals/fixtures/sql_injection.diff"
+      diff_path: "./fixtures/sql_injection.diff"
       min_score: 0.75
       expected_findings:
         - id: "sql_injection"
@@ -27,12 +27,12 @@ tests:
     assert:
       - type: javascript
         value: |
-          const scorer = require('./evals/scorers/review-quality.js');
+          const scorer = require('./scorers/review-quality.js');
           return scorer(output, context);
 
   - description: "Detect admin auth bypass / authorization removal"
     vars:
-      diff_path: "evals/fixtures/auth_bypass.diff"
+      diff_path: "./fixtures/auth_bypass.diff"
       min_score: 0.75
       expected_findings:
         - id: "auth_bypass"
@@ -50,12 +50,12 @@ tests:
     assert:
       - type: javascript
         value: |
-          const scorer = require('./evals/scorers/review-quality.js');
+          const scorer = require('./scorers/review-quality.js');
           return scorer(output, context);
 
   - description: "Detect nil pointer panic risk"
     vars:
-      diff_path: "evals/fixtures/nil_panic.diff"
+      diff_path: "./fixtures/nil_panic.diff"
       min_score: 0.7
       expected_findings:
         - id: "nil_pointer"
@@ -72,12 +72,12 @@ tests:
     assert:
       - type: javascript
         value: |
-          const scorer = require('./evals/scorers/review-quality.js');
+          const scorer = require('./scorers/review-quality.js');
           return scorer(output, context);
 
   - description: "Detect map access race condition after lock removal"
     vars:
-      diff_path: "evals/fixtures/race_condition.diff"
+      diff_path: "./fixtures/race_condition.diff"
       min_score: 0.75
       expected_findings:
         - id: "race_condition"
@@ -95,12 +95,12 @@ tests:
     assert:
       - type: javascript
         value: |
-          const scorer = require('./evals/scorers/review-quality.js');
+          const scorer = require('./scorers/review-quality.js');
           return scorer(output, context);
 
   - description: "Avoid false positives on safe refactor diff"
     vars:
-      diff_path: "evals/fixtures/clean_refactor.diff"
+      diff_path: "./fixtures/clean_refactor.diff"
       min_score: 0.85
       should_be_clean: true
       clean_forbidden_terms:
@@ -114,5 +114,5 @@ tests:
     assert:
       - type: javascript
         value: |
-          const scorer = require('./evals/scorers/review-quality.js');
+          const scorer = require('./scorers/review-quality.js');
           return scorer(output, context);

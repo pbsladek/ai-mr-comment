@@ -780,23 +780,26 @@ make test-fuzz
 # Run response-quality evals on curated diff fixtures (promptfoo)
 make eval-quality
 
+# Install/update pinned eval dependencies only
+make eval-quality-deps
+
 # Run linter
 make lint
 ```
 
-CI coverage on PRs includes:
-- Ollama `Qwen2.5 7b` full integration suite
-- Ollama `8b` full integration suite
-- Promptfoo quality evals on both `Qwen2.5 7b` and `8b` lanes (`make eval-quality`)
+CI coverage on PRs includes fast unit/lint/fuzz checks.
+Long Ollama integration + promptfoo quality eval lanes are manual-only via `workflow_dispatch` (set `run_ollama_integration=true`).
 
 ### Response Quality Evals
 
 `make eval-quality` runs end-to-end evals against fixture diffs in `evals/` and scores the generated review for recall, severity coverage, actionability, and false positives.
+In CI, evals write a compact JSON report to `evals/promptfoo-results.json` and print a short summary.
 
 Prerequisites:
-- Node.js + `npx` (for `promptfoo`)
+- Node.js + `npm`
 - A reachable model provider (defaults to local Ollama)
 - Built binary (handled automatically by `make eval-quality`)
+- Pinned eval dependencies (including `promptfoo`) are installed from `evals/package-lock.json`
 
 Useful overrides:
 - `AMC_EVAL_PROVIDER` (default `ollama`)
