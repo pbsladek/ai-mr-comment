@@ -15,6 +15,7 @@ import (
 
 	"github.com/atotto/clipboard"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/term"
 )
 
@@ -54,6 +55,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			runStart := time.Now()
 			cfg, _ := loadConfig()
 			if cmd.Flags().Changed("provider") {
 				cfg.Provider = ApiProvider(provider)
@@ -66,6 +68,9 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			}
 			if verbose {
 				cfg.DebugWriter = cmd.ErrOrStderr()
+				defer func() {
+					debugLog(cfg, "total elapsed: %dms", time.Since(runStart).Milliseconds())
+				}()
 			}
 			configFile := cfg.ConfigFile
 			if configFile == "" {
@@ -113,6 +118,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			var diffContent string
 			var diffSource string
 			var err error
+			diffFetchStart := time.Now()
 			if prURL != "" {
 				switch {
 				case isGitHubURL(prURL):
@@ -141,6 +147,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				}
 				diffContent, err = getGitDiff(commit, staged, exclude)
 			}
+			debugLog(cfg, "diff fetch: elapsed=%dms", time.Since(diffFetchStart).Milliseconds())
 			if err != nil {
 				return err
 			}
@@ -150,7 +157,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				}
 				return fmt.Errorf("no diff found. Make sure you have uncommitted changes or specify a commit range with --commit")
 			}
-			debugLog(cfg, "diff: source=%s bytes=%d lines=%d", diffSource, len(diffContent), len(strings.Split(diffContent, "\n")))
+			debugLog(cfg, "diff: source=%s bytes=%d", diffSource, len(diffContent))
 
 			// Prepend the current branch name when diffing a local git repo.
 			// This lets the AI and templates reference the branch/ticket number
@@ -164,9 +171,11 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			}
 
 			out := cmd.OutOrStdout()
-			rawLines := len(strings.Split(diffContent, "\n"))
-			diffContent = processDiff(diffContent, 4000)
-			debugLog(cfg, "diff: lines before truncation=%d after=%d (max=4000)", rawLines, len(strings.Split(diffContent, "\n")))
+			// Split once; reuse the slice for line-count logging and truncation.
+			diffLines := strings.Split(diffContent, "\n")
+			rawLines := len(diffLines)
+			diffContent = truncateDiff(diffLines, 4000)
+			debugLog(cfg, "diff: lines before truncation=%d after=%d (max=4000)", rawLines, strings.Count(diffContent, "\n")+1)
 
 			systemPrompt, templateErr := NewPromptTemplate(cfg.Template)
 			if templateErr != nil {
@@ -202,12 +211,11 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 					_, _ = fmt.Fprintln(out, "Using heuristic fallback.")
 				}
 
-				originalLen := len(strings.Split(diffContent, "\n"))
 				cost := EstimateCost(model, totalTokens)
 
 				_, _ = fmt.Fprintln(out, "Token & Cost Estimation:")
 				_, _ = fmt.Fprintf(out, "- Model: %s\n", model)
-				_, _ = fmt.Fprintf(out, "- Diff lines: %d\n", originalLen)
+				_, _ = fmt.Fprintf(out, "- Diff lines: %d\n", strings.Count(diffContent, "\n")+1)
 				_, _ = fmt.Fprintf(out, "- Estimated Input Tokens: %d\n", totalTokens)
 				_, _ = fmt.Fprintf(out, "- Estimated Input Cost: $%.6f\n", cost)
 				_, _ = fmt.Fprintln(out, "\nNote: Output tokens and cost depend on the generated response length.")
@@ -226,6 +234,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			var streamedOK bool
 
 			var comment string
+			var title string
 			var commitMessage string
 			if generateCommitMsg {
 				// Skip description generation; produce only a commit message.
@@ -244,22 +253,30 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				chunks := splitDiffByFile(diffContent)
 				debugLog(cfg, "smart-chunk: files=%d", len(chunks))
 				if len(chunks) > 1 {
-					// Summarize each file chunk independently, then do a final synthesis call.
+					// Summarize each file chunk independently in parallel, then do a final synthesis call.
 					const chunkPrompt = "Summarize the changes in this file diff in 3-5 bullet points. Be concise and technical."
-					var summaries []string
+					summaries := make([]string, len(chunks))
+					debugLog(cfg, "smart-chunk: summarizing %d chunks in parallel", len(chunks))
+					eg, egCtx := errgroup.WithContext(cmd.Context())
 					for i, chunk := range chunks {
-						debugLog(cfg, "smart-chunk: processing chunk %d/%d", i+1, len(chunks))
-						chunkCopy := chunk
-						summary, chunkErr := timedCall(cfg, "chunk-summary", func() (string, error) {
-							return chatFn(cmd.Context(), cfg, cfg.Provider, chunkPrompt, processDiff(chunkCopy, 1000))
-						})
-						if chunkErr != nil {
-							if cfg.Provider == Ollama && strings.Contains(chunkErr.Error(), "connection refused") {
-								return fmt.Errorf("failed to connect to Ollama at %s.\nMake sure Ollama is running (try 'ollama serve') or check your configuration", cfg.OllamaEndpoint)
+						i, chunk := i, chunk // capture loop vars
+						eg.Go(func() error {
+							debugLog(cfg, "smart-chunk: processing chunk %d/%d", i+1, len(chunks))
+							summary, chunkErr := timedCall(cfg, fmt.Sprintf("chunk-summary-%d", i+1), func() (string, error) {
+								return chatFn(egCtx, cfg, cfg.Provider, chunkPrompt, processDiff(chunk, 1000))
+							})
+							if chunkErr != nil {
+								return chunkErr
 							}
-							return chunkErr
+							summaries[i] = summary
+							return nil
+						})
+					}
+					if chunkErr := eg.Wait(); chunkErr != nil {
+						if cfg.Provider == Ollama && strings.Contains(chunkErr.Error(), "connection refused") {
+							return fmt.Errorf("failed to connect to Ollama at %s.\nMake sure Ollama is running (try 'ollama serve') or check your configuration", cfg.OllamaEndpoint)
 						}
-						summaries = append(summaries, summary)
+						return chunkErr
 					}
 					debugLog(cfg, "smart-chunk: all chunks summarized, running synthesis call")
 					combinedSummaries := strings.Join(summaries, "\n\n---\n\n")
@@ -285,9 +302,35 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 					streamedOK = true
 				}
 			} else {
-				comment, err = timedCall(cfg, "comment", func() (string, error) {
-					return chatFn(cmd.Context(), cfg, cfg.Provider, systemPrompt, diffContent)
-				})
+				// When a title is also needed, run comment and title concurrently to
+				// save one full LLM round-trip of wall-clock time.
+				needsTitle := (generateTitle || format == "json") && !generateCommitMsg
+				if needsTitle {
+					debugLog(cfg, "title+comment: running in parallel")
+					var parallelComment, parallelTitle string
+					eg, egCtx := errgroup.WithContext(cmd.Context())
+					eg.Go(func() error {
+						var callErr error
+						parallelComment, callErr = timedCall(cfg, "comment (parallel)", func() (string, error) {
+							return chatFn(egCtx, cfg, cfg.Provider, systemPrompt, diffContent)
+						})
+						return callErr
+					})
+					eg.Go(func() error {
+						var callErr error
+						parallelTitle, callErr = timedCall(cfg, "title (parallel)", func() (string, error) {
+							return chatFn(egCtx, cfg, cfg.Provider, titlePrompt, diffContent)
+						})
+						return callErr
+					})
+					err = eg.Wait()
+					comment = parallelComment
+					title = strings.TrimSpace(parallelTitle)
+				} else {
+					comment, err = timedCall(cfg, "comment", func() (string, error) {
+						return chatFn(cmd.Context(), cfg, cfg.Provider, systemPrompt, diffContent)
+					})
+				}
 			}
 			if !generateCommitMsg && err != nil {
 				if cfg.Provider == Ollama && strings.Contains(err.Error(), "connection refused") {
@@ -299,9 +342,10 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			// Generate a title when explicitly requested (--title) or when producing
 			// JSON output for pipeline consumers (--format=json implies title).
 			// Skip title generation entirely when --commit-msg is active.
-			var title string
-			if (generateTitle || format == "json") && !generateCommitMsg {
-				debugLog(cfg, "title: generating title with separate API call")
+			// NOTE: title may already be set above by the parallel path; this block
+			// only runs for the streaming case where the comment was written token-by-token.
+			if (generateTitle || format == "json") && !generateCommitMsg && title == "" {
+				debugLog(cfg, "title: generating title after stream")
 				title, err = timedCall(cfg, "title", func() (string, error) {
 					return chatFn(cmd.Context(), cfg, cfg.Provider, titlePrompt, diffContent)
 				})

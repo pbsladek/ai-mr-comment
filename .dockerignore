@@ -1,0 +1,18 @@
+# Build artifacts
+dist/
+coverage.out
+
+# Development tools
+.golangci.yml
+
+# Git history (not needed in build context; VCS info is stamped at build time)
+.git/
+
+# Editor / OS noise
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Test data is included — it's needed by go test during the builder stage.

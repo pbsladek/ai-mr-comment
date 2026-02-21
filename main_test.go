@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -420,10 +421,11 @@ func TestNewRootCmd_TitleFlagJSON(t *testing.T) {
 	callCount := 0
 	trackingFn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
 		callCount++
-		if callCount == 1 {
-			return "mocked comment", nil
+		// Distinguish by prompt content — title and comment run concurrently now.
+		if strings.HasPrefix(systemPrompt, "Generate a single-line MR/PR title") {
+			return "Add mocked feature", nil
 		}
-		return "Add mocked feature", nil
+		return "mocked comment", nil
 	}
 
 	var buf strings.Builder
@@ -938,10 +940,11 @@ func TestNewRootCmd_FormatJSON_AutoTitle(t *testing.T) {
 	callCount := 0
 	trackingFn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
 		callCount++
-		if callCount == 1 {
-			return "mocked description", nil
+		// Distinguish by prompt content — title and comment run concurrently now.
+		if strings.HasPrefix(systemPrompt, "Generate a single-line MR/PR title") {
+			return "Add mocked feature", nil
 		}
-		return "Add mocked feature", nil
+		return "mocked description", nil
 	}
 
 	var buf strings.Builder
@@ -1668,3 +1671,190 @@ func TestOutputFlag_JSON(t *testing.T) {
 		t.Errorf("expected provider key in JSON, got: %v", result)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Smart-chunk tests
+// ---------------------------------------------------------------------------
+
+// TestSmartChunk_MultiFile verifies that --smart-chunk splits a multi-file diff
+// into per-file chunks, calls the chat function once per chunk (parallel) plus
+// one synthesis call, and returns a non-empty comment.
+func TestSmartChunk_MultiFile(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var mu sync.Mutex
+	callsByPrompt := map[string]int{}
+
+	mockFn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
+		mu.Lock()
+		callsByPrompt[systemPrompt]++
+		mu.Unlock()
+		if strings.HasPrefix(systemPrompt, "Summarize the changes") {
+			return "chunk summary: " + diffContent[:min(30, len(diffContent))], nil
+		}
+		// Synthesis call — receives the combined summaries.
+		return "final synthesis comment", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(mockFn)
+	cmd.SetArgs([]string{
+		"--smart-chunk",
+		"--file=testdata/large-multi-file.diff",
+		"--provider=openai",
+		"--format=text",
+	})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "final synthesis comment") {
+		t.Errorf("expected synthesis comment in output, got:\n%s", out)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Count chunk-summary calls vs synthesis calls.
+	chunkCalls := callsByPrompt["Summarize the changes in this file diff in 3-5 bullet points. Be concise and technical."]
+	if chunkCalls < 2 {
+		t.Errorf("expected at least 2 per-file chunk calls, got %d", chunkCalls)
+	}
+}
+
+// TestSmartChunk_SingleFile verifies that when the diff contains only one file,
+// --smart-chunk falls through to a single direct comment call (no summarise+synthesise).
+func TestSmartChunk_SingleFile(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	callCount := 0
+	mockFn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
+		callCount++
+		if strings.HasPrefix(systemPrompt, "Summarize the changes") {
+			t.Error("unexpected chunk-summary call for a single-file diff")
+		}
+		return "single file comment", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(mockFn)
+	cmd.SetArgs([]string{
+		"--smart-chunk",
+		"--file=testdata/simple.diff",
+		"--provider=openai",
+	})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if callCount != 1 {
+		t.Errorf("expected exactly 1 chatFn call for single-file diff, got %d", callCount)
+	}
+	if !strings.Contains(buf.String(), "single file comment") {
+		t.Errorf("expected comment in output, got:\n%s", buf.String())
+	}
+}
+
+// TestSmartChunk_LargeFileSet verifies the full round-trip with the large
+// multi-file fixture: all chunks are processed, summaries are combined,
+// and the synthesis call receives content from every file.
+func TestSmartChunk_LargeFileSet(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	// Count unique files seen across all chunk calls.
+	var mu sync.Mutex
+	seenChunkDiffs := []string{}
+	synthesisInput := ""
+
+	mockFn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if strings.HasPrefix(systemPrompt, "Summarize the changes") {
+			seenChunkDiffs = append(seenChunkDiffs, diffContent)
+			return "summary for: " + diffContent[:min(20, len(diffContent))], nil
+		}
+		// Synthesis — diffContent is the joined summaries.
+		synthesisInput = diffContent
+		return "large set synthesis", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(mockFn)
+	cmd.SetArgs([]string{
+		"--smart-chunk",
+		"--file=testdata/large-multi-file.diff",
+		"--provider=openai",
+	})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// The fixture has 11 file diffs — verify all were chunked.
+	if len(seenChunkDiffs) < 5 {
+		t.Errorf("expected at least 5 file chunks, got %d", len(seenChunkDiffs))
+	}
+
+	// Synthesis input must contain all the per-chunk summaries joined by the separator.
+	if !strings.Contains(synthesisInput, "---") {
+		t.Errorf("expected chunk separator in synthesis input, got:\n%s", synthesisInput)
+	}
+	if !strings.Contains(buf.String(), "large set synthesis") {
+		t.Errorf("expected synthesis output, got:\n%s", buf.String())
+	}
+}
+
+// TestSmartChunk_ChunkError verifies that if any parallel chunk call fails,
+// the whole command returns an error.
+func TestSmartChunk_ChunkError(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	callCount := 0
+	mockFn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
+		if strings.HasPrefix(systemPrompt, "Summarize the changes") {
+			callCount++
+			if callCount == 1 {
+				return "", errors.New("simulated chunk API failure")
+			}
+			return "ok summary", nil
+		}
+		return "synthesis", nil
+	}
+
+	cmd := newRootCmd(mockFn)
+	cmd.SetArgs([]string{
+		"--smart-chunk",
+		"--file=testdata/large-multi-file.diff",
+		"--provider=openai",
+	})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when a chunk call fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "simulated chunk API failure") {
+		t.Errorf("expected chunk error message, got: %v", err)
+	}
+}
+

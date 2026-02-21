@@ -9,7 +9,7 @@ PLATFORMS := linux/amd64 darwin/amd64 darwin/arm64 windows/amd64
 # Raise this ceiling deliberately if you add large deps; shrink it to lock in gains.
 MAX_BINARY_BYTES := 36700160
 
-.PHONY: all clean build release test test-cover test-integration test-fuzz lint test-run install install-completion-bash install-completion-zsh check-size help
+.PHONY: all clean build release test test-cover test-integration test-fuzz lint test-run quick-commit run-debug install install-completion-bash install-completion-zsh check-size help docker-build docker-run docker-quick-commit profile-cpu profile-mem profile-bench
 
 all: build
 
@@ -88,6 +88,70 @@ install-completion-zsh: build ## Generate zsh completion script to /tmp/
 	./dist/ai-mr-comment completion zsh > /tmp/_ai-mr-comment
 	@echo "Move to your zsh functions path, e.g.:"
 	@echo "  mv /tmp/_ai-mr-comment ~/.zsh/completions/_ai-mr-comment"
+
+DOCKER_IMAGE ?= ai-mr-comment
+DOCKER_TAG   ?= latest
+
+# Common docker run flags:
+#   -it                           interactive terminal (for streaming output)
+#   --rm                          remove container on exit
+#   -v $(PWD):/repo               mount current repo so git diffs work
+#   -v ~/.ai-mr-comment.toml:...  optional: mount config file
+#   -e OPENAI_API_KEY=...         pass API key from host env
+DOCKER_RUN_FLAGS ?= \
+  -it --rm \
+  -v "$(PWD):/repo" \
+  -w /repo \
+  -e OPENAI_API_KEY \
+  -e ANTHROPIC_API_KEY \
+  -e GEMINI_API_KEY \
+  -e GITHUB_TOKEN \
+  -e GITLAB_TOKEN
+
+docker-build: ## Build the Docker image (IMAGE=name TAG=tag)
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		-t $(DOCKER_IMAGE):$(DOCKER_TAG) .
+
+docker-run: docker-build ## Build image and run with current repo mounted (ARGS="--provider openai")
+	docker run $(DOCKER_RUN_FLAGS) \
+		$(shell [ -f ~/.ai-mr-comment.toml ] && echo '-v $(HOME)/.ai-mr-comment.toml:/home/aiuser/.ai-mr-comment.toml:ro') \
+		$(DOCKER_IMAGE):$(DOCKER_TAG) $(ARGS)
+
+docker-quick-commit: docker-build ## Build image and run quick-commit with current repo mounted (ARGS="--dry-run")
+	docker run $(DOCKER_RUN_FLAGS) \
+		$(shell [ -f ~/.ai-mr-comment.toml ] && echo '-v $(HOME)/.ai-mr-comment.toml:/home/aiuser/.ai-mr-comment.toml:ro') \
+		$(DOCKER_IMAGE):$(DOCKER_TAG) quick-commit $(ARGS)
+
+PROFILE_DIR ?= dist/profiles
+
+profile-cpu: ## CPU profile of unit tests (opens pprof tool — requires graphviz for svg)
+	@mkdir -p $(PROFILE_DIR)
+	go test -cpuprofile=$(PROFILE_DIR)/cpu.prof -run='^$$' -bench=. ./... 2>/dev/null || \
+	  go test -cpuprofile=$(PROFILE_DIR)/cpu.prof ./...
+	@echo "CPU profile written to $(PROFILE_DIR)/cpu.prof"
+	@echo "Inspect with:  go tool pprof $(PROFILE_DIR)/cpu.prof"
+	@echo "  (top, web, list <func>, png > cpu.png)"
+
+profile-mem: ## Memory (heap) profile of unit tests
+	@mkdir -p $(PROFILE_DIR)
+	go test -memprofile=$(PROFILE_DIR)/mem.prof -memprofilerate=1 ./...
+	@echo "Memory profile written to $(PROFILE_DIR)/mem.prof"
+	@echo "Inspect with:  go tool pprof $(PROFILE_DIR)/mem.prof"
+
+profile-bench: ## Run benchmarks and capture both CPU and memory profiles
+	@mkdir -p $(PROFILE_DIR)
+	go test \
+	  -run='^$$' \
+	  -bench=. \
+	  -benchmem \
+	  -cpuprofile=$(PROFILE_DIR)/bench-cpu.prof \
+	  -memprofile=$(PROFILE_DIR)/bench-mem.prof \
+	  ./...
+	@echo "Benchmark profiles written to $(PROFILE_DIR)/"
+	@echo "CPU:  go tool pprof $(PROFILE_DIR)/bench-cpu.prof"
+	@echo "Mem:  go tool pprof $(PROFILE_DIR)/bench-mem.prof"
+	@echo "Open interactive browser UI with:  go tool pprof -http=:6060 $(PROFILE_DIR)/bench-cpu.prof"
 
 clean: ## Remove build artifacts and coverage output
 	rm -rf $(BUILD_DIR) coverage.out

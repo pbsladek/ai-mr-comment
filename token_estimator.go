@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/google/generative-ai-go/genai"
-	"google.golang.org/api/option"
 )
 
 // TokenEstimator defines the interface for counting tokens before an API call.
@@ -23,15 +22,11 @@ type GeminiTokenEstimator struct {
 // CountTokens returns the exact token count for the given texts using the Gemini
 // countTokens API.
 func (e *GeminiTokenEstimator) CountTokens(ctx context.Context, modelName string, text ...string) (int32, error) {
-	opts := []option.ClientOption{option.WithAPIKey(e.APIKey)}
-	// geminiClientOptions is declared in api.go and may be overridden in tests.
-	opts = append(opts, geminiClientOptions...)
-
-	client, err := genai.NewClient(ctx, opts...)
+	// Reuse the shared client to avoid repeated TLS handshakes.
+	client, err := getGeminiClient(ctx, e.APIKey)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create genai client for token counting: %w", err)
 	}
-	defer func() { _ = client.Close() }()
 
 	model := client.GenerativeModel(modelName)
 	parts := make([]genai.Part, len(text))

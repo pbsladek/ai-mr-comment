@@ -65,6 +65,46 @@ make test-run
 
 Download the latest binary for your OS from the [Releases](https://github.com/pbsladek/ai-mr-comment/releases) page.
 
+### Docker
+
+No Go toolchain required. The image includes git so all diff and commit commands work.
+
+```bash
+# Build the image
+make docker-build
+
+# Run against the current repo diff (mounts PWD, passes API keys from env)
+make docker-run ARGS="--provider openai"
+
+# Run quick-commit
+make docker-quick-commit ARGS="--dry-run"
+
+# Or use docker directly
+docker run --rm -it \
+  -v "$(pwd):/repo" -w /repo \
+  -e OPENAI_API_KEY \
+  ai-mr-comment --provider openai
+```
+
+**Mounting your config file:**
+```bash
+docker run --rm -it \
+  -v "$(pwd):/repo" -w /repo \
+  -v "$HOME/.ai-mr-comment.toml:/home/aiuser/.ai-mr-comment.toml:ro" \
+  -e OPENAI_API_KEY \
+  ai-mr-comment
+```
+
+**Fetching a PR/MR by URL (no repo mount needed):**
+```bash
+docker run --rm \
+  -e OPENAI_API_KEY \
+  -e GITHUB_TOKEN \
+  ai-mr-comment --pr https://github.com/owner/repo/pull/42
+```
+
+> **Note:** `--clipboard` is not available inside a container. Use `--output` or `--format json` instead to capture the output.
+
 ## Configuration File
 
 The tool looks for `.ai-mr-comment.toml` in your home directory or the current directory.
