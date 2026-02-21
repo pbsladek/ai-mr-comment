@@ -1,0 +1,15 @@
+diff --git a/scripts/build.sh b/scripts/build.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/deploy.sh b/scripts/deploy.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/test.sh b/scripts/test.sh
+old mode 100644
+new mode 100755
+diff --git a/config/secrets.toml b/config/secrets.toml
+old mode 100755
+new mode 100644
+diff --git a/bin/worker b/bin/worker
+old mode 100644
+new mode 100755

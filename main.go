@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -46,7 +47,7 @@ func parseVerdict(comment string) (verdict, body string) {
 // Accepting chatFn as a parameter allows tests to inject a mock without real API calls.
 func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
 	var commit, diffFilePath, outputPath, provider, modelOverride, templateName, format, prURL, clipboardFlag, systemPromptFlag string
-	var debug, staged, smartChunk, generateTitle, generateCommitMsg, verbose, exitCodeFlag, postFlag bool
+	var debug, staged, smartChunk, generateTitle, generateCommitMsg, verbose, exitCodeFlag, postFlag, estimate, autoYes bool
 	var exclude []string
 
 	rootCmd := &cobra.Command{
@@ -212,27 +213,19 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			}
 
 			if debug {
-				estimator := NewTokenEstimator(cfg)
-				model := getModelName(cfg)
-
-				// Gemini uses the official SDK for exact counts; others use a heuristic.
-				totalTokens, err := estimator.CountTokens(cmd.Context(), model, systemPrompt, diffContent)
-				if err != nil {
-					_, _ = fmt.Fprintf(out, "Error estimating tokens: %v\n", err)
-					fallback := &HeuristicTokenEstimator{}
-					totalTokens, _ = fallback.CountTokens(context.Background(), "", systemPrompt, diffContent)
-					_, _ = fmt.Fprintln(out, "Using heuristic fallback.")
-				}
-
-				cost := EstimateCost(model, totalTokens)
-
-				_, _ = fmt.Fprintln(out, "Token & Cost Estimation:")
-				_, _ = fmt.Fprintf(out, "- Model: %s\n", model)
-				_, _ = fmt.Fprintf(out, "- Diff lines: %d\n", strings.Count(diffContent, "\n")+1)
-				_, _ = fmt.Fprintf(out, "- Estimated Input Tokens: %d\n", totalTokens)
-				_, _ = fmt.Fprintf(out, "- Estimated Input Cost: $%.6f\n", cost)
-				_, _ = fmt.Fprintln(out, "\nNote: Output tokens and cost depend on the generated response length.")
+				showCostEstimate(cmd.Context(), cfg, systemPrompt, diffContent, out)
 				return nil
+			}
+
+			if estimate {
+				estimateOut := out
+				if format == "json" {
+					estimateOut = cmd.ErrOrStderr()
+				}
+				showCostEstimate(cmd.Context(), cfg, systemPrompt, diffContent, estimateOut)
+				if !promptConfirm(cmd.ErrOrStderr(), os.Stdin, autoYes) {
+					return nil
+				}
 			}
 
 			// Stream tokens directly to the terminal when output is a real TTY,
@@ -538,6 +531,8 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().BoolVar(&exitCodeFlag, "exit-code", false, "Exit with code 2 if the AI detects critical issues in the diff")
 	rootCmd.Flags().BoolVar(&postFlag, "post", false, "Post the generated comment back to the GitHub PR or GitLab MR (requires --pr)")
 	rootCmd.Flags().StringVar(&systemPromptFlag, "system-prompt", "", `Override the system prompt for this run. Use @path to read from a file (e.g. --system-prompt=@review.txt). Mutually exclusive with --template.`)
+	rootCmd.Flags().BoolVar(&estimate, "estimate", false, "Show token/cost estimate and prompt for confirmation before calling the API")
+	rootCmd.Flags().BoolVarP(&autoYes, "yes", "y", false, "Auto-confirm the cost estimate prompt (use with --estimate)")
 
 	rootCmd.AddCommand(newInitConfigCmd())
 	rootCmd.AddCommand(newModelsCmd())
@@ -689,6 +684,50 @@ func timedCall(cfg *Config, label string, fn func() (string, error)) (string, er
 		debugLog(cfg, "api: %s failed in %dms: %v", label, elapsed, err)
 	}
 	return result, err
+}
+
+// showCostEstimate prints token and cost estimation to w.
+func showCostEstimate(ctx context.Context, cfg *Config, systemPrompt, diffContent string, w io.Writer) {
+	model := getModelName(cfg)
+	estimator := NewTokenEstimator(cfg)
+	totalTokens, err := estimator.CountTokens(ctx, model, systemPrompt, diffContent)
+	if err != nil {
+		_, _ = fmt.Fprintf(w, "Error estimating tokens: %v\n", err)
+		fallback := &HeuristicTokenEstimator{}
+		totalTokens, _ = fallback.CountTokens(context.Background(), "", systemPrompt, diffContent)
+		_, _ = fmt.Fprintln(w, "Using heuristic fallback.")
+	}
+	cost := EstimateCost(model, totalTokens)
+	_, _ = fmt.Fprintln(w, "Token & Cost Estimation:")
+	_, _ = fmt.Fprintf(w, "- Model: %s\n", model)
+	_, _ = fmt.Fprintf(w, "- Diff lines: %d\n", strings.Count(diffContent, "\n")+1)
+	_, _ = fmt.Fprintf(w, "- Estimated Input Tokens: %d\n", totalTokens)
+	_, _ = fmt.Fprintf(w, "- Estimated Input Cost: $%.6f\n", cost)
+	_, _ = fmt.Fprintln(w, "\nNote: Output tokens and cost depend on the generated response length.")
+}
+
+// promptConfirm writes a "Proceed? [y/N]: " prompt to promptWriter and reads
+// one line from stdinReader. Returns true only if the user types "y" or "Y".
+// Auto-confirms when autoYes is true. Auto-declines when stdinReader is not
+// an interactive terminal (e.g. in CI or piped input).
+func promptConfirm(promptWriter io.Writer, stdinReader io.Reader, autoYes bool) bool {
+	if autoYes {
+		return true
+	}
+	if f, ok := stdinReader.(*os.File); ok {
+		if !term.IsTerminal(int(f.Fd())) {
+			_, _ = fmt.Fprintln(promptWriter, "Non-interactive mode: auto-declining. Use --yes to proceed.")
+			return false
+		}
+	} else {
+		// Non-*os.File reader (e.g. strings.Reader in tests) is non-interactive.
+		_, _ = fmt.Fprintln(promptWriter, "Non-interactive mode: auto-declining. Use --yes to proceed.")
+		return false
+	}
+	_, _ = fmt.Fprint(promptWriter, "Proceed? [y/N]: ")
+	var line string
+	_, _ = fmt.Fscan(stdinReader, &line)
+	return strings.ToLower(strings.TrimSpace(line)) == "y"
 }
 
 // setModelOverride applies a CLI --model value to the correct provider field in cfg.
@@ -883,6 +922,11 @@ remote. Use --dry-run to preview the generated message without committing.`,
 
 			if format != "json" {
 				_, _ = fmt.Fprintln(out, "Done.")
+				if remoteURL, remErr := getRemoteURL(); remErr == nil {
+					if createURL := prCreateURL(remoteURL, branch); createURL != "" {
+						_, _ = fmt.Fprintf(out, "\nOpen PR/MR: %s\n", createURL)
+					}
+				}
 			}
 			return nil
 		},

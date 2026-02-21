@@ -1,0 +1,33 @@
+diff --git a/internal/merge/resolver.go b/internal/merge/resolver.go
+index 1a2b3c4..5d6e7f8 100644
+--- a/internal/merge/resolver.go
++++ b/internal/merge/resolver.go
+@@ -10,16 +10,8 @@ func Resolve(a, b string) string {
+-<<<<<<< HEAD
+-	return "version A: " + a
+-=======
+-	return "version B: " + b
+->>>>>>> feature/new-resolver
++	if len(a) > len(b) {
++		return a
++	}
++	return b
+ }
+diff --git a/internal/merge/resolver_test.go b/internal/merge/resolver_test.go
+index 2b3c4d5..6e7f8a9 100644
+--- a/internal/merge/resolver_test.go
++++ b/internal/merge/resolver_test.go
+@@ -5,14 +5,10 @@ import "testing"
+ func TestResolve(t *testing.T) {
+-<<<<<<< HEAD
+-	got := Resolve("hello world", "hi")
+-	if got != "version A: hello world" {
+-=======
+-	got := Resolve("hello world", "hi")
+-	if got != "hello world" {
+->>>>>>> feature/new-resolver
++	got := Resolve("hello world", "hi")
++	if got != "hello world" {
+ 		t.Errorf("unexpected result: %s", got)
+ 	}
+ }

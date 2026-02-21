@@ -1,0 +1,42 @@
+diff --git a/services/api/v2/internal/auth/providers/oauth2/google/handler.go b/services/api/v2/internal/auth/providers/oauth2/google/handler.go
+index 1a2b3c4..5d6e7f8 100644
+--- a/services/api/v2/internal/auth/providers/oauth2/google/handler.go
++++ b/services/api/v2/internal/auth/providers/oauth2/google/handler.go
+@@ -1,5 +1,6 @@
+ package google
+
+ import "context"
+
++// HandleCallback processes the OAuth2 callback from Google.
+ func HandleCallback(ctx context.Context, code string) error {
+diff --git a/services/api/v2/internal/auth/providers/oauth2/github/handler.go b/services/api/v2/internal/auth/providers/oauth2/github/handler.go
+new file mode 100644
+index 0000000..9b8a7c6
+--- /dev/null
++++ b/services/api/v2/internal/auth/providers/oauth2/github/handler.go
+@@ -0,0 +1,5 @@
++package github
++
++// HandleCallback processes the OAuth2 callback from GitHub.
++func HandleCallback(ctx context.Context, code string) error {
++	return nil
++}
+diff --git a/services/api/v2/internal/auth/middleware/jwt/validator/claims/parser.go b/services/api/v2/internal/auth/middleware/jwt/validator/claims/parser.go
+index a1b2c3d..b2c3d4e 100644
+--- a/services/api/v2/internal/auth/middleware/jwt/validator/claims/parser.go
++++ b/services/api/v2/internal/auth/middleware/jwt/validator/claims/parser.go
+@@ -3,6 +3,7 @@ package parser
+
+ import (
+ 	"errors"
++	"fmt"
+ 	"time"
+ )
+
+@@ -12,5 +13,6 @@ func ParseClaims(token string) (*Claims, error) {
+ 	if token == "" {
+ 		return nil, errors.New("empty token")
+ 	}
++	fmt.Printf("parsing token of length %d\n", len(token))
+ 	return &Claims{Subject: token}, nil
+ }

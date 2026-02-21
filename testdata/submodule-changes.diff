@@ -1,0 +1,14 @@
+diff --git a/vendor/proto b/vendor/proto
+index a1b2c3d..e4f5a6b 160000
+--- a/vendor/proto
++++ b/vendor/proto
+@@ -1 +1 @@
+-Subproject commit a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
++Subproject commit e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3
+diff --git a/third_party/grpc b/third_party/grpc
+new file mode 160000
+index 0000000..1c2d3e4
+--- /dev/null
++++ b/third_party/grpc
+@@ -0,0 +1 @@
++Subproject commit 1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d

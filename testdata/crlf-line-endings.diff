@@ -1,0 +1,62 @@
+diff --git a/internal/config/config.go b/internal/config/config.go
+index abc1234..def5678 100644
+--- a/internal/config/config.go
++++ b/internal/config/config.go
+@@ -1,12 +1,14 @@
+ package config
+ 
+ import (
+-	"os"
++	"fmt"
++	"os"
+ )
+ 
+ // Config holds application configuration.
+ type Config struct {
+ 	Host string
+ 	Port int
++	Debug bool
+ }
+ 
+ // Load reads configuration from environment variables.
+ func Load() (*Config, error) {
+ 	host := os.Getenv("APP_HOST")
+ 	if host == "" {
+-		host = "localhost"
++		host = "0.0.0.0"
+ 	}
+-	return &Config{Host: host, Port: 8080}, nil
++	debug := os.Getenv("APP_DEBUG") == "true"
++	if debug {
++		fmt.Println("debug mode enabled")
++	}
++	return &Config{Host: host, Port: 8080, Debug: debug}, nil
+ }
+diff --git a/internal/config/config_test.go b/internal/config/config_test.go
+index 1b2c3d4..5e6f7a8 100644
+--- a/internal/config/config_test.go
++++ b/internal/config/config_test.go
+@@ -1,10 +1,15 @@
+ package config
+ 
+ import (
++	"os"
+ 	"testing"
+ )
+ 
+ func TestLoadDefaults(t *testing.T) {
+ 	cfg, err := Load()
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+-	if cfg.Host != "localhost" {
+-		t.Errorf("expected localhost got ", cfg.Host)
++	if cfg.Host != "0.0.0.0" {
++		t.Errorf("expected 0.0.0.0 got ", cfg.Host)
+ 	}
++	os.Setenv("APP_DEBUG", "true")
++	cfg2, _ := Load()
++	if !cfg2.Debug {
++		t.Error("expected debug true")
++	}
+ }

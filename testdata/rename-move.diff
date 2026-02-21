@@ -1,0 +1,55 @@
+diff --git a/internal/util/helpers.go b/internal/utils/helpers.go
+similarity index 91%
+rename from internal/util/helpers.go
+rename to internal/utils/helpers.go
+index 7a8b9c0..1d2e3f4 100644
+--- a/internal/util/helpers.go
++++ b/internal/utils/helpers.go
+@@ -1,4 +1,4 @@
+-package util
++package utils
+ 
+ import "strings"
+ 
+@@ -18,7 +18,7 @@ func TrimAll(ss []string) []string {
+ 	return out
+ }
+ 
+-// Contains reports whether s is in the slice.
++// Contains reports whether target is in the slice.
+ func Contains(slice []string, target string) bool {
+ 	for _, s := range slice {
+ 		if s == target {
+diff --git a/cmd/serve.go b/cmd/server.go
+similarity index 98%
+rename from cmd/serve.go
+rename to cmd/server.go
+index 2f3a4b5..6c7d8e9 100644
+--- a/cmd/serve.go
++++ b/cmd/server.go
+@@ -1,7 +1,7 @@
+ package cmd
+ 
+-// serve.go: HTTP server command.
++// server.go: HTTP server command.
+ 
+ import (
+ 	"context"
+diff --git a/pkg/old/widget.go b/pkg/widget/widget.go
+similarity index 100%
+rename from pkg/old/widget.go
+rename to pkg/widget/widget.go
+diff --git a/config/app.yaml b/config/application.yaml
+similarity index 87%
+rename from config/app.yaml
+rename to config/application.yaml
+index 4b5c6d7..8e9f0a1 100644
+--- a/config/app.yaml
++++ b/config/application.yaml
+@@ -1,5 +1,6 @@
+ server:
+   host: "0.0.0.0"
+   port: 8080
++  read_timeout: 30s
+ 
+ database:

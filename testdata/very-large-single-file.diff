@@ -1,0 +1,1324 @@
+diff --git a/internal/processor/rules.go b/internal/processor/rules.go
+index abcdef1..1234567 100644
+--- a/internal/processor/rules.go
++++ b/internal/processor/rules.go
+@@ -1,5 +1,5 @@
+ // Rule 0: context line A
+-	oldValue0000 := compute(input, 0)
++	newValue0000 := computeV2(input, 0)
+ // Rule 0: context line B
+ // Rule 0: context line C
+@@ -6,5 +6,5 @@
+ // Rule 1: context line A
+-	oldValue0001 := compute(input, 1)
++	newValue0001 := computeV2(input, 1)
+ // Rule 1: context line B
+ // Rule 1: context line C
+@@ -11,5 +11,5 @@
+ // Rule 2: context line A
+-	oldValue0002 := compute(input, 2)
++	newValue0002 := computeV2(input, 2)
+ // Rule 2: context line B
+ // Rule 2: context line C
+@@ -16,5 +16,5 @@
+ // Rule 3: context line A
+-	oldValue0003 := compute(input, 3)
++	newValue0003 := computeV2(input, 3)
+ // Rule 3: context line B
+ // Rule 3: context line C
+@@ -21,5 +21,5 @@
+ // Rule 4: context line A
+-	oldValue0004 := compute(input, 4)
++	newValue0004 := computeV2(input, 4)
+ // Rule 4: context line B
+ // Rule 4: context line C
+@@ -26,5 +26,5 @@
+ // Rule 5: context line A
+-	oldValue0005 := compute(input, 5)
++	newValue0005 := computeV2(input, 5)
+ // Rule 5: context line B
+ // Rule 5: context line C
+@@ -31,5 +31,5 @@
+ // Rule 6: context line A
+-	oldValue0006 := compute(input, 6)
++	newValue0006 := computeV2(input, 6)
+ // Rule 6: context line B
+ // Rule 6: context line C
+@@ -36,5 +36,5 @@
+ // Rule 7: context line A
+-	oldValue0007 := compute(input, 7)
++	newValue0007 := computeV2(input, 7)
+ // Rule 7: context line B
+ // Rule 7: context line C
+@@ -41,5 +41,5 @@
+ // Rule 8: context line A
+-	oldValue0008 := compute(input, 8)
++	newValue0008 := computeV2(input, 8)
+ // Rule 8: context line B
+ // Rule 8: context line C
+@@ -46,5 +46,5 @@
+ // Rule 9: context line A
+-	oldValue0009 := compute(input, 9)
++	newValue0009 := computeV2(input, 9)
+ // Rule 9: context line B
+ // Rule 9: context line C
+@@ -51,5 +51,5 @@
+ // Rule 10: context line A
+-	oldValue0010 := compute(input, 10)
++	newValue0010 := computeV2(input, 10)
+ // Rule 10: context line B
+ // Rule 10: context line C
+@@ -56,5 +56,5 @@
+ // Rule 11: context line A
+-	oldValue0011 := compute(input, 11)
++	newValue0011 := computeV2(input, 11)
+ // Rule 11: context line B
+ // Rule 11: context line C
+@@ -61,5 +61,5 @@
+ // Rule 12: context line A
+-	oldValue0012 := compute(input, 12)
++	newValue0012 := computeV2(input, 12)
+ // Rule 12: context line B
+ // Rule 12: context line C
+@@ -66,5 +66,5 @@
+ // Rule 13: context line A
+-	oldValue0013 := compute(input, 13)
++	newValue0013 := computeV2(input, 13)
+ // Rule 13: context line B
+ // Rule 13: context line C
+@@ -71,5 +71,5 @@
+ // Rule 14: context line A
+-	oldValue0014 := compute(input, 14)
++	newValue0014 := computeV2(input, 14)
+ // Rule 14: context line B
+ // Rule 14: context line C
+@@ -76,5 +76,5 @@
+ // Rule 15: context line A
+-	oldValue0015 := compute(input, 15)
++	newValue0015 := computeV2(input, 15)
+ // Rule 15: context line B
+ // Rule 15: context line C
+@@ -81,5 +81,5 @@
+ // Rule 16: context line A
+-	oldValue0016 := compute(input, 16)
++	newValue0016 := computeV2(input, 16)
+ // Rule 16: context line B
+ // Rule 16: context line C
+@@ -86,5 +86,5 @@
+ // Rule 17: context line A
+-	oldValue0017 := compute(input, 17)
++	newValue0017 := computeV2(input, 17)
+ // Rule 17: context line B
+ // Rule 17: context line C
+@@ -91,5 +91,5 @@
+ // Rule 18: context line A
+-	oldValue0018 := compute(input, 18)
++	newValue0018 := computeV2(input, 18)
+ // Rule 18: context line B
+ // Rule 18: context line C
+@@ -96,5 +96,5 @@
+ // Rule 19: context line A
+-	oldValue0019 := compute(input, 19)
++	newValue0019 := computeV2(input, 19)
+ // Rule 19: context line B
+ // Rule 19: context line C
+@@ -101,5 +101,5 @@
+ // Rule 20: context line A
+-	oldValue0020 := compute(input, 20)
++	newValue0020 := computeV2(input, 20)
+ // Rule 20: context line B
+ // Rule 20: context line C
+@@ -106,5 +106,5 @@
+ // Rule 21: context line A
+-	oldValue0021 := compute(input, 21)
++	newValue0021 := computeV2(input, 21)
+ // Rule 21: context line B
+ // Rule 21: context line C
+@@ -111,5 +111,5 @@
+ // Rule 22: context line A
+-	oldValue0022 := compute(input, 22)
++	newValue0022 := computeV2(input, 22)
+ // Rule 22: context line B
+ // Rule 22: context line C
+@@ -116,5 +116,5 @@
+ // Rule 23: context line A
+-	oldValue0023 := compute(input, 23)
++	newValue0023 := computeV2(input, 23)
+ // Rule 23: context line B
+ // Rule 23: context line C
+@@ -121,5 +121,5 @@
+ // Rule 24: context line A
+-	oldValue0024 := compute(input, 24)
++	newValue0024 := computeV2(input, 24)
+ // Rule 24: context line B
+ // Rule 24: context line C
+@@ -126,5 +126,5 @@
+ // Rule 25: context line A
+-	oldValue0025 := compute(input, 25)
++	newValue0025 := computeV2(input, 25)
+ // Rule 25: context line B
+ // Rule 25: context line C
+@@ -131,5 +131,5 @@
+ // Rule 26: context line A
+-	oldValue0026 := compute(input, 26)
++	newValue0026 := computeV2(input, 26)
+ // Rule 26: context line B
+ // Rule 26: context line C
+@@ -136,5 +136,5 @@
+ // Rule 27: context line A
+-	oldValue0027 := compute(input, 27)
++	newValue0027 := computeV2(input, 27)
+ // Rule 27: context line B
+ // Rule 27: context line C
+@@ -141,5 +141,5 @@
+ // Rule 28: context line A
+-	oldValue0028 := compute(input, 28)
++	newValue0028 := computeV2(input, 28)
+ // Rule 28: context line B
+ // Rule 28: context line C
+@@ -146,5 +146,5 @@
+ // Rule 29: context line A
+-	oldValue0029 := compute(input, 29)
++	newValue0029 := computeV2(input, 29)
+ // Rule 29: context line B
+ // Rule 29: context line C
+@@ -151,5 +151,5 @@
+ // Rule 30: context line A
+-	oldValue0030 := compute(input, 30)
++	newValue0030 := computeV2(input, 30)
+ // Rule 30: context line B
+ // Rule 30: context line C
+@@ -156,5 +156,5 @@
+ // Rule 31: context line A
+-	oldValue0031 := compute(input, 31)
++	newValue0031 := computeV2(input, 31)
+ // Rule 31: context line B
+ // Rule 31: context line C
+@@ -161,5 +161,5 @@
+ // Rule 32: context line A
+-	oldValue0032 := compute(input, 32)
++	newValue0032 := computeV2(input, 32)
+ // Rule 32: context line B
+ // Rule 32: context line C
+@@ -166,5 +166,5 @@
+ // Rule 33: context line A
+-	oldValue0033 := compute(input, 33)
++	newValue0033 := computeV2(input, 33)
+ // Rule 33: context line B
+ // Rule 33: context line C
+@@ -171,5 +171,5 @@
+ // Rule 34: context line A
+-	oldValue0034 := compute(input, 34)
++	newValue0034 := computeV2(input, 34)
+ // Rule 34: context line B
+ // Rule 34: context line C
+@@ -176,5 +176,5 @@
+ // Rule 35: context line A
+-	oldValue0035 := compute(input, 35)
++	newValue0035 := computeV2(input, 35)
+ // Rule 35: context line B
+ // Rule 35: context line C
+@@ -181,5 +181,5 @@
+ // Rule 36: context line A
+-	oldValue0036 := compute(input, 36)
++	newValue0036 := computeV2(input, 36)
+ // Rule 36: context line B
+ // Rule 36: context line C
+@@ -186,5 +186,5 @@
+ // Rule 37: context line A
+-	oldValue0037 := compute(input, 37)
++	newValue0037 := computeV2(input, 37)
+ // Rule 37: context line B
+ // Rule 37: context line C
+@@ -191,5 +191,5 @@
+ // Rule 38: context line A
+-	oldValue0038 := compute(input, 38)
++	newValue0038 := computeV2(input, 38)
+ // Rule 38: context line B
+ // Rule 38: context line C
+@@ -196,5 +196,5 @@
+ // Rule 39: context line A
+-	oldValue0039 := compute(input, 39)
++	newValue0039 := computeV2(input, 39)
+ // Rule 39: context line B
+ // Rule 39: context line C
+@@ -201,5 +201,5 @@
+ // Rule 40: context line A
+-	oldValue0040 := compute(input, 40)
++	newValue0040 := computeV2(input, 40)
+ // Rule 40: context line B
+ // Rule 40: context line C
+@@ -206,5 +206,5 @@
+ // Rule 41: context line A
+-	oldValue0041 := compute(input, 41)
++	newValue0041 := computeV2(input, 41)
+ // Rule 41: context line B
+ // Rule 41: context line C
+@@ -211,5 +211,5 @@
+ // Rule 42: context line A
+-	oldValue0042 := compute(input, 42)
++	newValue0042 := computeV2(input, 42)
+ // Rule 42: context line B
+ // Rule 42: context line C
+@@ -216,5 +216,5 @@
+ // Rule 43: context line A
+-	oldValue0043 := compute(input, 43)
++	newValue0043 := computeV2(input, 43)
+ // Rule 43: context line B
+ // Rule 43: context line C
+@@ -221,5 +221,5 @@
+ // Rule 44: context line A
+-	oldValue0044 := compute(input, 44)
++	newValue0044 := computeV2(input, 44)
+ // Rule 44: context line B
+ // Rule 44: context line C
+@@ -226,5 +226,5 @@
+ // Rule 45: context line A
+-	oldValue0045 := compute(input, 45)
++	newValue0045 := computeV2(input, 45)
+ // Rule 45: context line B
+ // Rule 45: context line C
+@@ -231,5 +231,5 @@
+ // Rule 46: context line A
+-	oldValue0046 := compute(input, 46)
++	newValue0046 := computeV2(input, 46)
+ // Rule 46: context line B
+ // Rule 46: context line C
+@@ -236,5 +236,5 @@
+ // Rule 47: context line A
+-	oldValue0047 := compute(input, 47)
++	newValue0047 := computeV2(input, 47)
+ // Rule 47: context line B
+ // Rule 47: context line C
+@@ -241,5 +241,5 @@
+ // Rule 48: context line A
+-	oldValue0048 := compute(input, 48)
++	newValue0048 := computeV2(input, 48)
+ // Rule 48: context line B
+ // Rule 48: context line C
+@@ -246,5 +246,5 @@
+ // Rule 49: context line A
+-	oldValue0049 := compute(input, 49)
++	newValue0049 := computeV2(input, 49)
+ // Rule 49: context line B
+ // Rule 49: context line C
+@@ -251,5 +251,5 @@
+ // Rule 50: context line A
+-	oldValue0050 := compute(input, 50)
++	newValue0050 := computeV2(input, 50)
+ // Rule 50: context line B
+ // Rule 50: context line C
+@@ -256,5 +256,5 @@
+ // Rule 51: context line A
+-	oldValue0051 := compute(input, 51)
++	newValue0051 := computeV2(input, 51)
+ // Rule 51: context line B
+ // Rule 51: context line C
+@@ -261,5 +261,5 @@
+ // Rule 52: context line A
+-	oldValue0052 := compute(input, 52)
++	newValue0052 := computeV2(input, 52)
+ // Rule 52: context line B
+ // Rule 52: context line C
+@@ -266,5 +266,5 @@
+ // Rule 53: context line A
+-	oldValue0053 := compute(input, 53)
++	newValue0053 := computeV2(input, 53)
+ // Rule 53: context line B
+ // Rule 53: context line C
+@@ -271,5 +271,5 @@
+ // Rule 54: context line A
+-	oldValue0054 := compute(input, 54)
++	newValue0054 := computeV2(input, 54)
+ // Rule 54: context line B
+ // Rule 54: context line C
+@@ -276,5 +276,5 @@
+ // Rule 55: context line A
+-	oldValue0055 := compute(input, 55)
++	newValue0055 := computeV2(input, 55)
+ // Rule 55: context line B
+ // Rule 55: context line C
+@@ -281,5 +281,5 @@
+ // Rule 56: context line A
+-	oldValue0056 := compute(input, 56)
++	newValue0056 := computeV2(input, 56)
+ // Rule 56: context line B
+ // Rule 56: context line C
+@@ -286,5 +286,5 @@
+ // Rule 57: context line A
+-	oldValue0057 := compute(input, 57)
++	newValue0057 := computeV2(input, 57)
+ // Rule 57: context line B
+ // Rule 57: context line C
+@@ -291,5 +291,5 @@
+ // Rule 58: context line A
+-	oldValue0058 := compute(input, 58)
++	newValue0058 := computeV2(input, 58)
+ // Rule 58: context line B
+ // Rule 58: context line C
+@@ -296,5 +296,5 @@
+ // Rule 59: context line A
+-	oldValue0059 := compute(input, 59)
++	newValue0059 := computeV2(input, 59)
+ // Rule 59: context line B
+ // Rule 59: context line C
+@@ -301,5 +301,5 @@
+ // Rule 60: context line A
+-	oldValue0060 := compute(input, 60)
++	newValue0060 := computeV2(input, 60)
+ // Rule 60: context line B
+ // Rule 60: context line C
+@@ -306,5 +306,5 @@
+ // Rule 61: context line A
+-	oldValue0061 := compute(input, 61)
++	newValue0061 := computeV2(input, 61)
+ // Rule 61: context line B
+ // Rule 61: context line C
+@@ -311,5 +311,5 @@
+ // Rule 62: context line A
+-	oldValue0062 := compute(input, 62)
++	newValue0062 := computeV2(input, 62)
+ // Rule 62: context line B
+ // Rule 62: context line C
+@@ -316,5 +316,5 @@
+ // Rule 63: context line A
+-	oldValue0063 := compute(input, 63)
++	newValue0063 := computeV2(input, 63)
+ // Rule 63: context line B
+ // Rule 63: context line C
+@@ -321,5 +321,5 @@
+ // Rule 64: context line A
+-	oldValue0064 := compute(input, 64)
++	newValue0064 := computeV2(input, 64)
+ // Rule 64: context line B
+ // Rule 64: context line C
+@@ -326,5 +326,5 @@
+ // Rule 65: context line A
+-	oldValue0065 := compute(input, 65)
++	newValue0065 := computeV2(input, 65)
+ // Rule 65: context line B
+ // Rule 65: context line C
+@@ -331,5 +331,5 @@
+ // Rule 66: context line A
+-	oldValue0066 := compute(input, 66)
++	newValue0066 := computeV2(input, 66)
+ // Rule 66: context line B
+ // Rule 66: context line C
+@@ -336,5 +336,5 @@
+ // Rule 67: context line A
+-	oldValue0067 := compute(input, 67)
++	newValue0067 := computeV2(input, 67)
+ // Rule 67: context line B
+ // Rule 67: context line C
+@@ -341,5 +341,5 @@
+ // Rule 68: context line A
+-	oldValue0068 := compute(input, 68)
++	newValue0068 := computeV2(input, 68)
+ // Rule 68: context line B
+ // Rule 68: context line C
+@@ -346,5 +346,5 @@
+ // Rule 69: context line A
+-	oldValue0069 := compute(input, 69)
++	newValue0069 := computeV2(input, 69)
+ // Rule 69: context line B
+ // Rule 69: context line C
+@@ -351,5 +351,5 @@
+ // Rule 70: context line A
+-	oldValue0070 := compute(input, 70)
++	newValue0070 := computeV2(input, 70)
+ // Rule 70: context line B
+ // Rule 70: context line C
+@@ -356,5 +356,5 @@
+ // Rule 71: context line A
+-	oldValue0071 := compute(input, 71)
++	newValue0071 := computeV2(input, 71)
+ // Rule 71: context line B
+ // Rule 71: context line C
+@@ -361,5 +361,5 @@
+ // Rule 72: context line A
+-	oldValue0072 := compute(input, 72)
++	newValue0072 := computeV2(input, 72)
+ // Rule 72: context line B
+ // Rule 72: context line C
+@@ -366,5 +366,5 @@
+ // Rule 73: context line A
+-	oldValue0073 := compute(input, 73)
++	newValue0073 := computeV2(input, 73)
+ // Rule 73: context line B
+ // Rule 73: context line C
+@@ -371,5 +371,5 @@
+ // Rule 74: context line A
+-	oldValue0074 := compute(input, 74)
++	newValue0074 := computeV2(input, 74)
+ // Rule 74: context line B
+ // Rule 74: context line C
+@@ -376,5 +376,5 @@
+ // Rule 75: context line A
+-	oldValue0075 := compute(input, 75)
++	newValue0075 := computeV2(input, 75)
+ // Rule 75: context line B
+ // Rule 75: context line C
+@@ -381,5 +381,5 @@
+ // Rule 76: context line A
+-	oldValue0076 := compute(input, 76)
++	newValue0076 := computeV2(input, 76)
+ // Rule 76: context line B
+ // Rule 76: context line C
+@@ -386,5 +386,5 @@
+ // Rule 77: context line A
+-	oldValue0077 := compute(input, 77)
++	newValue0077 := computeV2(input, 77)
+ // Rule 77: context line B
+ // Rule 77: context line C
+@@ -391,5 +391,5 @@
+ // Rule 78: context line A
+-	oldValue0078 := compute(input, 78)
++	newValue0078 := computeV2(input, 78)
+ // Rule 78: context line B
+ // Rule 78: context line C
+@@ -396,5 +396,5 @@
+ // Rule 79: context line A
+-	oldValue0079 := compute(input, 79)
++	newValue0079 := computeV2(input, 79)
+ // Rule 79: context line B
+ // Rule 79: context line C
+@@ -401,5 +401,5 @@
+ // Rule 80: context line A
+-	oldValue0080 := compute(input, 80)
++	newValue0080 := computeV2(input, 80)
+ // Rule 80: context line B
+ // Rule 80: context line C
+@@ -406,5 +406,5 @@
+ // Rule 81: context line A
+-	oldValue0081 := compute(input, 81)
++	newValue0081 := computeV2(input, 81)
+ // Rule 81: context line B
+ // Rule 81: context line C
+@@ -411,5 +411,5 @@
+ // Rule 82: context line A
+-	oldValue0082 := compute(input, 82)
++	newValue0082 := computeV2(input, 82)
+ // Rule 82: context line B
+ // Rule 82: context line C
+@@ -416,5 +416,5 @@
+ // Rule 83: context line A
+-	oldValue0083 := compute(input, 83)
++	newValue0083 := computeV2(input, 83)
+ // Rule 83: context line B
+ // Rule 83: context line C
+@@ -421,5 +421,5 @@
+ // Rule 84: context line A
+-	oldValue0084 := compute(input, 84)
++	newValue0084 := computeV2(input, 84)
+ // Rule 84: context line B
+ // Rule 84: context line C
+@@ -426,5 +426,5 @@
+ // Rule 85: context line A
+-	oldValue0085 := compute(input, 85)
++	newValue0085 := computeV2(input, 85)
+ // Rule 85: context line B
+ // Rule 85: context line C
+@@ -431,5 +431,5 @@
+ // Rule 86: context line A
+-	oldValue0086 := compute(input, 86)
++	newValue0086 := computeV2(input, 86)
+ // Rule 86: context line B
+ // Rule 86: context line C
+@@ -436,5 +436,5 @@
+ // Rule 87: context line A
+-	oldValue0087 := compute(input, 87)
++	newValue0087 := computeV2(input, 87)
+ // Rule 87: context line B
+ // Rule 87: context line C
+@@ -441,5 +441,5 @@
+ // Rule 88: context line A
+-	oldValue0088 := compute(input, 88)
++	newValue0088 := computeV2(input, 88)
+ // Rule 88: context line B
+ // Rule 88: context line C
+@@ -446,5 +446,5 @@
+ // Rule 89: context line A
+-	oldValue0089 := compute(input, 89)
++	newValue0089 := computeV2(input, 89)
+ // Rule 89: context line B
+ // Rule 89: context line C
+@@ -451,5 +451,5 @@
+ // Rule 90: context line A
+-	oldValue0090 := compute(input, 90)
++	newValue0090 := computeV2(input, 90)
+ // Rule 90: context line B
+ // Rule 90: context line C
+@@ -456,5 +456,5 @@
+ // Rule 91: context line A
+-	oldValue0091 := compute(input, 91)
++	newValue0091 := computeV2(input, 91)
+ // Rule 91: context line B
+ // Rule 91: context line C
+@@ -461,5 +461,5 @@
+ // Rule 92: context line A
+-	oldValue0092 := compute(input, 92)
++	newValue0092 := computeV2(input, 92)
+ // Rule 92: context line B
+ // Rule 92: context line C
+@@ -466,5 +466,5 @@
+ // Rule 93: context line A
+-	oldValue0093 := compute(input, 93)
++	newValue0093 := computeV2(input, 93)
+ // Rule 93: context line B
+ // Rule 93: context line C
+@@ -471,5 +471,5 @@
+ // Rule 94: context line A
+-	oldValue0094 := compute(input, 94)
++	newValue0094 := computeV2(input, 94)
+ // Rule 94: context line B
+ // Rule 94: context line C
+@@ -476,5 +476,5 @@
+ // Rule 95: context line A
+-	oldValue0095 := compute(input, 95)
++	newValue0095 := computeV2(input, 95)
+ // Rule 95: context line B
+ // Rule 95: context line C
+@@ -481,5 +481,5 @@
+ // Rule 96: context line A
+-	oldValue0096 := compute(input, 96)
++	newValue0096 := computeV2(input, 96)
+ // Rule 96: context line B
+ // Rule 96: context line C
+@@ -486,5 +486,5 @@
+ // Rule 97: context line A
+-	oldValue0097 := compute(input, 97)
++	newValue0097 := computeV2(input, 97)
+ // Rule 97: context line B
+ // Rule 97: context line C
+@@ -491,5 +491,5 @@
+ // Rule 98: context line A
+-	oldValue0098 := compute(input, 98)
++	newValue0098 := computeV2(input, 98)
+ // Rule 98: context line B
+ // Rule 98: context line C
+@@ -496,5 +496,5 @@
+ // Rule 99: context line A
+-	oldValue0099 := compute(input, 99)
++	newValue0099 := computeV2(input, 99)
+ // Rule 99: context line B
+ // Rule 99: context line C
+@@ -501,5 +501,5 @@
+ // Rule 100: context line A
+-	oldValue0100 := compute(input, 100)
++	newValue0100 := computeV2(input, 100)
+ // Rule 100: context line B
+ // Rule 100: context line C
+@@ -506,5 +506,5 @@
+ // Rule 101: context line A
+-	oldValue0101 := compute(input, 101)
++	newValue0101 := computeV2(input, 101)
+ // Rule 101: context line B
+ // Rule 101: context line C
+@@ -511,5 +511,5 @@
+ // Rule 102: context line A
+-	oldValue0102 := compute(input, 102)
++	newValue0102 := computeV2(input, 102)
+ // Rule 102: context line B
+ // Rule 102: context line C
+@@ -516,5 +516,5 @@
+ // Rule 103: context line A
+-	oldValue0103 := compute(input, 103)
++	newValue0103 := computeV2(input, 103)
+ // Rule 103: context line B
+ // Rule 103: context line C
+@@ -521,5 +521,5 @@
+ // Rule 104: context line A
+-	oldValue0104 := compute(input, 104)
++	newValue0104 := computeV2(input, 104)
+ // Rule 104: context line B
+ // Rule 104: context line C
+@@ -526,5 +526,5 @@
+ // Rule 105: context line A
+-	oldValue0105 := compute(input, 105)
++	newValue0105 := computeV2(input, 105)
+ // Rule 105: context line B
+ // Rule 105: context line C
+@@ -531,5 +531,5 @@
+ // Rule 106: context line A
+-	oldValue0106 := compute(input, 106)
++	newValue0106 := computeV2(input, 106)
+ // Rule 106: context line B
+ // Rule 106: context line C
+@@ -536,5 +536,5 @@
+ // Rule 107: context line A
+-	oldValue0107 := compute(input, 107)
++	newValue0107 := computeV2(input, 107)
+ // Rule 107: context line B
+ // Rule 107: context line C
+@@ -541,5 +541,5 @@
+ // Rule 108: context line A
+-	oldValue0108 := compute(input, 108)
++	newValue0108 := computeV2(input, 108)
+ // Rule 108: context line B
+ // Rule 108: context line C
+@@ -546,5 +546,5 @@
+ // Rule 109: context line A
+-	oldValue0109 := compute(input, 109)
++	newValue0109 := computeV2(input, 109)
+ // Rule 109: context line B
+ // Rule 109: context line C
+@@ -551,5 +551,5 @@
+ // Rule 110: context line A
+-	oldValue0110 := compute(input, 110)
++	newValue0110 := computeV2(input, 110)
+ // Rule 110: context line B
+ // Rule 110: context line C
+@@ -556,5 +556,5 @@
+ // Rule 111: context line A
+-	oldValue0111 := compute(input, 111)
++	newValue0111 := computeV2(input, 111)
+ // Rule 111: context line B
+ // Rule 111: context line C
+@@ -561,5 +561,5 @@
+ // Rule 112: context line A
+-	oldValue0112 := compute(input, 112)
++	newValue0112 := computeV2(input, 112)
+ // Rule 112: context line B
+ // Rule 112: context line C
+@@ -566,5 +566,5 @@
+ // Rule 113: context line A
+-	oldValue0113 := compute(input, 113)
++	newValue0113 := computeV2(input, 113)
+ // Rule 113: context line B
+ // Rule 113: context line C
+@@ -571,5 +571,5 @@
+ // Rule 114: context line A
+-	oldValue0114 := compute(input, 114)
++	newValue0114 := computeV2(input, 114)
+ // Rule 114: context line B
+ // Rule 114: context line C
+@@ -576,5 +576,5 @@
+ // Rule 115: context line A
+-	oldValue0115 := compute(input, 115)
++	newValue0115 := computeV2(input, 115)
+ // Rule 115: context line B
+ // Rule 115: context line C
+@@ -581,5 +581,5 @@
+ // Rule 116: context line A
+-	oldValue0116 := compute(input, 116)
++	newValue0116 := computeV2(input, 116)
+ // Rule 116: context line B
+ // Rule 116: context line C
+@@ -586,5 +586,5 @@
+ // Rule 117: context line A
+-	oldValue0117 := compute(input, 117)
++	newValue0117 := computeV2(input, 117)
+ // Rule 117: context line B
+ // Rule 117: context line C
+@@ -591,5 +591,5 @@
+ // Rule 118: context line A
+-	oldValue0118 := compute(input, 118)
++	newValue0118 := computeV2(input, 118)
+ // Rule 118: context line B
+ // Rule 118: context line C
+@@ -596,5 +596,5 @@
+ // Rule 119: context line A
+-	oldValue0119 := compute(input, 119)
++	newValue0119 := computeV2(input, 119)
+ // Rule 119: context line B
+ // Rule 119: context line C
+@@ -601,5 +601,5 @@
+ // Rule 120: context line A
+-	oldValue0120 := compute(input, 120)
++	newValue0120 := computeV2(input, 120)
+ // Rule 120: context line B
+ // Rule 120: context line C
+@@ -606,5 +606,5 @@
+ // Rule 121: context line A
+-	oldValue0121 := compute(input, 121)
++	newValue0121 := computeV2(input, 121)
+ // Rule 121: context line B
+ // Rule 121: context line C
+@@ -611,5 +611,5 @@
+ // Rule 122: context line A
+-	oldValue0122 := compute(input, 122)
++	newValue0122 := computeV2(input, 122)
+ // Rule 122: context line B
+ // Rule 122: context line C
+@@ -616,5 +616,5 @@
+ // Rule 123: context line A
+-	oldValue0123 := compute(input, 123)
++	newValue0123 := computeV2(input, 123)
+ // Rule 123: context line B
+ // Rule 123: context line C
+@@ -621,5 +621,5 @@
+ // Rule 124: context line A
+-	oldValue0124 := compute(input, 124)
++	newValue0124 := computeV2(input, 124)
+ // Rule 124: context line B
+ // Rule 124: context line C
+@@ -626,5 +626,5 @@
+ // Rule 125: context line A
+-	oldValue0125 := compute(input, 125)
++	newValue0125 := computeV2(input, 125)
+ // Rule 125: context line B
+ // Rule 125: context line C
+@@ -631,5 +631,5 @@
+ // Rule 126: context line A
+-	oldValue0126 := compute(input, 126)
++	newValue0126 := computeV2(input, 126)
+ // Rule 126: context line B
+ // Rule 126: context line C
+@@ -636,5 +636,5 @@
+ // Rule 127: context line A
+-	oldValue0127 := compute(input, 127)
++	newValue0127 := computeV2(input, 127)
+ // Rule 127: context line B
+ // Rule 127: context line C
+@@ -641,5 +641,5 @@
+ // Rule 128: context line A
+-	oldValue0128 := compute(input, 128)
++	newValue0128 := computeV2(input, 128)
+ // Rule 128: context line B
+ // Rule 128: context line C
+@@ -646,5 +646,5 @@
+ // Rule 129: context line A
+-	oldValue0129 := compute(input, 129)
++	newValue0129 := computeV2(input, 129)
+ // Rule 129: context line B
+ // Rule 129: context line C
+@@ -651,5 +651,5 @@
+ // Rule 130: context line A
+-	oldValue0130 := compute(input, 130)
++	newValue0130 := computeV2(input, 130)
+ // Rule 130: context line B
+ // Rule 130: context line C
+@@ -656,5 +656,5 @@
+ // Rule 131: context line A
+-	oldValue0131 := compute(input, 131)
++	newValue0131 := computeV2(input, 131)
+ // Rule 131: context line B
+ // Rule 131: context line C
+@@ -661,5 +661,5 @@
+ // Rule 132: context line A
+-	oldValue0132 := compute(input, 132)
++	newValue0132 := computeV2(input, 132)
+ // Rule 132: context line B
+ // Rule 132: context line C
+@@ -666,5 +666,5 @@
+ // Rule 133: context line A
+-	oldValue0133 := compute(input, 133)
++	newValue0133 := computeV2(input, 133)
+ // Rule 133: context line B
+ // Rule 133: context line C
+@@ -671,5 +671,5 @@
+ // Rule 134: context line A
+-	oldValue0134 := compute(input, 134)
++	newValue0134 := computeV2(input, 134)
+ // Rule 134: context line B
+ // Rule 134: context line C
+@@ -676,5 +676,5 @@
+ // Rule 135: context line A
+-	oldValue0135 := compute(input, 135)
++	newValue0135 := computeV2(input, 135)
+ // Rule 135: context line B
+ // Rule 135: context line C
+@@ -681,5 +681,5 @@
+ // Rule 136: context line A
+-	oldValue0136 := compute(input, 136)
++	newValue0136 := computeV2(input, 136)
+ // Rule 136: context line B
+ // Rule 136: context line C
+@@ -686,5 +686,5 @@
+ // Rule 137: context line A
+-	oldValue0137 := compute(input, 137)
++	newValue0137 := computeV2(input, 137)
+ // Rule 137: context line B
+ // Rule 137: context line C
+@@ -691,5 +691,5 @@
+ // Rule 138: context line A
+-	oldValue0138 := compute(input, 138)
++	newValue0138 := computeV2(input, 138)
+ // Rule 138: context line B
+ // Rule 138: context line C
+@@ -696,5 +696,5 @@
+ // Rule 139: context line A
+-	oldValue0139 := compute(input, 139)
++	newValue0139 := computeV2(input, 139)
+ // Rule 139: context line B
+ // Rule 139: context line C
+@@ -701,5 +701,5 @@
+ // Rule 140: context line A
+-	oldValue0140 := compute(input, 140)
++	newValue0140 := computeV2(input, 140)
+ // Rule 140: context line B
+ // Rule 140: context line C
+@@ -706,5 +706,5 @@
+ // Rule 141: context line A
+-	oldValue0141 := compute(input, 141)
++	newValue0141 := computeV2(input, 141)
+ // Rule 141: context line B
+ // Rule 141: context line C
+@@ -711,5 +711,5 @@
+ // Rule 142: context line A
+-	oldValue0142 := compute(input, 142)
++	newValue0142 := computeV2(input, 142)
+ // Rule 142: context line B
+ // Rule 142: context line C
+@@ -716,5 +716,5 @@
+ // Rule 143: context line A
+-	oldValue0143 := compute(input, 143)
++	newValue0143 := computeV2(input, 143)
+ // Rule 143: context line B
+ // Rule 143: context line C
+@@ -721,5 +721,5 @@
+ // Rule 144: context line A
+-	oldValue0144 := compute(input, 144)
++	newValue0144 := computeV2(input, 144)
+ // Rule 144: context line B
+ // Rule 144: context line C
+@@ -726,5 +726,5 @@
+ // Rule 145: context line A
+-	oldValue0145 := compute(input, 145)
++	newValue0145 := computeV2(input, 145)
+ // Rule 145: context line B
+ // Rule 145: context line C
+@@ -731,5 +731,5 @@
+ // Rule 146: context line A
+-	oldValue0146 := compute(input, 146)
++	newValue0146 := computeV2(input, 146)
+ // Rule 146: context line B
+ // Rule 146: context line C
+@@ -736,5 +736,5 @@
+ // Rule 147: context line A
+-	oldValue0147 := compute(input, 147)
++	newValue0147 := computeV2(input, 147)
+ // Rule 147: context line B
+ // Rule 147: context line C
+@@ -741,5 +741,5 @@
+ // Rule 148: context line A
+-	oldValue0148 := compute(input, 148)
++	newValue0148 := computeV2(input, 148)
+ // Rule 148: context line B
+ // Rule 148: context line C
+@@ -746,5 +746,5 @@
+ // Rule 149: context line A
+-	oldValue0149 := compute(input, 149)
++	newValue0149 := computeV2(input, 149)
+ // Rule 149: context line B
+ // Rule 149: context line C
+@@ -751,5 +751,5 @@
+ // Rule 150: context line A
+-	oldValue0150 := compute(input, 150)
++	newValue0150 := computeV2(input, 150)
+ // Rule 150: context line B
+ // Rule 150: context line C
+@@ -756,5 +756,5 @@
+ // Rule 151: context line A
+-	oldValue0151 := compute(input, 151)
++	newValue0151 := computeV2(input, 151)
+ // Rule 151: context line B
+ // Rule 151: context line C
+@@ -761,5 +761,5 @@
+ // Rule 152: context line A
+-	oldValue0152 := compute(input, 152)
++	newValue0152 := computeV2(input, 152)
+ // Rule 152: context line B
+ // Rule 152: context line C
+@@ -766,5 +766,5 @@
+ // Rule 153: context line A
+-	oldValue0153 := compute(input, 153)
++	newValue0153 := computeV2(input, 153)
+ // Rule 153: context line B
+ // Rule 153: context line C
+@@ -771,5 +771,5 @@
+ // Rule 154: context line A
+-	oldValue0154 := compute(input, 154)
++	newValue0154 := computeV2(input, 154)
+ // Rule 154: context line B
+ // Rule 154: context line C
+@@ -776,5 +776,5 @@
+ // Rule 155: context line A
+-	oldValue0155 := compute(input, 155)
++	newValue0155 := computeV2(input, 155)
+ // Rule 155: context line B
+ // Rule 155: context line C
+@@ -781,5 +781,5 @@
+ // Rule 156: context line A
+-	oldValue0156 := compute(input, 156)
++	newValue0156 := computeV2(input, 156)
+ // Rule 156: context line B
+ // Rule 156: context line C
+@@ -786,5 +786,5 @@
+ // Rule 157: context line A
+-	oldValue0157 := compute(input, 157)
++	newValue0157 := computeV2(input, 157)
+ // Rule 157: context line B
+ // Rule 157: context line C
+@@ -791,5 +791,5 @@
+ // Rule 158: context line A
+-	oldValue0158 := compute(input, 158)
++	newValue0158 := computeV2(input, 158)
+ // Rule 158: context line B
+ // Rule 158: context line C
+@@ -796,5 +796,5 @@
+ // Rule 159: context line A
+-	oldValue0159 := compute(input, 159)
++	newValue0159 := computeV2(input, 159)
+ // Rule 159: context line B
+ // Rule 159: context line C
+@@ -801,5 +801,5 @@
+ // Rule 160: context line A
+-	oldValue0160 := compute(input, 160)
++	newValue0160 := computeV2(input, 160)
+ // Rule 160: context line B
+ // Rule 160: context line C
+@@ -806,5 +806,5 @@
+ // Rule 161: context line A
+-	oldValue0161 := compute(input, 161)
++	newValue0161 := computeV2(input, 161)
+ // Rule 161: context line B
+ // Rule 161: context line C
+@@ -811,5 +811,5 @@
+ // Rule 162: context line A
+-	oldValue0162 := compute(input, 162)
++	newValue0162 := computeV2(input, 162)
+ // Rule 162: context line B
+ // Rule 162: context line C
+@@ -816,5 +816,5 @@
+ // Rule 163: context line A
+-	oldValue0163 := compute(input, 163)
++	newValue0163 := computeV2(input, 163)
+ // Rule 163: context line B
+ // Rule 163: context line C
+@@ -821,5 +821,5 @@
+ // Rule 164: context line A
+-	oldValue0164 := compute(input, 164)
++	newValue0164 := computeV2(input, 164)
+ // Rule 164: context line B
+ // Rule 164: context line C
+@@ -826,5 +826,5 @@
+ // Rule 165: context line A
+-	oldValue0165 := compute(input, 165)
++	newValue0165 := computeV2(input, 165)
+ // Rule 165: context line B
+ // Rule 165: context line C
+@@ -831,5 +831,5 @@
+ // Rule 166: context line A
+-	oldValue0166 := compute(input, 166)
++	newValue0166 := computeV2(input, 166)
+ // Rule 166: context line B
+ // Rule 166: context line C
+@@ -836,5 +836,5 @@
+ // Rule 167: context line A
+-	oldValue0167 := compute(input, 167)
++	newValue0167 := computeV2(input, 167)
+ // Rule 167: context line B
+ // Rule 167: context line C
+@@ -841,5 +841,5 @@
+ // Rule 168: context line A
+-	oldValue0168 := compute(input, 168)
++	newValue0168 := computeV2(input, 168)
+ // Rule 168: context line B
+ // Rule 168: context line C
+@@ -846,5 +846,5 @@
+ // Rule 169: context line A
+-	oldValue0169 := compute(input, 169)
++	newValue0169 := computeV2(input, 169)
+ // Rule 169: context line B
+ // Rule 169: context line C
+@@ -851,5 +851,5 @@
+ // Rule 170: context line A
+-	oldValue0170 := compute(input, 170)
++	newValue0170 := computeV2(input, 170)
+ // Rule 170: context line B
+ // Rule 170: context line C
+@@ -856,5 +856,5 @@
+ // Rule 171: context line A
+-	oldValue0171 := compute(input, 171)
++	newValue0171 := computeV2(input, 171)
+ // Rule 171: context line B
+ // Rule 171: context line C
+@@ -861,5 +861,5 @@
+ // Rule 172: context line A
+-	oldValue0172 := compute(input, 172)
++	newValue0172 := computeV2(input, 172)
+ // Rule 172: context line B
+ // Rule 172: context line C
+@@ -866,5 +866,5 @@
+ // Rule 173: context line A
+-	oldValue0173 := compute(input, 173)
++	newValue0173 := computeV2(input, 173)
+ // Rule 173: context line B
+ // Rule 173: context line C
+@@ -871,5 +871,5 @@
+ // Rule 174: context line A
+-	oldValue0174 := compute(input, 174)
++	newValue0174 := computeV2(input, 174)
+ // Rule 174: context line B
+ // Rule 174: context line C
+@@ -876,5 +876,5 @@
+ // Rule 175: context line A
+-	oldValue0175 := compute(input, 175)
++	newValue0175 := computeV2(input, 175)
+ // Rule 175: context line B
+ // Rule 175: context line C
+@@ -881,5 +881,5 @@
+ // Rule 176: context line A
+-	oldValue0176 := compute(input, 176)
++	newValue0176 := computeV2(input, 176)
+ // Rule 176: context line B
+ // Rule 176: context line C
+@@ -886,5 +886,5 @@
+ // Rule 177: context line A
+-	oldValue0177 := compute(input, 177)
++	newValue0177 := computeV2(input, 177)
+ // Rule 177: context line B
+ // Rule 177: context line C
+@@ -891,5 +891,5 @@
+ // Rule 178: context line A
+-	oldValue0178 := compute(input, 178)
++	newValue0178 := computeV2(input, 178)
+ // Rule 178: context line B
+ // Rule 178: context line C
+@@ -896,5 +896,5 @@
+ // Rule 179: context line A
+-	oldValue0179 := compute(input, 179)
++	newValue0179 := computeV2(input, 179)
+ // Rule 179: context line B
+ // Rule 179: context line C
+@@ -901,5 +901,5 @@
+ // Rule 180: context line A
+-	oldValue0180 := compute(input, 180)
++	newValue0180 := computeV2(input, 180)
+ // Rule 180: context line B
+ // Rule 180: context line C
+@@ -906,5 +906,5 @@
+ // Rule 181: context line A
+-	oldValue0181 := compute(input, 181)
++	newValue0181 := computeV2(input, 181)
+ // Rule 181: context line B
+ // Rule 181: context line C
+@@ -911,5 +911,5 @@
+ // Rule 182: context line A
+-	oldValue0182 := compute(input, 182)
++	newValue0182 := computeV2(input, 182)
+ // Rule 182: context line B
+ // Rule 182: context line C
+@@ -916,5 +916,5 @@
+ // Rule 183: context line A
+-	oldValue0183 := compute(input, 183)
++	newValue0183 := computeV2(input, 183)
+ // Rule 183: context line B
+ // Rule 183: context line C
+@@ -921,5 +921,5 @@
+ // Rule 184: context line A
+-	oldValue0184 := compute(input, 184)
++	newValue0184 := computeV2(input, 184)
+ // Rule 184: context line B
+ // Rule 184: context line C
+@@ -926,5 +926,5 @@
+ // Rule 185: context line A
+-	oldValue0185 := compute(input, 185)
++	newValue0185 := computeV2(input, 185)
+ // Rule 185: context line B
+ // Rule 185: context line C
+@@ -931,5 +931,5 @@
+ // Rule 186: context line A
+-	oldValue0186 := compute(input, 186)
++	newValue0186 := computeV2(input, 186)
+ // Rule 186: context line B
+ // Rule 186: context line C
+@@ -936,5 +936,5 @@
+ // Rule 187: context line A
+-	oldValue0187 := compute(input, 187)
++	newValue0187 := computeV2(input, 187)
+ // Rule 187: context line B
+ // Rule 187: context line C
+@@ -941,5 +941,5 @@
+ // Rule 188: context line A
+-	oldValue0188 := compute(input, 188)
++	newValue0188 := computeV2(input, 188)
+ // Rule 188: context line B
+ // Rule 188: context line C
+@@ -946,5 +946,5 @@
+ // Rule 189: context line A
+-	oldValue0189 := compute(input, 189)
++	newValue0189 := computeV2(input, 189)
+ // Rule 189: context line B
+ // Rule 189: context line C
+@@ -951,5 +951,5 @@
+ // Rule 190: context line A
+-	oldValue0190 := compute(input, 190)
++	newValue0190 := computeV2(input, 190)
+ // Rule 190: context line B
+ // Rule 190: context line C
+@@ -956,5 +956,5 @@
+ // Rule 191: context line A
+-	oldValue0191 := compute(input, 191)
++	newValue0191 := computeV2(input, 191)
+ // Rule 191: context line B
+ // Rule 191: context line C
+@@ -961,5 +961,5 @@
+ // Rule 192: context line A
+-	oldValue0192 := compute(input, 192)
++	newValue0192 := computeV2(input, 192)
+ // Rule 192: context line B
+ // Rule 192: context line C
+@@ -966,5 +966,5 @@
+ // Rule 193: context line A
+-	oldValue0193 := compute(input, 193)
++	newValue0193 := computeV2(input, 193)
+ // Rule 193: context line B
+ // Rule 193: context line C
+@@ -971,5 +971,5 @@
+ // Rule 194: context line A
+-	oldValue0194 := compute(input, 194)
++	newValue0194 := computeV2(input, 194)
+ // Rule 194: context line B
+ // Rule 194: context line C
+@@ -976,5 +976,5 @@
+ // Rule 195: context line A
+-	oldValue0195 := compute(input, 195)
++	newValue0195 := computeV2(input, 195)
+ // Rule 195: context line B
+ // Rule 195: context line C
+@@ -981,5 +981,5 @@
+ // Rule 196: context line A
+-	oldValue0196 := compute(input, 196)
++	newValue0196 := computeV2(input, 196)
+ // Rule 196: context line B
+ // Rule 196: context line C
+@@ -986,5 +986,5 @@
+ // Rule 197: context line A
+-	oldValue0197 := compute(input, 197)
++	newValue0197 := computeV2(input, 197)
+ // Rule 197: context line B
+ // Rule 197: context line C
+@@ -991,5 +991,5 @@
+ // Rule 198: context line A
+-	oldValue0198 := compute(input, 198)
++	newValue0198 := computeV2(input, 198)
+ // Rule 198: context line B
+ // Rule 198: context line C
+@@ -996,5 +996,5 @@
+ // Rule 199: context line A
+-	oldValue0199 := compute(input, 199)
++	newValue0199 := computeV2(input, 199)
+ // Rule 199: context line B
+ // Rule 199: context line C
+@@ -1001,5 +1001,5 @@
+ // Rule 200: context line A
+-	oldValue0200 := compute(input, 200)
++	newValue0200 := computeV2(input, 200)
+ // Rule 200: context line B
+ // Rule 200: context line C
+@@ -1006,5 +1006,5 @@
+ // Rule 201: context line A
+-	oldValue0201 := compute(input, 201)
++	newValue0201 := computeV2(input, 201)
+ // Rule 201: context line B
+ // Rule 201: context line C
+@@ -1011,5 +1011,5 @@
+ // Rule 202: context line A
+-	oldValue0202 := compute(input, 202)
++	newValue0202 := computeV2(input, 202)
+ // Rule 202: context line B
+ // Rule 202: context line C
+@@ -1016,5 +1016,5 @@
+ // Rule 203: context line A
+-	oldValue0203 := compute(input, 203)
++	newValue0203 := computeV2(input, 203)
+ // Rule 203: context line B
+ // Rule 203: context line C
+@@ -1021,5 +1021,5 @@
+ // Rule 204: context line A
+-	oldValue0204 := compute(input, 204)
++	newValue0204 := computeV2(input, 204)
+ // Rule 204: context line B
+ // Rule 204: context line C
+@@ -1026,5 +1026,5 @@
+ // Rule 205: context line A
+-	oldValue0205 := compute(input, 205)
++	newValue0205 := computeV2(input, 205)
+ // Rule 205: context line B
+ // Rule 205: context line C
+@@ -1031,5 +1031,5 @@
+ // Rule 206: context line A
+-	oldValue0206 := compute(input, 206)
++	newValue0206 := computeV2(input, 206)
+ // Rule 206: context line B
+ // Rule 206: context line C
+@@ -1036,5 +1036,5 @@
+ // Rule 207: context line A
+-	oldValue0207 := compute(input, 207)
++	newValue0207 := computeV2(input, 207)
+ // Rule 207: context line B
+ // Rule 207: context line C
+@@ -1041,5 +1041,5 @@
+ // Rule 208: context line A
+-	oldValue0208 := compute(input, 208)
++	newValue0208 := computeV2(input, 208)
+ // Rule 208: context line B
+ // Rule 208: context line C
+@@ -1046,5 +1046,5 @@
+ // Rule 209: context line A
+-	oldValue0209 := compute(input, 209)
++	newValue0209 := computeV2(input, 209)
+ // Rule 209: context line B
+ // Rule 209: context line C
+@@ -1051,5 +1051,5 @@
+ // Rule 210: context line A
+-	oldValue0210 := compute(input, 210)
++	newValue0210 := computeV2(input, 210)
+ // Rule 210: context line B
+ // Rule 210: context line C
+@@ -1056,5 +1056,5 @@
+ // Rule 211: context line A
+-	oldValue0211 := compute(input, 211)
++	newValue0211 := computeV2(input, 211)
+ // Rule 211: context line B
+ // Rule 211: context line C
+@@ -1061,5 +1061,5 @@
+ // Rule 212: context line A
+-	oldValue0212 := compute(input, 212)
++	newValue0212 := computeV2(input, 212)
+ // Rule 212: context line B
+ // Rule 212: context line C
+@@ -1066,5 +1066,5 @@
+ // Rule 213: context line A
+-	oldValue0213 := compute(input, 213)
++	newValue0213 := computeV2(input, 213)
+ // Rule 213: context line B
+ // Rule 213: context line C
+@@ -1071,5 +1071,5 @@
+ // Rule 214: context line A
+-	oldValue0214 := compute(input, 214)
++	newValue0214 := computeV2(input, 214)
+ // Rule 214: context line B
+ // Rule 214: context line C
+@@ -1076,5 +1076,5 @@
+ // Rule 215: context line A
+-	oldValue0215 := compute(input, 215)
++	newValue0215 := computeV2(input, 215)
+ // Rule 215: context line B
+ // Rule 215: context line C
+@@ -1081,5 +1081,5 @@
+ // Rule 216: context line A
+-	oldValue0216 := compute(input, 216)
++	newValue0216 := computeV2(input, 216)
+ // Rule 216: context line B
+ // Rule 216: context line C
+@@ -1086,5 +1086,5 @@
+ // Rule 217: context line A
+-	oldValue0217 := compute(input, 217)
++	newValue0217 := computeV2(input, 217)
+ // Rule 217: context line B
+ // Rule 217: context line C
+@@ -1091,5 +1091,5 @@
+ // Rule 218: context line A
+-	oldValue0218 := compute(input, 218)
++	newValue0218 := computeV2(input, 218)
+ // Rule 218: context line B
+ // Rule 218: context line C
+@@ -1096,5 +1096,5 @@
+ // Rule 219: context line A
+-	oldValue0219 := compute(input, 219)
++	newValue0219 := computeV2(input, 219)
+ // Rule 219: context line B
+ // Rule 219: context line C

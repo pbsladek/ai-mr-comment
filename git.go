@@ -15,6 +15,55 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// getRemoteURL returns the push URL for the "origin" remote.
+func getRemoteURL() (string, error) {
+	out, err := exec.Command("git", "remote", "get-url", "origin").CombinedOutput() //nolint:gosec // G204: git is a fixed binary, "origin" is a constant
+	if err != nil {
+		return "", fmt.Errorf("getting remote URL: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// prCreateURL converts a git remote URL and branch name into a browser URL
+// for creating a new PR (GitHub) or MR (GitLab). Returns an empty string
+// when the remote does not match a known hosting pattern.
+//
+// Handles:
+//   - https://github.com/owner/repo.git      → github.com PR compare URL
+//   - git@github.com:owner/repo.git           → same
+//   - https://gitlab.com/group/project.git   → gitlab.com MR create URL
+//   - git@gitlab.com:group/project.git        → same
+func prCreateURL(remoteURL, branch string) string {
+	// Normalise SSH → HTTPS form.
+	// git@github.com:owner/repo.git → https://github.com/owner/repo.git
+	// git@gitlab.com:group/proj.git → https://gitlab.com/group/proj.git
+	raw := remoteURL
+	if strings.HasPrefix(raw, "git@") {
+		raw = strings.TrimPrefix(raw, "git@")
+		raw = strings.Replace(raw, ":", "/", 1)
+		raw = "https://" + raw
+	}
+	raw = strings.TrimSuffix(raw, ".git")
+
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+
+	host := strings.ToLower(u.Host)
+	path := strings.Trim(u.Path, "/")
+
+	switch {
+	case strings.Contains(host, "github"):
+		// https://github.com/owner/repo/compare/branch-name?expand=1
+		return "https://" + u.Host + "/" + path + "/compare/" + branch + "?expand=1"
+	case strings.Contains(host, "gitlab"):
+		// https://gitlab.com/group/project/-/merge_requests/new?merge_request[source_branch]=branch-name
+		return "https://" + u.Host + "/" + path + "/-/merge_requests/new?merge_request[source_branch]=" + branch
+	}
+	return ""
+}
+
 // getAutoMergeBase returns the common ancestor commit between HEAD and the
 // remote default branch, trying origin/main then origin/master.
 func getAutoMergeBase() (string, error) {

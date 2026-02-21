@@ -15,6 +15,7 @@ import (
 // user-facing changelog entry from a commit range using AI.
 func newChangelogCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
 	var commit, diffFilePath, outputPath, provider, modelOverride, format, systemPromptFlag string
+	var estimate, autoYes bool
 
 	cmd := &cobra.Command{
 		Use:   "changelog",
@@ -88,6 +89,13 @@ Examples:
 				prompt = override
 			}
 
+			if estimate {
+				showCostEstimate(cmd.Context(), cfg, prompt, diffContent, cmd.OutOrStdout())
+				if !promptConfirm(cmd.ErrOrStderr(), os.Stdin, autoYes) {
+					return nil
+				}
+			}
+
 			entry, err := timedCall(cfg, "changelog", func() (string, error) {
 				return chatFn(cmd.Context(), cfg, cfg.Provider, prompt, diffContent)
 			})
@@ -152,5 +160,7 @@ Examples:
 	cmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this run")
 	cmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")
 	cmd.Flags().StringVar(&systemPromptFlag, "system-prompt", "", `Override the system prompt for this run. Use @path to read from a file (e.g. --system-prompt=@notes.txt).`)
+	cmd.Flags().BoolVar(&estimate, "estimate", false, "Show token/cost estimate and prompt for confirmation before calling the API")
+	cmd.Flags().BoolVarP(&autoYes, "yes", "y", false, "Auto-confirm the cost estimate prompt (use with --estimate)")
 	return cmd
 }

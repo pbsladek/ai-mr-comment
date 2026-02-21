@@ -1,0 +1,69 @@
+diff --git a/locales/ja/messages.go b/locales/ja/messages.go
+new file mode 100644
+index 0000000..3f4a5b6
+--- /dev/null
++++ b/locales/ja/messages.go
+@@ -0,0 +1,18 @@
++package ja
++
++// Messages contains Japanese UI strings.
++var Messages = map[string]string{
++	"welcome":     "ようこそ！",
++	"goodbye":     "さようなら",
++	"error":       "エラーが発生しました",
++	"loading":     "読み込み中...",
++	"save":        "保存する",
++	"cancel":      "キャンセル",
++	"search":      "検索",
++	"not_found":   "見つかりませんでした",
++	"success":     "成功しました ✅",
++	"warning":     "⚠️ 警告",
++	"info":        "ℹ️ 情報",
++	"progress":    "進行状況: 🔄",
++	"done":        "完了 🎉",
++	"error_retry": "再試行してください 🔁",
++}
+diff --git "a/docs/\360\237\224\245-hotfix-notes.md" "b/docs/\360\237\224\245-hotfix-notes.md"
+new file mode 100644
+index 0000000..7c8d9e0
+--- /dev/null
++++ "b/docs/\360\237\224\245-hotfix-notes.md"
+@@ -0,0 +1,10 @@
++# Hotfix Notes 🔥
++
++## Changes
++
++- Fixed crash when emoji appear in usernames 👤
++- Corrected CJK character width calculation for terminal output
++- Added support for right-to-left text: مرحبا بالعالم
++- Greek alphabet constants: α β γ δ ε ζ η θ
++- Mathematical symbols: ∑ ∞ ∂ ∇ ∫ ≤ ≥ ≠ ≈
++- Currency symbols: € £ ¥ ₹ ₿
+diff --git a/internal/i18n/detector.go b/internal/i18n/detector.go
+index 1a2b3c4..5d6e7f8 100644
+--- a/internal/i18n/detector.go
++++ b/internal/i18n/detector.go
+@@ -12,7 +12,10 @@ var supportedLocales = []string{
+ 	"en-US",
+ 	"fr-FR",
+ 	"de-DE",
++	"ja-JP",
++	"zh-CN",
++	"zh-TW",
++	"ko-KR",
+ 	"es-ES",
+ }
+ 
+@@ -25,6 +28,9 @@ func Detect(header string) string {
+ 		case "fr-FR":
+ 			return "Bonjour 👋"
+ 		case "de-DE":
+ 			return "Hallo 👋"
++		case "ja-JP":
++			// Japanese greeting with wave emoji
++			return "こんにちは 👋"
++		case "zh-CN":
++			return "你好 👋"
+ 		default:
+ 			return "Hello 👋"
+ 		}
