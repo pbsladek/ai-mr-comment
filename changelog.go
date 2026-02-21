@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -29,7 +28,10 @@ Examples:
   ai-mr-comment changelog --commit="v1.2.0..HEAD" --format=json
   ai-mr-comment changelog --file=my.diff --provider=anthropic`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, _ := loadConfig()
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
 			if cmd.Flags().Changed("provider") {
 				cfg.Provider = ApiProvider(provider)
 			}
@@ -37,20 +39,8 @@ Examples:
 				setModelOverride(cfg, modelOverride)
 			}
 
-			if cfg.Provider != OpenAI && cfg.Provider != Anthropic && cfg.Provider != Ollama && cfg.Provider != Gemini {
-				return errors.New("unsupported provider: " + string(cfg.Provider))
-			}
-			if cfg.Provider == OpenAI && cfg.OpenAIAPIKey == "" {
-				return fmt.Errorf("missing OpenAI API key.\n\n" +
-					"Please set the OPENAI_API_KEY environment variable or configure 'openai_api_key' in ~/.ai-mr-comment.toml")
-			}
-			if cfg.Provider == Anthropic && cfg.AnthropicAPIKey == "" {
-				return fmt.Errorf("missing Anthropic API key.\n\n" +
-					"Please set the ANTHROPIC_API_KEY environment variable or configure 'anthropic_api_key' in ~/.ai-mr-comment.toml")
-			}
-			if cfg.Provider == Gemini && cfg.GeminiAPIKey == "" {
-				return fmt.Errorf("missing Gemini API key.\n\n" +
-					"Please set the GEMINI_API_KEY environment variable or configure 'gemini_api_key' in ~/.ai-mr-comment.toml")
+			if cfgErr := validateProviderConfig(cfg); cfgErr != nil {
+				return cfgErr
 			}
 
 			if format != "text" && format != "json" {
@@ -59,7 +49,7 @@ Examples:
 
 			// Obtain diff content from file, commit range, or working tree.
 			var diffContent string
-			var err error
+			err = nil
 			if diffFilePath != "" {
 				diffContent, err = readDiffFromFile(diffFilePath)
 			} else {
@@ -107,25 +97,6 @@ Examples:
 			}
 			entry = strings.TrimSpace(entry)
 
-			out := cmd.OutOrStdout()
-
-			if format == "json" {
-				payload := struct {
-					Changelog string `json:"changelog"`
-					Provider  string `json:"provider"`
-					Model     string `json:"model"`
-				}{
-					Changelog: entry,
-					Provider:  string(cfg.Provider),
-					Model:     getModelName(cfg),
-				}
-				if encErr := json.NewEncoder(out).Encode(payload); encErr != nil {
-					return encErr
-				}
-			} else {
-				_, _ = fmt.Fprintln(out, entry)
-			}
-
 			if outputPath != "" {
 				var fileContent []byte
 				if format == "json" {
@@ -147,6 +118,24 @@ Examples:
 					fileContent = []byte(entry + "\n")
 				}
 				return os.WriteFile(outputPath, fileContent, 0600) //nolint:gosec // G306: 0600 is intentional for user-owned output
+			}
+
+			out := cmd.OutOrStdout()
+			if format == "json" {
+				payload := struct {
+					Changelog string `json:"changelog"`
+					Provider  string `json:"provider"`
+					Model     string `json:"model"`
+				}{
+					Changelog: entry,
+					Provider:  string(cfg.Provider),
+					Model:     getModelName(cfg),
+				}
+				if encErr := json.NewEncoder(out).Encode(payload); encErr != nil {
+					return encErr
+				}
+			} else {
+				_, _ = fmt.Fprintln(out, entry)
 			}
 
 			return nil

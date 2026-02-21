@@ -9,7 +9,7 @@ PLATFORMS := linux/amd64 darwin/amd64 darwin/arm64 windows/amd64
 # Raise this ceiling deliberately if you add large deps; shrink it to lock in gains.
 MAX_BINARY_BYTES := 36700160
 
-.PHONY: all clean build release test test-cover test-integration test-fuzz lint test-run quick-commit run-debug changelog gen-aliases install install-completion-bash install-completion-zsh check-size help docker-build docker-run docker-quick-commit profile-cpu profile-mem profile-bench
+.PHONY: all clean build release test test-cover test-integration test-integration-ollama test-fuzz lint test-run quick-commit run-debug changelog gen-aliases install install-completion-bash install-completion-zsh check-size help docker-build docker-run docker-quick-commit profile-cpu profile-mem profile-bench eval-quality-deps eval-quality eval-quality-view
 
 all: build
 
@@ -71,8 +71,30 @@ test: ## Run unit tests
 test-cover: ## Run tests with coverage report
 	go test -v -coverprofile=coverage.out ./...
 
-test-integration: ## Run integration tests (requires GEMINI_API_KEY)
+test-integration: ## Run all integration tests (provider tests may skip if env vars are missing)
 	go test -v -tags=integration ./...
+
+INTEGRATION_TEST_PATTERN ?= ^TestIntegration_Ollama
+
+test-integration-ollama: ## Run only Ollama integration tests (set OLLAMA_MODEL/OLLAMA_ENDPOINT as needed)
+	go test -v -tags=integration -run '$(INTEGRATION_TEST_PATTERN)' ./...
+
+PROMPTFOO_DIR ?= evals
+PROMPTFOO_BIN ?= ./node_modules/.bin/promptfoo
+PROMPTFOO_CONFIG ?= promptfooconfig.yaml
+PROMPTFOO_OUTPUT ?= promptfoo-results.json
+PROMPTFOO_EVAL_FLAGS ?= --no-share --no-progress-bar --no-table --output $(PROMPTFOO_OUTPUT)
+
+eval-quality-deps: ## Install pinned promptfoo deps for quality evals
+	cd $(PROMPTFOO_DIR) && if [ ! -x node_modules/.bin/promptfoo ]; then npm ci --no-audit --no-fund --loglevel=error; fi
+
+eval-quality: build eval-quality-deps ## Run response-quality evals on curated diff fixtures
+	AMC_BIN="$$(pwd)/dist/$(APP)" ; \
+	export AMC_BIN ; \
+	cd $(PROMPTFOO_DIR) && $(PROMPTFOO_BIN) eval -c $(PROMPTFOO_CONFIG) $(PROMPTFOO_EVAL_FLAGS)
+
+eval-quality-view: eval-quality-deps ## Open the latest promptfoo eval report
+	cd $(PROMPTFOO_DIR) && $(PROMPTFOO_BIN) view
 
 test-fuzz: ## Run fuzz tests (30s per target)
 	go test -fuzz=FuzzSplitDiffByFile -fuzztime=30s .

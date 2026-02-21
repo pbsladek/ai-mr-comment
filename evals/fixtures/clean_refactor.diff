@@ -1,0 +1,18 @@
+diff --git a/pkg/format/title.go b/pkg/format/title.go
+index ceaf1ea..3e15f8a 100644
+--- a/pkg/format/title.go
++++ b/pkg/format/title.go
+@@ -1,11 +1,14 @@
+ package format
+ 
+ import "strings"
+ 
+ func NormalizeTitle(input string) string {
+-	s := strings.TrimSpace(input)
+-	s = strings.ReplaceAll(s, "\t", " ")
+-	return strings.Join(strings.Fields(s), " ")
++	trimmed := strings.TrimSpace(input)
++	collapsedTabs := strings.ReplaceAll(trimmed, "\t", " ")
++	normalized := strings.Join(strings.Fields(collapsedTabs), " ")
++	return normalized
+ }

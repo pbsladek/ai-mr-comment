@@ -1,0 +1,16 @@
+{
+  "name": "ai-mr-comment-evals",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Pinned dependencies for ai-mr-comment quality evals",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "eval": "promptfoo eval -c promptfooconfig.yaml",
+    "view": "promptfoo view"
+  },
+  "devDependencies": {
+    "promptfoo": "0.120.25"
+  }
+}

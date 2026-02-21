@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -19,6 +20,8 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/term"
 )
+
+var debugWriterMu sync.Mutex
 
 func main() {
 	if err := newRootCmd(chatCompletions).Execute(); err != nil {
@@ -28,9 +31,9 @@ func main() {
 }
 
 // parseVerdict extracts the VERDICT line prepended by the AI when --exit-code is
-// active. Returns the verdict token ("PASS" or "FAIL") and the body with the
-// verdict line stripped. If no VERDICT prefix is found, returns ("PASS", comment)
-// so the exit-code logic is always safe to call.
+// active. Returns the verdict token ("PASS", "FAIL", or "UNKNOWN") and the body
+// with the verdict line stripped. "UNKNOWN" indicates a missing/invalid verdict
+// line and should be handled as fail-closed by callers.
 func parseVerdict(comment string) (verdict, body string) {
 	if strings.HasPrefix(comment, "VERDICT: ") {
 		lines := strings.SplitN(comment, "\n", 2)
@@ -40,7 +43,75 @@ func parseVerdict(comment string) (verdict, body string) {
 		}
 		return verdict, body
 	}
-	return "PASS", comment
+	return "UNKNOWN", comment
+}
+
+// normalizeCommitMessage reduces model output to a single-line commit message.
+// Some smaller models may return multiple lines or small preambles despite the prompt.
+func normalizeCommitMessage(raw string) string {
+	normalized := strings.ReplaceAll(raw, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+
+	lines := strings.Split(normalized, "\n")
+	candidates := make([]string, 0, len(lines))
+	for _, line := range lines {
+		clean := strings.TrimSpace(line)
+		if clean == "" || strings.HasPrefix(clean, "```") {
+			continue
+		}
+
+		// Strip common list markers and quote wrappers.
+		switch {
+		case strings.HasPrefix(clean, "- "):
+			clean = strings.TrimSpace(strings.TrimPrefix(clean, "- "))
+		case strings.HasPrefix(clean, "* "):
+			clean = strings.TrimSpace(strings.TrimPrefix(clean, "* "))
+		case strings.HasPrefix(clean, "+ "):
+			clean = strings.TrimSpace(strings.TrimPrefix(clean, "+ "))
+		}
+		clean = strings.Trim(clean, "\"'`")
+
+		// Strip common labels like "Commit message: ...".
+		if idx := strings.Index(clean, ":"); idx > 0 {
+			label := strings.ToLower(strings.TrimSpace(clean[:idx]))
+			if label == "commit message" || label == "message" {
+				clean = strings.TrimSpace(clean[idx+1:])
+			}
+		}
+
+		clean = strings.Join(strings.Fields(clean), " ")
+		if clean != "" {
+			candidates = append(candidates, clean)
+		}
+	}
+
+	if len(candidates) == 0 {
+		return ""
+	}
+	for _, c := range candidates {
+		if isConventionalCommitLine(c) {
+			return c
+		}
+	}
+	return candidates[0]
+}
+
+func isConventionalCommitLine(line string) bool {
+	l := strings.ToLower(strings.TrimSpace(line))
+	types := []string{"feat", "fix", "docs", "style", "refactor", "test", "chore", "perf", "ci", "build", "revert"}
+	for _, typ := range types {
+		if strings.HasPrefix(l, typ+":") {
+			return true
+		}
+		prefix := typ + "("
+		if strings.HasPrefix(l, prefix) {
+			rest := l[len(prefix):]
+			if close := strings.Index(rest, ")"); close > 0 && close+1 < len(rest) && rest[close+1] == ':' {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // newRootCmd builds the root cobra command, wiring flags to the provided chatFn.
@@ -57,7 +128,10 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runStart := time.Now()
-			cfg, _ := loadConfig()
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
 			if cmd.Flags().Changed("provider") {
 				cfg.Provider = ApiProvider(provider)
 			}
@@ -79,23 +153,9 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			}
 			debugLog(cfg, "config: file=%s provider=%s model=%s template=%s", configFile, cfg.Provider, getModelName(cfg), cfg.Template)
 
-			if cfg.Provider != OpenAI && cfg.Provider != Anthropic && cfg.Provider != Ollama && cfg.Provider != Gemini {
-				return errors.New("unsupported provider: " + string(cfg.Provider))
+			if cfgErr := validateProviderConfig(cfg); cfgErr != nil {
+				return cfgErr
 			}
-
-			if cfg.Provider == OpenAI && cfg.OpenAIAPIKey == "" {
-				return fmt.Errorf("missing OpenAI API key.\n\n" +
-					"Please set the OPENAI_API_KEY environment variable or configure 'openai_api_key' in ~/.ai-mr-comment.toml")
-			}
-			if cfg.Provider == Anthropic && cfg.AnthropicAPIKey == "" {
-				return fmt.Errorf("missing Anthropic API key.\n\n" +
-					"Please set the ANTHROPIC_API_KEY environment variable or configure 'anthropic_api_key' in ~/.ai-mr-comment.toml")
-			}
-			if cfg.Provider == Gemini && cfg.GeminiAPIKey == "" {
-				return fmt.Errorf("missing Gemini API key.\n\n" +
-					"Please set the GEMINI_API_KEY environment variable or configure 'gemini_api_key' in ~/.ai-mr-comment.toml")
-			}
-
 			if staged && commit != "" {
 				return errors.New("--staged and --commit are mutually exclusive")
 			}
@@ -121,8 +181,8 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 
 			var diffContent string
 			var diffSource string
-			var err error
 			diffFetchStart := time.Now()
+			err = nil
 			if prURL != "" {
 				switch {
 				case isGitHubURL(prURL):
@@ -254,7 +314,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 					}
 					return err
 				}
-				commitMessage = strings.TrimSpace(commitMessage)
+				commitMessage = normalizeCommitMessage(commitMessage)
 			} else if smartChunk {
 				chunks := splitDiffByFile(diffContent)
 				debugLog(cfg, "smart-chunk: files=%d", len(chunks))
@@ -366,8 +426,11 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 
 			// Parse and strip the VERDICT line when --exit-code is active.
 			var verdict string
-			if exitCodeFlag && comment != "" {
+			if exitCodeFlag {
 				verdict, comment = parseVerdict(comment)
+				if verdict != "PASS" && verdict != "FAIL" {
+					verdict = "FAIL"
+				}
 				debugLog(cfg, "exit-code: verdict=%s", verdict)
 			}
 
@@ -662,12 +725,33 @@ func getModelName(cfg *Config) string {
 	}
 }
 
+func validateProviderConfig(cfg *Config) error {
+	if cfg.Provider != OpenAI && cfg.Provider != Anthropic && cfg.Provider != Ollama && cfg.Provider != Gemini {
+		return errors.New("unsupported provider: " + string(cfg.Provider))
+	}
+	if cfg.Provider == OpenAI && cfg.OpenAIAPIKey == "" {
+		return fmt.Errorf("missing OpenAI API key.\n\n" +
+			"Please set the OPENAI_API_KEY environment variable or configure 'openai_api_key' in ~/.ai-mr-comment.toml")
+	}
+	if cfg.Provider == Anthropic && cfg.AnthropicAPIKey == "" {
+		return fmt.Errorf("missing Anthropic API key.\n\n" +
+			"Please set the ANTHROPIC_API_KEY environment variable or configure 'anthropic_api_key' in ~/.ai-mr-comment.toml")
+	}
+	if cfg.Provider == Gemini && cfg.GeminiAPIKey == "" {
+		return fmt.Errorf("missing Gemini API key.\n\n" +
+			"Please set the GEMINI_API_KEY environment variable or configure 'gemini_api_key' in ~/.ai-mr-comment.toml")
+	}
+	return nil
+}
+
 // debugLog writes a formatted debug message to cfg.DebugWriter when verbose mode is enabled.
 // The message is prefixed with "[debug] " and terminated with a newline.
 func debugLog(cfg *Config, format string, args ...any) {
 	if cfg.DebugWriter == nil {
 		return
 	}
+	debugWriterMu.Lock()
+	defer debugWriterMu.Unlock()
 	_, _ = fmt.Fprintf(cfg.DebugWriter, "[debug] "+format+"\n", args...)
 }
 
@@ -828,12 +912,18 @@ remote. Use --dry-run to preview the generated message without committing.`,
 				return fmt.Errorf("not a git repository")
 			}
 
-			cfg, _ := loadConfig()
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
 			if cmd.Flags().Changed("provider") {
 				cfg.Provider = ApiProvider(provider)
 			}
 			if cmd.Flags().Changed("model") {
 				setModelOverride(cfg, modelOverride)
+			}
+			if cfgErr := validateProviderConfig(cfg); cfgErr != nil {
+				return cfgErr
 			}
 
 			branch, err := getCurrentBranch()
@@ -880,7 +970,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			if err != nil {
 				return fmt.Errorf("generating commit message: %w", err)
 			}
-			commitMessage = strings.TrimSpace(commitMessage)
+			commitMessage = normalizeCommitMessage(commitMessage)
 			if commitMessage == "" {
 				return fmt.Errorf("AI returned an empty commit message")
 			}

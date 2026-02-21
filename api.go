@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	anthropicopt "github.com/anthropics/anthropic-sdk-go/option"
@@ -35,6 +36,8 @@ var (
 	geminiClientMu        sync.Mutex
 )
 
+var ollamaHTTPClient = &http.Client{Timeout: 2 * time.Minute}
+
 // getGeminiClient returns a cached *genai.Client for apiKey, creating it on
 // first use. If the API key changes (rare in practice) the cache is refreshed.
 func getGeminiClient(ctx context.Context, apiKey string) (*genai.Client, error) {
@@ -51,10 +54,6 @@ func getGeminiClient(ctx context.Context, apiKey string) (*genai.Client, error) 
 	client, err := genai.NewClient(ctx, opts...)
 	if err != nil {
 		return nil, err
-	}
-	// Close the old client if we're replacing it.
-	if geminiCachedClient != nil {
-		_ = geminiCachedClient.Close()
 	}
 	geminiCachedClient = client
 	geminiCachedClientKey = apiKey
@@ -130,7 +129,7 @@ func callOllama(ctx context.Context, cfg *Config, systemPrompt, diffContent stri
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := ollamaHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -177,7 +176,7 @@ func callGemini(ctx context.Context, cfg *Config, systemPrompt, diffContent stri
 		return "", err
 	}
 
-	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
+	if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil || len(resp.Candidates[0].Content.Parts) == 0 {
 		return "", errors.New("no content returned from Gemini")
 	}
 
@@ -337,7 +336,7 @@ func streamGemini(ctx context.Context, cfg *Config, systemPrompt, diffContent st
 		if err != nil {
 			return "", err
 		}
-		if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
+		if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil || len(resp.Candidates[0].Content.Parts) == 0 {
 			continue
 		}
 		for _, part := range resp.Candidates[0].Content.Parts {
@@ -367,7 +366,7 @@ func streamOllama(ctx context.Context, cfg *Config, systemPrompt, diffContent st
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := ollamaHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -393,11 +392,17 @@ func streamOllama(ctx context.Context, cfg *Config, systemPrompt, diffContent st
 		Done     bool   `json:"done"`
 	}
 	scanner := bufio.NewScanner(resp.Body)
+	// Ollama can emit large JSON lines, so raise scanner limit above default 64K.
+	scanner.Buffer(make([]byte, 1024), 1024*1024)
 	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
 		chunk.Response = ""
 		chunk.Done = false
-		if err := json.Unmarshal(scanner.Bytes(), &chunk); err != nil {
-			continue
+		if err := json.Unmarshal(line, &chunk); err != nil {
+			return "", fmt.Errorf("decoding ollama stream chunk: %w", err)
 		}
 		_, _ = fmt.Fprint(w, chunk.Response)
 		sb.WriteString(chunk.Response)

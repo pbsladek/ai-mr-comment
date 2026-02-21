@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -145,9 +146,9 @@ func TestCmd_SubmoduleChangesDiff(t *testing.T) {
 func TestCmd_TruncationTriggerDiff_SmartChunk(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
-	callCount := 0
+	var callCount atomic.Int32
 	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
-		callCount++
+		callCount.Add(1)
 		return "chunk summary", nil
 	}
 
@@ -162,8 +163,7 @@ func TestCmd_TruncationTriggerDiff_SmartChunk(t *testing.T) {
 		t.Fatalf("unexpected error for truncation-trigger.diff with --smart-chunk: %v", err)
 	}
 	// Expect at least: N chunk-summary calls + 1 synthesis call.
-	if callCount < 2 {
-		t.Errorf("expected multiple chatFn calls for large multi-file diff, got %d", callCount)
+	if got := callCount.Load(); got < 2 {
+		t.Errorf("expected multiple chatFn calls for large multi-file diff, got %d", got)
 	}
 }
-

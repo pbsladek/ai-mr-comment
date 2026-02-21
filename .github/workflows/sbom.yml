@@ -11,9 +11,8 @@ jobs:
     name: Generate and upload SBOM
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      # Required to submit to the GitHub dependency graph.
-      dependency-snapshots: write
+      # Required to submit dependency snapshots.
+      contents: write
       # Required for keyless signing via sigstore.
       id-token: write
 

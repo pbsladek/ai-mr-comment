@@ -29,6 +29,10 @@ dist/
 /ai-mr-comment
 /ai-mr-comment.exe
 
+# Promptfoo eval artifacts
+.promptfoo/
+evals/node_modules/
+
 # IDE and editor files
 .vscode/
 .zed/

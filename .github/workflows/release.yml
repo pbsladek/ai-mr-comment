@@ -38,3 +38,36 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate installer manifest
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          COMMIT_SHA="$(git rev-list -n 1 "${TAG}")"
+          bash scripts/generate-installer-manifest.sh \
+            --repo "pbsladek/ai-mr-comment" \
+            --tag "${TAG}" \
+            --commit "${COMMIT_SHA}" \
+            --out "dist/installer-manifest.json"
+
+      - name: Sign installer manifest
+        run: |
+          set -euo pipefail
+          cosign sign-blob \
+            --yes \
+            --output-signature "dist/installer-manifest.json.sig" \
+            --output-certificate "dist/installer-manifest.json.pem" \
+            "dist/installer-manifest.json"
+
+      - name: Upload installer manifest assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release upload "${TAG}" \
+            "dist/installer-manifest.json" \
+            "dist/installer-manifest.json.sig" \
+            "dist/installer-manifest.json.pem" \
+            --clobber
