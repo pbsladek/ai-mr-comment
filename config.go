@@ -74,23 +74,14 @@ func loadConfig() (*Config, error) {
 	return loadConfigWith(v)
 }
 
-// newViperFromFile returns a Viper instance pre-configured to read from path.
-// It is used in tests to validate generated config files.
-func newViperFromFile(path string) *viper.Viper {
-	v := viper.New()
-	v.SetConfigFile(path)
-	v.SetConfigType("toml")
-	return v
-}
-
 // loadConfigWith applies defaults, reads the config file (if present), and
 // unmarshals the result into a Config. It is split from loadConfig to allow
 // tests to inject a pre-configured Viper instance.
 func loadConfigWith(v *viper.Viper) (*Config, error) {
 	v.SetDefault("provider", OpenAI)
-	v.SetDefault("openai_model", "gpt-4o-mini")
+	v.SetDefault("openai_model", "gpt-4.1-mini")
 	v.SetDefault("openai_endpoint", "https://api.openai.com/v1/")
-	v.SetDefault("anthropic_model", "claude-sonnet-4-5")
+	v.SetDefault("anthropic_model", "claude-sonnet-4-6")
 	v.SetDefault("anthropic_endpoint", "https://api.anthropic.com")
 	v.SetDefault("ollama_model", "llama3")
 	v.SetDefault("ollama_endpoint", "http://localhost:11434/api/generate")

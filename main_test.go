@@ -1343,14 +1343,11 @@ func TestQuickCommit_DryRun(t *testing.T) {
 	}
 
 	out := buf.String()
-	// When chatFn was reached, the output must contain the generated message.
-	if err == nil {
-		if !strings.Contains(out, "chore: update config") {
-			t.Errorf("expected commit message in output, got:\n%s", out)
-		}
-		if !strings.Contains(out, "dry-run") {
-			t.Errorf("expected dry-run notice in output, got:\n%s", out)
-		}
+	if !strings.Contains(out, "chore: update config") {
+		t.Errorf("expected commit message in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "dry-run") {
+		t.Errorf("expected dry-run notice in output, got:\n%s", out)
 	}
 }
 
