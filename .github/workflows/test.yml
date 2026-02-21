@@ -32,6 +32,17 @@ jobs:
           go mod tidy
           git diff --exit-code go.mod go.sum
 
+      - name: Validate Installer Scripts
+        run: |
+          bash -n scripts/install.sh
+          bash -n scripts/bootstrap-install.sh
+          bash -n scripts/generate-installer-manifest.sh
+          bash scripts/install_test.sh
+          bash scripts/manifest_test.sh
+          pwsh -NoProfile -Command '$null = [System.Management.Automation.Language.Parser]::ParseFile("scripts/install.ps1",[ref]$null,[ref]$parseErrors); if ($parseErrors) { $parseErrors; exit 1 }'
+          pwsh -NoProfile -Command '$null = [System.Management.Automation.Language.Parser]::ParseFile("scripts/bootstrap-install.ps1",[ref]$null,[ref]$parseErrors); if ($parseErrors) { $parseErrors; exit 1 }'
+          pwsh -NoProfile -File scripts/install_test.ps1
+
       - name: Run Tests
         run: make test
 
@@ -50,3 +61,66 @@ jobs:
 
       - name: Check Binary Size
         run: make check-size
+
+  integration-ollama:
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: tiny-full
+            model: llama3.2:1b-instruct-q3_K_M
+            test_pattern: "^TestIntegration_Ollama"
+          - lane: small-smoke
+            model: llama3.2:3b-instruct-q4_K_M
+            test_pattern: "^TestIntegration_Ollama(_MainCmd_Text|_MainCmd_JSONTitle|_CommitMsg)$"
+    name: Integration (Ollama, ${{ matrix.lane }})
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Install Ollama (pinned version)
+        env:
+          OLLAMA_VERSION: "0.16.3"
+          OLLAMA_SHA256: "0c0bb0ff7cc77079f259e75ba4f3494e4ab3d33af49b62644f9880ec50329fed"
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/ollama/ollama/releases/download/v${OLLAMA_VERSION}/ollama-linux-amd64.tar.zst" -o /tmp/ollama-linux-amd64.tar.zst
+          echo "${OLLAMA_SHA256}  /tmp/ollama-linux-amd64.tar.zst" | sha256sum -c -
+          sudo tar --zstd -xvf /tmp/ollama-linux-amd64.tar.zst -C /usr
+          ollama --version
+
+      - name: Start Ollama
+        run: |
+          set -euo pipefail
+          nohup ollama serve > /tmp/ollama.log 2>&1 &
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Ollama failed to start"
+          tail -n 200 /tmp/ollama.log || true
+          exit 1
+
+      - name: Pull matrix model
+        run: ollama pull ${{ matrix.model }}
+
+      - name: Run Ollama integration tests
+        env:
+          OLLAMA_ENDPOINT: http://127.0.0.1:11434/api/generate
+          OLLAMA_MODEL: ${{ matrix.model }}
+          INTEGRATION_TEST_PATTERN: ${{ matrix.test_pattern }}
+        run: make test-integration-ollama
+
+      - name: Ollama logs on failure
+        if: failure()
+        run: tail -n 300 /tmp/ollama.log || true

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -54,6 +55,79 @@ func TestNewRootCmd_UnsupportedProvider(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "unsupported provider") {
 		t.Fatalf("expected unsupported provider error, got %v", err)
+	}
+}
+
+func TestRootCmd_MalformedConfig(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	if err := os.WriteFile(tmpHome+"/.ai-mr-comment.toml", []byte("provider = "), 0600); err != nil {
+		t.Fatalf("failed to write malformed config: %v", err)
+	}
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected malformed config error, got nil")
+	}
+	if !strings.Contains(err.Error(), "malformed config file") {
+		t.Fatalf("expected malformed config error, got: %v", err)
+	}
+}
+
+func TestChangelogCmd_MalformedConfig(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	if err := os.WriteFile(tmpHome+"/.ai-mr-comment.toml", []byte("provider = "), 0600); err != nil {
+		t.Fatalf("failed to write malformed config: %v", err)
+	}
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"changelog", "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected malformed config error, got nil")
+	}
+	if !strings.Contains(err.Error(), "malformed config file") {
+		t.Fatalf("expected malformed config error, got: %v", err)
+	}
+}
+
+func TestQuickCommitCmd_MalformedConfig(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	if err := os.WriteFile(tmpHome+"/.ai-mr-comment.toml", []byte("provider = "), 0600); err != nil {
+		t.Fatalf("failed to write malformed config: %v", err)
+	}
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"quick-commit", "--dry-run", "--provider=openai"})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected malformed config error, got nil")
+	}
+	if !strings.Contains(err.Error(), "malformed config file") {
+		t.Fatalf("expected malformed config error, got: %v", err)
 	}
 }
 
@@ -335,10 +409,9 @@ func TestNewRootCmd_ClipboardFlag(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "dummy")
 	for _, val := range []string{"description", "comment", "title", "all"} {
 		t.Run(val, func(t *testing.T) {
-			callCount := 0
+			var callCount atomic.Int32
 			fn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
-				callCount++
-				if callCount == 1 {
+				if callCount.Add(1) == 1 {
 					return "mocked comment", nil
 				}
 				return "mocked title", nil
@@ -380,10 +453,9 @@ func TestNewRootCmd_ClipboardFlag_InvalidValue(t *testing.T) {
 
 func TestNewRootCmd_TitleFlag(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "dummy")
-	callCount := 0
+	var callCount atomic.Int32
 	trackingFn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
-		callCount++
-		if callCount == 1 {
+		if callCount.Add(1) == 1 {
 			return "mocked comment", nil
 		}
 		return "Add mocked feature", nil
@@ -401,8 +473,8 @@ func TestNewRootCmd_TitleFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if callCount != 2 {
-		t.Errorf("expected 2 chatFn calls (comment + title), got %d", callCount)
+	if got := callCount.Load(); got != 2 {
+		t.Errorf("expected 2 chatFn calls (comment + title), got %d", got)
 	}
 	out := buf.String()
 	if !strings.Contains(out, "Add mocked feature") {
@@ -418,9 +490,9 @@ func TestNewRootCmd_TitleFlag(t *testing.T) {
 
 func TestNewRootCmd_TitleFlagJSON(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "dummy")
-	callCount := 0
+	var callCount atomic.Int32
 	trackingFn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
-		callCount++
+		callCount.Add(1)
 		// Distinguish by prompt content — title and comment run concurrently now.
 		if strings.HasPrefix(systemPrompt, "Generate a single-line MR/PR title") {
 			return "Add mocked feature", nil
@@ -937,9 +1009,9 @@ func TestVerboseFlag_DiffBytes(t *testing.T) {
 func TestNewRootCmd_FormatJSON_AutoTitle(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
-	callCount := 0
+	var callCount atomic.Int32
 	trackingFn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
-		callCount++
+		callCount.Add(1)
 		// Distinguish by prompt content — title and comment run concurrently now.
 		if strings.HasPrefix(systemPrompt, "Generate a single-line MR/PR title") {
 			return "Add mocked feature", nil
@@ -960,8 +1032,8 @@ func TestNewRootCmd_FormatJSON_AutoTitle(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	if callCount != 2 {
-		t.Errorf("expected 2 chatFn calls (description + auto-title), got %d", callCount)
+	if got := callCount.Load(); got != 2 {
+		t.Errorf("expected 2 chatFn calls (description + auto-title), got %d", got)
 	}
 
 	var result map[string]string
@@ -1474,8 +1546,8 @@ func TestParseVerdict_Fail(t *testing.T) {
 func TestParseVerdict_NoVerdictLine(t *testing.T) {
 	input := "Normal review text without verdict."
 	verdict, body := parseVerdict(input)
-	if verdict != "PASS" {
-		t.Errorf("expected default PASS, got %q", verdict)
+	if verdict != "UNKNOWN" {
+		t.Errorf("expected default UNKNOWN, got %q", verdict)
 	}
 	if body != input {
 		t.Errorf("expected body unchanged, got %q", body)
@@ -1592,6 +1664,39 @@ func TestExitCodeFlag_Fail(t *testing.T) {
 
 	proc := exec.Command(os.Args[0], "-test.run=TestExitCodeFlag_Fail", "-test.v")
 	proc.Env = append(os.Environ(), "AI_MR_EXIT_CODE_SUBPROCESS=1")
+	err := proc.Run()
+	if err == nil {
+		t.Fatal("expected process to exit with non-zero code, got nil")
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("expected *exec.ExitError, got %T: %v", err, err)
+	}
+	if exitErr.ExitCode() != 2 {
+		t.Errorf("expected exit code 2, got %d", exitErr.ExitCode())
+	}
+}
+
+// TestExitCodeFlag_MissingVerdictFailsClosed verifies missing verdict lines are
+// treated as FAIL and exit with code 2 when --exit-code is set.
+func TestExitCodeFlag_MissingVerdictFailsClosed(t *testing.T) {
+	if os.Getenv("AI_MR_EXIT_CODE_SUBPROCESS_MISSING_VERDICT") == "1" {
+		fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+			return "review body without verdict", nil
+		}
+		t.Setenv("OPENAI_API_KEY", "dummy")
+		cmd := newRootCmd(fn)
+		cmd.SetArgs([]string{"--exit-code", "--file=testdata/simple.diff", "--provider=openai"})
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		_ = cmd.Execute()
+		return
+	}
+
+	proc := exec.Command(os.Args[0], "-test.run=TestExitCodeFlag_MissingVerdictFailsClosed", "-test.v")
+	proc.Env = append(os.Environ(), "AI_MR_EXIT_CODE_SUBPROCESS_MISSING_VERDICT=1")
 	err := proc.Run()
 	if err == nil {
 		t.Fatal("expected process to exit with non-zero code, got nil")
@@ -1823,11 +1928,10 @@ func TestSmartChunk_LargeFileSet(t *testing.T) {
 func TestSmartChunk_ChunkError(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
-	callCount := 0
+	var callCount atomic.Int32
 	mockFn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
 		if strings.HasPrefix(systemPrompt, "Summarize the changes") {
-			callCount++
-			if callCount == 1 {
+			if callCount.Add(1) == 1 {
 				return "", errors.New("simulated chunk API failure")
 			}
 			return "ok summary", nil
@@ -1969,7 +2073,8 @@ func TestChangelog_OutputToFile(t *testing.T) {
 		"--provider=openai",
 		"--output=" + outFile,
 	})
-	cmd.SetOut(io.Discard)
+	var outBuf strings.Builder
+	cmd.SetOut(&outBuf)
 	cmd.SetErr(io.Discard)
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
@@ -1983,6 +2088,9 @@ func TestChangelog_OutputToFile(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "### Added") {
 		t.Errorf("expected changelog in file, got: %q", string(data))
+	}
+	if outBuf.Len() != 0 {
+		t.Errorf("expected no stdout output when --output is set, got: %q", outBuf.String())
 	}
 }
 
@@ -2127,4 +2235,3 @@ func TestGenAliases_MatchesConstant(t *testing.T) {
 		t.Errorf("output does not match aliasBlock constant.\ngot:\n%s\nwant:\n%s", buf.String(), aliasBlock)
 	}
 }
-

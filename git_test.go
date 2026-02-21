@@ -185,6 +185,8 @@ func TestParsePRURL(t *testing.T) {
 		// Invalid cases
 		{"https://github.com/org/repo/issues/1", "", "", 0, true}, // issues, not pull
 		{"https://github.com/org/repo/pull/", "", "", 0, true},    // missing number
+		{"https://github.com/org/repo/pull/12/files", "", "", 0, true},
+		{"ssh://github.com/org/repo/pull/12", "", "", 0, true},
 		{"not-a-url", "", "", 0, true},
 	}
 	for _, tc := range tests {
@@ -217,7 +219,7 @@ func TestParseMRURL(t *testing.T) {
 		// Public gitlab.com
 		{"https://gitlab.com/mygroup/myproject/-/merge_requests/42", "mygroup", "myproject", 42, false},
 		{"https://gitlab.com/group/sub/project/-/merge_requests/1", "group/sub", "project", 1, false},
-		{"https://gitlab.com/mygroup/myproject/-/merge_requests/42/", "mygroup", "myproject", 42, false},    // trailing slash
+		{"https://gitlab.com/mygroup/myproject/-/merge_requests/42/", "mygroup", "myproject", 42, false}, // trailing slash
 		{"https://gitlab.com/mygroup/myproject/-/merge_requests/42?tab=changes", "mygroup", "myproject", 42, false},
 		// Self-hosted GitLab
 		{"https://gitlab.myco.com/ns/proj/-/merge_requests/3", "ns", "proj", 3, false},
@@ -226,6 +228,8 @@ func TestParseMRURL(t *testing.T) {
 		{"https://gitlab.com/g/p/merge_requests/1", "", "", 0, true},         // missing /-/
 		{"https://gitlab.com/myproject/-/merge_requests/1", "", "", 0, true}, // no namespace
 		{"https://gitlab.com/g/p/-/merge_requests/", "", "", 0, true},
+		{"https://gitlab.com/g/p/-/merge_requests/1/changes", "", "", 0, true},
+		{"ssh://gitlab.com/g/p/-/merge_requests/1", "", "", 0, true},
 	}
 	for _, tc := range tests {
 		namespace, project, iid, err := parseMRURL(tc.url)
@@ -243,6 +247,112 @@ func TestParseMRURL(t *testing.T) {
 			t.Errorf("parseMRURL(%q): got (%s, %s, %d), want (%s, %s, %d)",
 				tc.url, namespace, project, iid, tc.namespace, tc.project, tc.iid)
 		}
+	}
+}
+
+func TestResolveGitHubBaseURL(t *testing.T) {
+	tests := []struct {
+		name           string
+		prURL          string
+		configuredBase string
+		want           string
+		wantErr        bool
+	}{
+		{
+			name:           "github.com without configured base",
+			prURL:          "https://github.com/owner/repo/pull/1",
+			configuredBase: "",
+			want:           "",
+		},
+		{
+			name:           "self-hosted without configured base",
+			prURL:          "https://github.myco.com/owner/repo/pull/1",
+			configuredBase: "",
+			want:           "https://github.myco.com",
+		},
+		{
+			name:           "matching configured base with path is normalized",
+			prURL:          "https://github.myco.com/owner/repo/pull/1",
+			configuredBase: "https://github.myco.com/api/v3/",
+			want:           "https://github.myco.com",
+		},
+		{
+			name:           "host mismatch returns error",
+			prURL:          "https://github.myco.com/owner/repo/pull/1",
+			configuredBase: "https://api.github.com",
+			wantErr:        true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := resolveGitHubBaseURL(tc.prURL, tc.configuredBase)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("expected %q, got %q", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestResolveGitLabBaseURL(t *testing.T) {
+	tests := []struct {
+		name           string
+		mrURL          string
+		configuredBase string
+		want           string
+		wantErr        bool
+	}{
+		{
+			name:           "gitlab.com without configured base",
+			mrURL:          "https://gitlab.com/group/project/-/merge_requests/1",
+			configuredBase: "",
+			want:           "",
+		},
+		{
+			name:           "self-hosted without configured base",
+			mrURL:          "https://gitlab.myco.com/group/project/-/merge_requests/1",
+			configuredBase: "",
+			want:           "https://gitlab.myco.com",
+		},
+		{
+			name:           "matching configured base with path is normalized",
+			mrURL:          "https://gitlab.myco.com/group/project/-/merge_requests/1",
+			configuredBase: "https://gitlab.myco.com/api/v4/",
+			want:           "https://gitlab.myco.com",
+		},
+		{
+			name:           "host mismatch returns error",
+			mrURL:          "https://gitlab.myco.com/group/project/-/merge_requests/1",
+			configuredBase: "https://gitlab.com",
+			wantErr:        true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := resolveGitLabBaseURL(tc.mrURL, tc.configuredBase)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("expected %q, got %q", tc.want, got)
+			}
+		})
 	}
 }
 
@@ -428,6 +538,10 @@ func TestIsGitHubURL(t *testing.T) {
 	if isGitHubURL("https://github.com/owner/repo/issues/1") {
 		t.Error("expected false for GitHub issues URL")
 	}
+	// Invalid PR path shape
+	if isGitHubURL("https://example.com/owner/repo/pull/1/files") {
+		t.Error("expected false for invalid PR path")
+	}
 }
 
 func TestIsGitLabURL(t *testing.T) {
@@ -442,6 +556,10 @@ func TestIsGitLabURL(t *testing.T) {
 	// GitHub URL should not match
 	if isGitLabURL("https://github.com/owner/repo/pull/1") {
 		t.Error("expected false for github.com URL")
+	}
+	// Invalid MR path shape
+	if isGitLabURL("https://example.com/group/project/-/merge_requests/1/changes") {
+		t.Error("expected false for invalid MR path")
 	}
 }
 
@@ -801,13 +919,13 @@ func TestPRCreateURL(t *testing.T) {
 			name:      "github https",
 			remoteURL: "https://github.com/owner/repo.git",
 			branch:    "feat/add-login",
-			want:      "https://github.com/owner/repo/compare/feat/add-login?expand=1",
+			want:      "https://github.com/owner/repo/compare/feat%2Fadd-login?expand=1",
 		},
 		{
 			name:      "github ssh",
 			remoteURL: "git@github.com:owner/repo.git",
 			branch:    "fix/auth-bug",
-			want:      "https://github.com/owner/repo/compare/fix/auth-bug?expand=1",
+			want:      "https://github.com/owner/repo/compare/fix%2Fauth-bug?expand=1",
 		},
 		{
 			name:      "github no .git suffix",
@@ -819,13 +937,13 @@ func TestPRCreateURL(t *testing.T) {
 			name:      "gitlab https",
 			remoteURL: "https://gitlab.com/group/project.git",
 			branch:    "feat/new-feature",
-			want:      "https://gitlab.com/group/project/-/merge_requests/new?merge_request[source_branch]=feat/new-feature",
+			want:      "https://gitlab.com/group/project/-/merge_requests/new?merge_request%5Bsource_branch%5D=feat%2Fnew-feature",
 		},
 		{
 			name:      "gitlab ssh",
 			remoteURL: "git@gitlab.com:group/project.git",
 			branch:    "fix/bug",
-			want:      "https://gitlab.com/group/project/-/merge_requests/new?merge_request[source_branch]=fix/bug",
+			want:      "https://gitlab.com/group/project/-/merge_requests/new?merge_request%5Bsource_branch%5D=fix%2Fbug",
 		},
 		{
 			name:      "unknown host",
@@ -850,4 +968,3 @@ func TestPRCreateURL(t *testing.T) {
 		})
 	}
 }
-

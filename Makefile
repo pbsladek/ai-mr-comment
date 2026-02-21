@@ -9,7 +9,7 @@ PLATFORMS := linux/amd64 darwin/amd64 darwin/arm64 windows/amd64
 # Raise this ceiling deliberately if you add large deps; shrink it to lock in gains.
 MAX_BINARY_BYTES := 36700160
 
-.PHONY: all clean build release test test-cover test-integration test-fuzz lint test-run quick-commit run-debug changelog gen-aliases install install-completion-bash install-completion-zsh check-size help docker-build docker-run docker-quick-commit profile-cpu profile-mem profile-bench
+.PHONY: all clean build release test test-cover test-integration test-integration-ollama test-fuzz lint test-run quick-commit run-debug changelog gen-aliases install install-completion-bash install-completion-zsh check-size help docker-build docker-run docker-quick-commit profile-cpu profile-mem profile-bench
 
 all: build
 
@@ -71,8 +71,13 @@ test: ## Run unit tests
 test-cover: ## Run tests with coverage report
 	go test -v -coverprofile=coverage.out ./...
 
-test-integration: ## Run integration tests (requires GEMINI_API_KEY)
+test-integration: ## Run all integration tests (provider tests may skip if env vars are missing)
 	go test -v -tags=integration ./...
+
+INTEGRATION_TEST_PATTERN ?= ^TestIntegration_Ollama
+
+test-integration-ollama: ## Run only Ollama integration tests (set OLLAMA_MODEL/OLLAMA_ENDPOINT as needed)
+	go test -v -tags=integration -run '$(INTEGRATION_TEST_PATTERN)' ./...
 
 test-fuzz: ## Run fuzz tests (30s per target)
 	go test -fuzz=FuzzSplitDiffByFile -fuzztime=30s .

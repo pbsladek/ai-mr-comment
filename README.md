@@ -68,6 +68,104 @@ make test-run
 
 Download the latest binary for your OS from the [Releases](https://github.com/pbsladek/ai-mr-comment/releases) page.
 
+### One-line installers
+
+Recommended secure path:
+- Do not use `curl | bash`
+- Do not use `/main/` for installer scripts
+- Resolve bootstrap script SHA from a signed release manifest, then execute locally
+
+Bootstrap prerequisites: `curl`, `git`, `jq`, and `cosign` on macOS/Linux; PowerShell + `cosign` on Windows.
+
+macOS / Linux (pinned release, no pipe, signed manifest):
+
+```bash
+VERSION=v0.6.0
+BASE_URL="https://github.com/pbsladek/ai-mr-comment/releases/download/${VERSION}"
+curl -fsSLO "${BASE_URL}/installer-manifest.json"
+curl -fsSLO "${BASE_URL}/installer-manifest.json.sig"
+curl -fsSLO "${BASE_URL}/installer-manifest.json.pem"
+cosign verify-blob installer-manifest.json \
+  --certificate installer-manifest.json.pem \
+  --signature installer-manifest.json.sig \
+  --certificate-identity "https://github.com/pbsladek/ai-mr-comment/.github/workflows/release.yml@refs/tags/${VERSION}" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" >/dev/null
+BOOTSTRAP_SHA="$(jq -r '.bootstrap.commit_sha' installer-manifest.json)"
+BOOTSTRAP_SHA256="$(jq -r '.bootstrap.bash.sha256' installer-manifest.json)"
+curl -fsSLo install-bootstrap.sh "https://raw.githubusercontent.com/pbsladek/ai-mr-comment/${BOOTSTRAP_SHA}/scripts/bootstrap-install.sh"
+if command -v sha256sum >/dev/null 2>&1; then
+  echo "${BOOTSTRAP_SHA256}  install-bootstrap.sh" | sha256sum -c -
+else
+  echo "${BOOTSTRAP_SHA256}  install-bootstrap.sh" | shasum -a 256 -c -
+fi
+chmod +x install-bootstrap.sh
+./install-bootstrap.sh --version "${VERSION}"
+```
+
+macOS / Linux (user-local, no sudo):
+
+```bash
+./install-bootstrap.sh --version "${VERSION}" --install-dir "$HOME/.local/lib/ai-mr-comment" --bin-dir "$HOME/.local/bin" --sudo never
+```
+
+Windows PowerShell (pinned release, no pipe, signed manifest):
+
+```powershell
+$Version = "v0.6.0"
+$BaseUrl = "https://github.com/pbsladek/ai-mr-comment/releases/download/$Version"
+iwr "$BaseUrl/installer-manifest.json" -OutFile installer-manifest.json -SslProtocol Tls13
+iwr "$BaseUrl/installer-manifest.json.sig" -OutFile installer-manifest.json.sig -SslProtocol Tls13
+iwr "$BaseUrl/installer-manifest.json.pem" -OutFile installer-manifest.json.pem -SslProtocol Tls13
+cosign verify-blob installer-manifest.json --certificate installer-manifest.json.pem --signature installer-manifest.json.sig --certificate-identity "https://github.com/pbsladek/ai-mr-comment/.github/workflows/release.yml@refs/tags/$Version" --certificate-oidc-issuer "https://token.actions.githubusercontent.com" | Out-Null
+$Manifest = Get-Content installer-manifest.json -Raw | ConvertFrom-Json
+$BootstrapSha = $Manifest.bootstrap.commit_sha
+$BootstrapSha256 = $Manifest.bootstrap.powershell.sha256
+iwr "https://raw.githubusercontent.com/pbsladek/ai-mr-comment/$BootstrapSha/scripts/bootstrap-install.ps1" -OutFile install-bootstrap.ps1 -SslProtocol Tls13
+$Actual = (Get-FileHash -Path install-bootstrap.ps1 -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($Actual -ne $BootstrapSha256.ToLowerInvariant()) { throw "bootstrap script checksum mismatch" }
+.\install-bootstrap.ps1 -Version $Version
+```
+
+Default install mode is least privilege (`--sudo never`).
+
+Both installers:
+- Use a signed `installer-manifest.json` to resolve pinned bootstrap script SHA
+- Verify the signed `checksums.txt` with `cosign` (default)
+- Verify artifact SHA256 against `checksums.txt`
+- Do not execute the installed binary unless explicitly requested
+
+Install a specific release tag:
+
+```bash
+./install.sh --version v1.2.3
+```
+
+```powershell
+.\install.ps1 -Version v1.2.3
+```
+
+Use a different repository (for forks or internal mirrors):
+
+```bash
+./install.sh --repo <owner>/<repo> --version <tag>
+```
+
+```powershell
+.\install.ps1 -Repo <owner>/<repo>
+```
+
+If `cosign` is unavailable, you can disable signature verification (not recommended):
+
+```bash
+./install.sh --version v1.2.3 --verify-signature false
+```
+
+```powershell
+.\install.ps1 -Version v1.2.3 -VerifySignature:$false
+```
+
+Disabling signature verification is unsafe. Use it only for trusted offline/internal mirrors.
+
 ### Docker
 
 No Go toolchain required. The image includes git so all diff and commit commands work.
@@ -724,6 +822,7 @@ When ready to publish a release:
 1. Go to **GitHub → Releases → Draft a new release**
 2. Pick the pre-created tag from the dropdown
 3. Click **Publish release** — GoReleaser builds and attaches signed binaries automatically
+4. Release workflow also publishes signed installer metadata (`installer-manifest.json`, `.sig`, `.pem`)
 
 ## License
 

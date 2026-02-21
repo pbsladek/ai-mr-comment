@@ -231,6 +231,34 @@ func TestCallGemini_NoContent(t *testing.T) {
 	}
 }
 
+func TestCallGemini_NilCandidateContent(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"candidates": []map[string]any{
+				{},
+			},
+		})
+	}))
+	defer ts.Close()
+
+	geminiClientOptions = []option.ClientOption{
+		option.WithEndpoint(ts.URL),
+		option.WithHTTPClient(ts.Client()),
+	}
+	defer func() { geminiClientOptions = nil }()
+
+	cfg := &Config{GeminiAPIKey: "test", GeminiModel: "gemini-2.5-flash"}
+
+	_, err := callGemini(context.Background(), cfg, "prompt", "diff")
+	if err == nil {
+		t.Fatal("expected error for nil candidate content")
+	}
+	if !strings.Contains(err.Error(), "no content") {
+		t.Errorf("expected 'no content' error, got %q", err.Error())
+	}
+}
+
 // --- callOllama tests ---
 
 func TestCallOllama_Success(t *testing.T) {
@@ -518,6 +546,54 @@ func TestStreamOllama_Success(t *testing.T) {
 	}
 	if buf.String() != "chunk1 chunk2" {
 		t.Errorf("expected writer to receive 'chunk1 chunk2', got %q", buf.String())
+	}
+}
+
+func TestStreamOllama_LargeChunkLine(t *testing.T) {
+	largeToken := strings.Repeat("a", 70*1024)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, "{\"response\":%q,\"done\":true}\n", largeToken)
+	}))
+	defer ts.Close()
+
+	cfg := &Config{
+		OllamaModel:    "llama3",
+		OllamaEndpoint: ts.URL,
+	}
+
+	var buf strings.Builder
+	result, err := streamOllama(context.Background(), cfg, "sys", "diff", &buf)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != largeToken {
+		t.Errorf("expected large token response, got len=%d", len(result))
+	}
+	if buf.Len() != len(largeToken) {
+		t.Errorf("expected writer len=%d, got %d", len(largeToken), buf.Len())
+	}
+}
+
+func TestStreamOllama_InvalidChunkFails(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, "{\"response\":\"ok\",\"done\":false}\n")
+		_, _ = fmt.Fprint(w, "{invalid json}\n")
+	}))
+	defer ts.Close()
+
+	cfg := &Config{
+		OllamaModel:    "llama3",
+		OllamaEndpoint: ts.URL,
+	}
+
+	_, err := streamOllama(context.Background(), cfg, "sys", "diff", io.Discard)
+	if err == nil {
+		t.Fatal("expected JSON decode error, got nil")
+	}
+	if !strings.Contains(err.Error(), "decoding ollama stream chunk") {
+		t.Fatalf("expected decode error context, got: %v", err)
 	}
 }
 

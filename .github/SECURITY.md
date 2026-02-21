@@ -29,15 +29,44 @@ This repository uses the following automated security tooling:
 
 ## Verifying Release Artifacts
 
-All release archives are signed with [cosign](https://github.com/sigstore/cosign) using keyless signing via Sigstore.
+Release archives are verified via a signed `checksums.txt` file.
+`checksums.txt` is signed with [cosign](https://github.com/sigstore/cosign) using keyless Sigstore signing.
 
-To verify a release artifact:
+To verify release checksums and then an archive:
 
 ```sh
+VERSION=v0.6.0
+ASSET="ai-mr-comment_Linux_x86_64.tar.gz"
+BASE_URL="https://github.com/pbsladek/ai-mr-comment/releases/download/${VERSION}"
+curl -fsSLO "${BASE_URL}/checksums.txt"
+curl -fsSLO "${BASE_URL}/checksums.txt.sig"
+curl -fsSLO "${BASE_URL}/checksums.txt.pem"
+curl -fsSLO "${BASE_URL}/${ASSET}"
+
 cosign verify-blob \
-  --certificate ai-mr-comment_Linux_x86_64.tar.gz.pem \
-  --signature ai-mr-comment_Linux_x86_64.tar.gz.sig \
-  --certificate-identity-regexp="https://github.com/pbsladek/ai-mr-comment/.github/workflows/release.yml" \
-  --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
-  ai-mr-comment_Linux_x86_64.tar.gz
+  --certificate checksums.txt.pem \
+  --signature checksums.txt.sig \
+  --certificate-identity "https://github.com/pbsladek/ai-mr-comment/.github/workflows/release.yml@refs/tags/${VERSION}" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  checksums.txt
+
+grep "  ${ASSET}$" checksums.txt | sha256sum -c -
+```
+
+### Verifying installer-manifest.json
+
+Each release also publishes a signed `installer-manifest.json` containing pinned
+bootstrap installer script URLs and SHA256 hashes.
+
+```sh
+VERSION=v0.6.0
+BASE_URL="https://github.com/pbsladek/ai-mr-comment/releases/download/${VERSION}"
+curl -fsSLO "${BASE_URL}/installer-manifest.json"
+curl -fsSLO "${BASE_URL}/installer-manifest.json.sig"
+curl -fsSLO "${BASE_URL}/installer-manifest.json.pem"
+cosign verify-blob installer-manifest.json \
+  --certificate installer-manifest.json.pem \
+  --signature installer-manifest.json.sig \
+  --certificate-identity "https://github.com/pbsladek/ai-mr-comment/.github/workflows/release.yml@refs/tags/${VERSION}" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
 ```

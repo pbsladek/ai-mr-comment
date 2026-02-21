@@ -15,6 +15,73 @@ import (
 	"golang.org/x/oauth2"
 )
 
+func parseURLHost(rawURL string) (scheme, host, hostname string, err error) {
+	clean := parseHostedURL(rawURL)
+	u, parseErr := url.Parse(clean)
+	if parseErr != nil || u.Host == "" || u.Scheme == "" {
+		return "", "", "", fmt.Errorf("invalid URL %q: must be a valid http(s) URL", rawURL)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", "", "", fmt.Errorf("invalid URL %q: only http(s) URLs are supported", rawURL)
+	}
+	return u.Scheme, u.Host, strings.ToLower(u.Hostname()), nil
+}
+
+func normalizeConfiguredBaseURL(rawBaseURL, provider string) (string, string, error) {
+	u, err := url.Parse(rawBaseURL)
+	if err != nil || u.Host == "" || u.Scheme == "" {
+		return "", "", fmt.Errorf("invalid %s_base_url %q: must be a valid http(s) URL", provider, rawBaseURL)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", "", fmt.Errorf("invalid %s_base_url %q: only http(s) URLs are supported", provider, rawBaseURL)
+	}
+	return u.Scheme + "://" + u.Host, strings.ToLower(u.Hostname()), nil
+}
+
+func resolveGitHubBaseURL(prURL, configuredBaseURL string) (string, error) {
+	scheme, host, hostname, err := parseURLHost(prURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid GitHub PR URL %q: %w", prURL, err)
+	}
+	if configuredBaseURL == "" {
+		if hostname == "github.com" {
+			return "", nil
+		}
+		// For self-hosted instances, auto-derive the enterprise base URL from the PR URL host.
+		return scheme + "://" + host, nil
+	}
+	normalizedBase, baseHost, err := normalizeConfiguredBaseURL(configuredBaseURL, "github")
+	if err != nil {
+		return "", err
+	}
+	if baseHost != hostname {
+		return "", fmt.Errorf("GitHub PR URL host %q does not match github_base_url host %q", host, baseHost)
+	}
+	return normalizedBase, nil
+}
+
+func resolveGitLabBaseURL(mrURL, configuredBaseURL string) (string, error) {
+	scheme, host, hostname, err := parseURLHost(mrURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid GitLab MR URL %q: %w", mrURL, err)
+	}
+	if configuredBaseURL == "" {
+		if hostname == "gitlab.com" {
+			return "", nil
+		}
+		// For self-hosted instances, auto-derive the API base URL from the MR URL host.
+		return scheme + "://" + host, nil
+	}
+	normalizedBase, baseHost, err := normalizeConfiguredBaseURL(configuredBaseURL, "gitlab")
+	if err != nil {
+		return "", err
+	}
+	if baseHost != hostname {
+		return "", fmt.Errorf("GitLab MR URL host %q does not match gitlab_base_url host %q", host, baseHost)
+	}
+	return normalizedBase, nil
+}
+
 // getRemoteURL returns the push URL for the "origin" remote.
 func getRemoteURL() (string, error) {
 	out, err := exec.Command("git", "remote", "get-url", "origin").CombinedOutput() //nolint:gosec // G204: git is a fixed binary, "origin" is a constant
@@ -56,10 +123,12 @@ func prCreateURL(remoteURL, branch string) string {
 	switch {
 	case strings.Contains(host, "github"):
 		// https://github.com/owner/repo/compare/branch-name?expand=1
-		return "https://" + u.Host + "/" + path + "/compare/" + branch + "?expand=1"
+		return "https://" + u.Host + "/" + path + "/compare/" + url.PathEscape(branch) + "?expand=1"
 	case strings.Contains(host, "gitlab"):
 		// https://gitlab.com/group/project/-/merge_requests/new?merge_request[source_branch]=branch-name
-		return "https://" + u.Host + "/" + path + "/-/merge_requests/new?merge_request[source_branch]=" + branch
+		q := url.Values{}
+		q.Set("merge_request[source_branch]", branch)
+		return "https://" + u.Host + "/" + path + "/-/merge_requests/new?" + q.Encode()
 	}
 	return ""
 }
@@ -137,8 +206,9 @@ func getGitDiff(commit string, staged bool, exclude []string) (string, error) {
 		if strings.Contains(commit, "..") {
 			args = []string{"diff", commit}
 		} else {
-			// Single commit: diff against its parent.
-			args = []string{"diff", fmt.Sprintf("%s^", commit), commit}
+			// Single commit: show only that commit's patch. This works for both
+			// root commits and commits with parents.
+			args = []string{"show", "--format=", commit}
 		}
 	} else if base, err := getAutoMergeBase(); err == nil {
 		// Diff the merge base against the working tree (staged + unstaged).
@@ -184,12 +254,15 @@ func parsePRURL(prURL string) (owner, repo string, number int, err error) {
 	if parseErr != nil || u.Host == "" || u.Scheme == "" {
 		return "", "", 0, fmt.Errorf("invalid GitHub PR URL %q: must be a valid URL", prURL)
 	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", "", 0, fmt.Errorf("invalid GitHub PR URL %q: only http(s) URLs are supported", prURL)
+	}
 	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
 	if len(parts) != 4 || parts[2] != "pull" || parts[0] == "" || parts[1] == "" || parts[3] == "" {
 		return "", "", 0, fmt.Errorf("invalid GitHub PR URL %q: expected .../{owner}/{repo}/pull/{number}", prURL)
 	}
 	var num int
-	if _, scanErr := fmt.Sscanf(parts[3], "%d", &num); scanErr != nil || num <= 0 {
+	if n, scanErr := fmt.Sscanf(parts[3], "%d", &num); scanErr != nil || n != 1 || num <= 0 || fmt.Sprintf("%d", num) != parts[3] {
 		return "", "", 0, fmt.Errorf("invalid GitHub PR URL %q: PR number must be a positive integer", prURL)
 	}
 	return parts[0], parts[1], num, nil
@@ -204,13 +277,16 @@ func parseMRURL(mrURL string) (namespace, project string, iid int64, err error) 
 	if parseErr != nil || u.Host == "" || u.Scheme == "" {
 		return "", "", 0, fmt.Errorf("invalid GitLab MR URL %q: must be a valid URL", mrURL)
 	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", "", 0, fmt.Errorf("invalid GitLab MR URL %q: only http(s) URLs are supported", mrURL)
+	}
 	const marker = "/-/merge_requests/"
 	idx := strings.Index(u.Path, marker)
 	if idx == -1 {
 		return "", "", 0, fmt.Errorf("invalid GitLab MR URL %q: expected .../-/merge_requests/{iid}", mrURL)
 	}
 	projectPath := strings.Trim(u.Path[:idx], "/") // e.g. "group/subgroup/project"
-	iidStr := u.Path[idx+len(marker):]              // e.g. "42"
+	iidStr := u.Path[idx+len(marker):]             // e.g. "42"
 	if projectPath == "" || iidStr == "" {
 		return "", "", 0, fmt.Errorf("invalid GitLab MR URL %q: missing project path or MR IID", mrURL)
 	}
@@ -219,7 +295,7 @@ func parseMRURL(mrURL string) (namespace, project string, iid int64, err error) 
 		return "", "", 0, fmt.Errorf("invalid GitLab MR URL %q: expected {namespace}/{project}", mrURL)
 	}
 	var num int64
-	if _, scanErr := fmt.Sscanf(iidStr, "%d", &num); scanErr != nil || num <= 0 {
+	if n, scanErr := fmt.Sscanf(iidStr, "%d", &num); scanErr != nil || n != 1 || num <= 0 || fmt.Sprintf("%d", num) != iidStr {
 		return "", "", 0, fmt.Errorf("invalid GitLab MR URL %q: MR IID must be a positive integer", mrURL)
 	}
 	return projectPath[:slashIdx], projectPath[slashIdx+1:], num, nil
@@ -273,7 +349,11 @@ func getPRDiffWithClient(ctx context.Context, gh *gogithub.Client, prURL string)
 // description, and raw unified diff. token may be empty for public repositories.
 // baseURL may be empty for github.com, or set to a GitHub Enterprise host.
 func getPRDiff(ctx context.Context, prURL, token, baseURL string) (string, error) {
-	gh, err := newGitHubClient(ctx, token, baseURL)
+	resolvedBaseURL, err := resolveGitHubBaseURL(prURL, baseURL)
+	if err != nil {
+		return "", err
+	}
+	gh, err := newGitHubClient(ctx, token, resolvedBaseURL)
 	if err != nil {
 		return "", err
 	}
@@ -328,7 +408,11 @@ func getMRDiffWithClient(ctx context.Context, gl *gogitlab.Client, mrURL string)
 // description, and raw unified diff. token may be empty for public projects.
 // baseURL may be empty for gitlab.com, or set to a self-hosted GitLab host.
 func getMRDiff(ctx context.Context, mrURL, token, baseURL string) (string, error) {
-	gl, err := newGitLabClient(token, baseURL)
+	resolvedBaseURL, err := resolveGitLabBaseURL(mrURL, baseURL)
+	if err != nil {
+		return "", err
+	}
+	gl, err := newGitLabClient(token, resolvedBaseURL)
 	if err != nil {
 		return "", fmt.Errorf("creating GitLab client: %w", err)
 	}
@@ -352,7 +436,11 @@ func postGitHubPRCommentWithClient(ctx context.Context, gh *gogithub.Client, prU
 
 // postGitHubPRComment posts body as a comment on the GitHub PR at prURL.
 func postGitHubPRComment(ctx context.Context, prURL, token, baseURL, body string) error {
-	gh, err := newGitHubClient(ctx, token, baseURL)
+	resolvedBaseURL, err := resolveGitHubBaseURL(prURL, baseURL)
+	if err != nil {
+		return err
+	}
+	gh, err := newGitHubClient(ctx, token, resolvedBaseURL)
 	if err != nil {
 		return err
 	}
@@ -379,7 +467,11 @@ func postGitLabMRNoteWithClient(ctx context.Context, gl *gogitlab.Client, mrURL,
 
 // postGitLabMRNote posts body as a note on the GitLab MR at mrURL.
 func postGitLabMRNote(ctx context.Context, mrURL, token, baseURL, body string) error {
-	gl, err := newGitLabClient(token, baseURL)
+	resolvedBaseURL, err := resolveGitLabBaseURL(mrURL, baseURL)
+	if err != nil {
+		return err
+	}
+	gl, err := newGitLabClient(token, resolvedBaseURL)
 	if err != nil {
 		return fmt.Errorf("creating GitLab client: %w", err)
 	}
@@ -407,13 +499,15 @@ func formatPRContent(title, body, rawDiff string) string {
 // isGitHubURL reports whether rawURL looks like a GitHub pull request URL.
 // Detects github.com and self-hosted GitHub Enterprise instances by path shape.
 func isGitHubURL(rawURL string) bool {
-	return strings.Contains(rawURL, "/pull/")
+	_, _, _, err := parsePRURL(rawURL)
+	return err == nil
 }
 
 // isGitLabURL reports whether rawURL looks like a GitLab merge request URL.
 // Detects gitlab.com and self-hosted GitLab instances by path shape.
 func isGitLabURL(rawURL string) bool {
-	return strings.Contains(rawURL, "/-/merge_requests/")
+	_, _, _, err := parseMRURL(rawURL)
+	return err == nil
 }
 
 // readDiffFromFile reads a raw diff from the given file path.

@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"strings"
@@ -19,6 +20,31 @@ index 0000000..e69de29
 +Hello World`
 
 const testSystemPrompt = "You are a code reviewer. Summarize the changes. Be concise."
+
+func ollamaIntegrationEnv(t *testing.T) (endpoint, model string) {
+	t.Helper()
+	endpoint = os.Getenv("OLLAMA_ENDPOINT")
+	if endpoint == "" {
+		endpoint = "http://127.0.0.1:11434/api/generate"
+	}
+	model = os.Getenv("OLLAMA_MODEL")
+	if model == "" {
+		model = "llama3.2:1b"
+	}
+	// loadConfig() reads this key via AI_MR_COMMENT_ prefix.
+	t.Setenv("AI_MR_COMMENT_OLLAMA_ENDPOINT", endpoint)
+	return endpoint, model
+}
+
+func isOllamaUnreachable(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "couldn't connect")
+}
 
 func TestIntegration_Gemini(t *testing.T) {
 	apiKey := os.Getenv("GEMINI_API_KEY")
@@ -104,6 +130,216 @@ func TestIntegration_Anthropic(t *testing.T) {
 	}
 
 	t.Logf("Anthropic Response:\n%s", response)
+}
+
+func TestIntegration_Ollama(t *testing.T) {
+	endpoint, model := ollamaIntegrationEnv(t)
+
+	cfg := &Config{
+		Provider:       Ollama,
+		OllamaModel:    model,
+		OllamaEndpoint: endpoint,
+	}
+
+	response, err := chatCompletions(context.Background(), cfg, Ollama, testSystemPrompt, testDiff)
+	if err != nil {
+		// Skip only when Ollama is unreachable.
+		if isOllamaUnreachable(err) {
+			t.Skipf("Skipping Ollama integration test: %v", err)
+		}
+		t.Fatalf("Ollama API call failed: %v", err)
+	}
+
+	if strings.TrimSpace(response) == "" {
+		t.Error("Expected non-empty response from Ollama")
+	}
+
+	t.Logf("Ollama Response:\n%s", response)
+}
+
+func TestIntegration_Ollama_MainCmd_Text(t *testing.T) {
+	_, model := ollamaIntegrationEnv(t)
+
+	var out strings.Builder
+	cmd := newRootCmd(chatCompletions)
+	cmd.SetArgs([]string{
+		"--provider=ollama",
+		"--model=" + model,
+		"--file=testdata/simple.diff",
+	})
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if isOllamaUnreachable(err) {
+		t.Skipf("Skipping Ollama integration test: %v", err)
+	}
+	if err != nil {
+		t.Fatalf("main command failed: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "── Description ──") {
+		t.Fatalf("expected description section, got:\n%s", got)
+	}
+	if strings.TrimSpace(got) == "" {
+		t.Fatal("expected non-empty output")
+	}
+}
+
+func TestIntegration_Ollama_MainCmd_JSONTitle(t *testing.T) {
+	_, model := ollamaIntegrationEnv(t)
+
+	var out strings.Builder
+	cmd := newRootCmd(chatCompletions)
+	cmd.SetArgs([]string{
+		"--provider=ollama",
+		"--model=" + model,
+		"--format=json",
+		"--title",
+		"--file=testdata/simple.diff",
+	})
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if isOllamaUnreachable(err) {
+		t.Skipf("Skipping Ollama integration test: %v", err)
+	}
+	if err != nil {
+		t.Fatalf("json+title command failed: %v", err)
+	}
+
+	var payload struct {
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Provider    string `json:"provider"`
+		Model       string `json:"model"`
+	}
+	if decErr := json.Unmarshal([]byte(out.String()), &payload); decErr != nil {
+		t.Fatalf("invalid json output: %v\n%s", decErr, out.String())
+	}
+	if payload.Provider != string(Ollama) {
+		t.Fatalf("expected provider=%q, got %q", Ollama, payload.Provider)
+	}
+	if payload.Model != model {
+		t.Fatalf("expected model=%q, got %q", model, payload.Model)
+	}
+	if strings.TrimSpace(payload.Title) == "" {
+		t.Fatal("expected non-empty title")
+	}
+	if strings.TrimSpace(payload.Description) == "" {
+		t.Fatal("expected non-empty description")
+	}
+}
+
+func TestIntegration_Ollama_SmartChunk(t *testing.T) {
+	_, model := ollamaIntegrationEnv(t)
+
+	var out strings.Builder
+	cmd := newRootCmd(chatCompletions)
+	cmd.SetArgs([]string{
+		"--provider=ollama",
+		"--model=" + model,
+		"--smart-chunk",
+		"--file=testdata/multiple-files.diff",
+	})
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if isOllamaUnreachable(err) {
+		t.Skipf("Skipping Ollama integration test: %v", err)
+	}
+	if err != nil {
+		t.Fatalf("smart-chunk command failed: %v", err)
+	}
+	if strings.TrimSpace(out.String()) == "" {
+		t.Fatal("expected non-empty smart-chunk output")
+	}
+}
+
+func TestIntegration_Ollama_CommitMsg(t *testing.T) {
+	_, model := ollamaIntegrationEnv(t)
+
+	var out strings.Builder
+	cmd := newRootCmd(chatCompletions)
+	cmd.SetArgs([]string{
+		"--provider=ollama",
+		"--model=" + model,
+		"--commit-msg",
+		"--file=testdata/simple.diff",
+	})
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if isOllamaUnreachable(err) {
+		t.Skipf("Skipping Ollama integration test: %v", err)
+	}
+	if err != nil {
+		t.Fatalf("commit-msg command failed: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected a single-line commit message, got:\n%s", out.String())
+	}
+	if strings.TrimSpace(lines[0]) == "" {
+		t.Fatal("expected non-empty commit message")
+	}
+}
+
+func TestIntegration_Ollama_ChangelogJSON(t *testing.T) {
+	_, model := ollamaIntegrationEnv(t)
+
+	var out strings.Builder
+	cmd := newRootCmd(chatCompletions)
+	cmd.SetArgs([]string{
+		"changelog",
+		"--provider=ollama",
+		"--model=" + model,
+		"--format=json",
+		"--file=testdata/multiple-files.diff",
+	})
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if isOllamaUnreachable(err) {
+		t.Skipf("Skipping Ollama integration test: %v", err)
+	}
+	if err != nil {
+		t.Fatalf("changelog command failed: %v", err)
+	}
+
+	var payload struct {
+		Changelog string `json:"changelog"`
+		Provider  string `json:"provider"`
+		Model     string `json:"model"`
+	}
+	if decErr := json.Unmarshal([]byte(out.String()), &payload); decErr != nil {
+		t.Fatalf("invalid changelog json: %v\n%s", decErr, out.String())
+	}
+	if payload.Provider != string(Ollama) {
+		t.Fatalf("expected provider=%q, got %q", Ollama, payload.Provider)
+	}
+	if payload.Model != model {
+		t.Fatalf("expected model=%q, got %q", model, payload.Model)
+	}
+	if strings.TrimSpace(payload.Changelog) == "" {
+		t.Fatal("expected non-empty changelog")
+	}
 }
 
 // TestIntegration_SmartChunk_Gemini verifies that --smart-chunk processes a
