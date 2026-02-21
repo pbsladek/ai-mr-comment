@@ -1,0 +1,21 @@
+diff --git a/docs/api.md b/docs/api.md
+index 1a2b3c4..1a2b3c4 100644
+--- a/docs/api.md
++++ b/docs/api.md
+@@ -1,6 +1,6 @@
+ # API Documentation
+
+ ## Endpoints
+
+ GET /api/v1/users
+ GET /api/v1/users/:id
+diff --git a/docs/config.md b/docs/config.md
+index 2b3c4d5..2b3c4d5 100644
+--- a/docs/config.md
++++ b/docs/config.md
+@@ -1,5 +1,5 @@
+ # Configuration
+
+ ## Environment Variables
+
+ OPENAI_API_KEY: OpenAI API key

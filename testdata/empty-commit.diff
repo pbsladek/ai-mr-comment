@@ -1,0 +1,9 @@
+diff --git a/scripts/run.sh b/scripts/run.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/lint.sh b/scripts/lint.sh
+old mode 100644
+new mode 100755
+diff --git a/scripts/build.sh b/scripts/build.sh
+old mode 100644
+new mode 100755

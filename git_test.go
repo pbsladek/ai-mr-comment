@@ -612,3 +612,242 @@ func TestPostGitLabMRNote_APIError(t *testing.T) {
 	}
 }
 
+// ── splitDiffByFile edge case tests ───────────────────────────────────────────
+
+func TestSplitDiffByFile_BinaryFiles(t *testing.T) {
+	data, err := os.ReadFile("testdata/binary-files.diff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks := splitDiffByFile(string(data))
+	if len(chunks) != 5 {
+		t.Errorf("expected 5 chunks for binary-files.diff, got %d", len(chunks))
+	}
+	for i, c := range chunks {
+		if !strings.HasPrefix(c, "diff --git") {
+			t.Errorf("chunk %d does not start with 'diff --git'", i)
+		}
+	}
+}
+
+func TestSplitDiffByFile_RenameMove(t *testing.T) {
+	data, err := os.ReadFile("testdata/rename-move.diff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks := splitDiffByFile(string(data))
+	if len(chunks) != 4 {
+		t.Errorf("expected 4 chunks for rename-move.diff, got %d", len(chunks))
+	}
+	if !strings.Contains(chunks[0], "rename from") {
+		t.Error("expected 'rename from' in first chunk")
+	}
+	if !strings.Contains(chunks[0], "rename to") {
+		t.Error("expected 'rename to' in first chunk")
+	}
+}
+
+func TestSplitDiffByFile_ModeChange(t *testing.T) {
+	data, err := os.ReadFile("testdata/mode-change.diff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks := splitDiffByFile(string(data))
+	if len(chunks) != 5 {
+		t.Errorf("expected 5 chunks for mode-change.diff, got %d", len(chunks))
+	}
+	for _, c := range chunks {
+		if !strings.Contains(c, "old mode") || !strings.Contains(c, "new mode") {
+			t.Error("expected mode change lines in chunk")
+		}
+	}
+}
+
+func TestSplitDiffByFile_SubmoduleChanges(t *testing.T) {
+	data, err := os.ReadFile("testdata/submodule-changes.diff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks := splitDiffByFile(string(data))
+	if len(chunks) != 2 {
+		t.Errorf("expected 2 chunks for submodule-changes.diff, got %d", len(chunks))
+	}
+	if !strings.Contains(chunks[0], "Subproject commit") {
+		t.Error("expected 'Subproject commit' in first chunk")
+	}
+}
+
+func TestSplitDiffByFile_SymlinkChanges(t *testing.T) {
+	data, err := os.ReadFile("testdata/symlink-changes.diff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks := splitDiffByFile(string(data))
+	if len(chunks) != 3 {
+		t.Errorf("expected 3 chunks for symlink-changes.diff, got %d", len(chunks))
+	}
+	for _, c := range chunks {
+		if !strings.Contains(c, "120000") {
+			t.Error("expected symlink mode 120000 in chunk")
+		}
+	}
+}
+
+func TestSplitDiffByFile_MultipleHunksOneFile(t *testing.T) {
+	data, err := os.ReadFile("testdata/multiple-hunks-one-file.diff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks := splitDiffByFile(string(data))
+	if len(chunks) != 1 {
+		t.Errorf("expected 1 chunk for multiple-hunks-one-file.diff, got %d", len(chunks))
+	}
+	hunkCount := strings.Count(chunks[0], "\n@@")
+	if hunkCount < 2 {
+		t.Errorf("expected at least 2 hunk headers in chunk, got %d", hunkCount)
+	}
+}
+
+// ── processDiff edge case tests ────────────────────────────────────────────────
+
+func TestProcessDiff_TruncationTrigger(t *testing.T) {
+	data, err := os.ReadFile("testdata/truncation-trigger.diff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(data)
+	lineCount := strings.Count(raw, "\n") + 1
+	if lineCount <= 4000 {
+		t.Skipf("truncation-trigger.diff has only %d lines, need >4000", lineCount)
+	}
+	output := processDiff(raw, 4000)
+	if !strings.Contains(output, "[...diff truncated...]") {
+		t.Error("expected truncation marker in output")
+	}
+}
+
+func TestProcessDiff_VeryLargeSingleFile(t *testing.T) {
+	data, err := os.ReadFile("testdata/very-large-single-file.diff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should not truncate at max=4000 (file is ~1300 lines).
+	output := processDiff(string(data), 4000)
+	if strings.Contains(output, "[...diff truncated...]") {
+		t.Error("did not expect truncation for very-large-single-file.diff at max=4000")
+	}
+	// Should truncate at max=100.
+	outputSmall := processDiff(string(data), 100)
+	if !strings.Contains(outputSmall, "[...diff truncated...]") {
+		t.Error("expected truncation for very-large-single-file.diff at max=100")
+	}
+}
+
+// ── readDiffFromFile edge case tests ──────────────────────────────────────────
+
+func TestReadDiffFromFile_UnicodeEmoji(t *testing.T) {
+	content, err := readDiffFromFile("testdata/unicode-emoji.diff")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(content, "diff --git") {
+		t.Error("expected diff header in unicode-emoji.diff")
+	}
+	// File must be non-empty and produce at least one chunk.
+	chunks := splitDiffByFile(content)
+	if len(chunks) == 0 {
+		t.Error("expected at least one chunk from unicode-emoji.diff")
+	}
+}
+
+func TestReadDiffFromFile_CRLFLineEndings(t *testing.T) {
+	content, err := readDiffFromFile("testdata/crlf-line-endings.diff")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(content, "diff --git") {
+		t.Error("expected diff header in crlf-line-endings.diff")
+	}
+	chunks := splitDiffByFile(content)
+	if len(chunks) == 0 {
+		t.Error("expected at least one chunk from crlf-line-endings.diff")
+	}
+}
+
+func TestReadDiffFromFile_NoNewlineAtEOF(t *testing.T) {
+	content, err := readDiffFromFile("testdata/no-newline-at-eof.diff")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(content, `\ No newline at end of file`) {
+		t.Error("expected '\\No newline at end of file' marker in diff")
+	}
+	chunks := splitDiffByFile(content)
+	if len(chunks) < 2 {
+		t.Errorf("expected at least 2 chunks from no-newline-at-eof.diff, got %d", len(chunks))
+	}
+}
+
+// ── prCreateURL tests ─────────────────────────────────────────────────────────
+
+func TestPRCreateURL(t *testing.T) {
+	tests := []struct {
+		name      string
+		remoteURL string
+		branch    string
+		want      string
+	}{
+		{
+			name:      "github https",
+			remoteURL: "https://github.com/owner/repo.git",
+			branch:    "feat/add-login",
+			want:      "https://github.com/owner/repo/compare/feat/add-login?expand=1",
+		},
+		{
+			name:      "github ssh",
+			remoteURL: "git@github.com:owner/repo.git",
+			branch:    "fix/auth-bug",
+			want:      "https://github.com/owner/repo/compare/fix/auth-bug?expand=1",
+		},
+		{
+			name:      "github no .git suffix",
+			remoteURL: "https://github.com/owner/repo",
+			branch:    "main",
+			want:      "https://github.com/owner/repo/compare/main?expand=1",
+		},
+		{
+			name:      "gitlab https",
+			remoteURL: "https://gitlab.com/group/project.git",
+			branch:    "feat/new-feature",
+			want:      "https://gitlab.com/group/project/-/merge_requests/new?merge_request[source_branch]=feat/new-feature",
+		},
+		{
+			name:      "gitlab ssh",
+			remoteURL: "git@gitlab.com:group/project.git",
+			branch:    "fix/bug",
+			want:      "https://gitlab.com/group/project/-/merge_requests/new?merge_request[source_branch]=fix/bug",
+		},
+		{
+			name:      "unknown host",
+			remoteURL: "https://bitbucket.org/owner/repo.git",
+			branch:    "main",
+			want:      "",
+		},
+		{
+			name:      "invalid url",
+			remoteURL: "not-a-url",
+			branch:    "main",
+			want:      "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := prCreateURL(tt.remoteURL, tt.branch)
+			if got != tt.want {
+				t.Errorf("prCreateURL(%q, %q)\n got:  %q\n want: %q", tt.remoteURL, tt.branch, got, tt.want)
+			}
+		})
+	}
+}
+

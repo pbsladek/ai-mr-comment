@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -45,8 +46,8 @@ func parseVerdict(comment string) (verdict, body string) {
 // newRootCmd builds the root cobra command, wiring flags to the provided chatFn.
 // Accepting chatFn as a parameter allows tests to inject a mock without real API calls.
 func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
-	var commit, diffFilePath, outputPath, provider, modelOverride, templateName, format, prURL, clipboardFlag string
-	var debug, staged, smartChunk, generateTitle, generateCommitMsg, verbose, exitCodeFlag, postFlag bool
+	var commit, diffFilePath, outputPath, provider, modelOverride, templateName, format, prURL, clipboardFlag, systemPromptFlag string
+	var debug, staged, smartChunk, generateTitle, generateCommitMsg, verbose, exitCodeFlag, postFlag, estimate, autoYes bool
 	var exclude []string
 
 	rootCmd := &cobra.Command{
@@ -109,6 +110,9 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			}
 			if postFlag && prURL == "" {
 				return errors.New("--post requires --pr to specify a GitHub PR or GitLab MR URL")
+			}
+			if cmd.Flags().Changed("system-prompt") && cmd.Flags().Changed("template") {
+				return errors.New("--system-prompt and --template are mutually exclusive")
 			}
 
 			if format != "text" && format != "json" {
@@ -191,6 +195,16 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			}
 			debugLog(cfg, "template: name=%q source=%s length=%d", cfg.Template, templateSource, len(systemPrompt))
 
+			// --system-prompt overrides the template-derived prompt entirely.
+			if systemPromptFlag != "" {
+				override, spErr := resolveSystemPrompt(systemPromptFlag)
+				if spErr != nil {
+					return spErr
+				}
+				systemPrompt = override
+				debugLog(cfg, "system-prompt: override applied length=%d", len(systemPrompt))
+			}
+
 			// When --exit-code is set, prepend a verdict instruction so the AI starts
 			// its response with "VERDICT: PASS" or "VERDICT: FAIL".
 			const exitCodePreamble = "Before your review, output a verdict on the very first line in exactly this format:\nVERDICT: PASS\nor\nVERDICT: FAIL\nUse FAIL if the diff contains critical bugs, security vulnerabilities, data loss risks, or broken public APIs. Use PASS for everything else. Then continue with your normal review on the next line.\n\n"
@@ -199,27 +213,19 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			}
 
 			if debug {
-				estimator := NewTokenEstimator(cfg)
-				model := getModelName(cfg)
-
-				// Gemini uses the official SDK for exact counts; others use a heuristic.
-				totalTokens, err := estimator.CountTokens(cmd.Context(), model, systemPrompt, diffContent)
-				if err != nil {
-					_, _ = fmt.Fprintf(out, "Error estimating tokens: %v\n", err)
-					fallback := &HeuristicTokenEstimator{}
-					totalTokens, _ = fallback.CountTokens(context.Background(), "", systemPrompt, diffContent)
-					_, _ = fmt.Fprintln(out, "Using heuristic fallback.")
-				}
-
-				cost := EstimateCost(model, totalTokens)
-
-				_, _ = fmt.Fprintln(out, "Token & Cost Estimation:")
-				_, _ = fmt.Fprintf(out, "- Model: %s\n", model)
-				_, _ = fmt.Fprintf(out, "- Diff lines: %d\n", strings.Count(diffContent, "\n")+1)
-				_, _ = fmt.Fprintf(out, "- Estimated Input Tokens: %d\n", totalTokens)
-				_, _ = fmt.Fprintf(out, "- Estimated Input Cost: $%.6f\n", cost)
-				_, _ = fmt.Fprintln(out, "\nNote: Output tokens and cost depend on the generated response length.")
+				showCostEstimate(cmd.Context(), cfg, systemPrompt, diffContent, out)
 				return nil
+			}
+
+			if estimate {
+				estimateOut := out
+				if format == "json" {
+					estimateOut = cmd.ErrOrStderr()
+				}
+				showCostEstimate(cmd.Context(), cfg, systemPrompt, diffContent, estimateOut)
+				if !promptConfirm(cmd.ErrOrStderr(), os.Stdin, autoYes) {
+					return nil
+				}
 			}
 
 			// Stream tokens directly to the terminal when output is a real TTY,
@@ -524,10 +530,15 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().BoolVar(&generateCommitMsg, "commit-msg", false, "Generate a git commit message instead of a full MR/PR description")
 	rootCmd.Flags().BoolVar(&exitCodeFlag, "exit-code", false, "Exit with code 2 if the AI detects critical issues in the diff")
 	rootCmd.Flags().BoolVar(&postFlag, "post", false, "Post the generated comment back to the GitHub PR or GitLab MR (requires --pr)")
+	rootCmd.Flags().StringVar(&systemPromptFlag, "system-prompt", "", `Override the system prompt for this run. Use @path to read from a file (e.g. --system-prompt=@review.txt). Mutually exclusive with --template.`)
+	rootCmd.Flags().BoolVar(&estimate, "estimate", false, "Show token/cost estimate and prompt for confirmation before calling the API")
+	rootCmd.Flags().BoolVarP(&autoYes, "yes", "y", false, "Auto-confirm the cost estimate prompt (use with --estimate)")
 
 	rootCmd.AddCommand(newInitConfigCmd())
 	rootCmd.AddCommand(newModelsCmd())
 	rootCmd.AddCommand(newQuickCommitCmd(chatFn))
+	rootCmd.AddCommand(newChangelogCmd(chatFn))
+	rootCmd.AddCommand(newGenAliasesCmd())
 
 	rootCmd.AddCommand(&cobra.Command{
 		Use:       "completion [bash|zsh|fish|powershell]",
@@ -673,6 +684,50 @@ func timedCall(cfg *Config, label string, fn func() (string, error)) (string, er
 		debugLog(cfg, "api: %s failed in %dms: %v", label, elapsed, err)
 	}
 	return result, err
+}
+
+// showCostEstimate prints token and cost estimation to w.
+func showCostEstimate(ctx context.Context, cfg *Config, systemPrompt, diffContent string, w io.Writer) {
+	model := getModelName(cfg)
+	estimator := NewTokenEstimator(cfg)
+	totalTokens, err := estimator.CountTokens(ctx, model, systemPrompt, diffContent)
+	if err != nil {
+		_, _ = fmt.Fprintf(w, "Error estimating tokens: %v\n", err)
+		fallback := &HeuristicTokenEstimator{}
+		totalTokens, _ = fallback.CountTokens(context.Background(), "", systemPrompt, diffContent)
+		_, _ = fmt.Fprintln(w, "Using heuristic fallback.")
+	}
+	cost := EstimateCost(model, totalTokens)
+	_, _ = fmt.Fprintln(w, "Token & Cost Estimation:")
+	_, _ = fmt.Fprintf(w, "- Model: %s\n", model)
+	_, _ = fmt.Fprintf(w, "- Diff lines: %d\n", strings.Count(diffContent, "\n")+1)
+	_, _ = fmt.Fprintf(w, "- Estimated Input Tokens: %d\n", totalTokens)
+	_, _ = fmt.Fprintf(w, "- Estimated Input Cost: $%.6f\n", cost)
+	_, _ = fmt.Fprintln(w, "\nNote: Output tokens and cost depend on the generated response length.")
+}
+
+// promptConfirm writes a "Proceed? [y/N]: " prompt to promptWriter and reads
+// one line from stdinReader. Returns true only if the user types "y" or "Y".
+// Auto-confirms when autoYes is true. Auto-declines when stdinReader is not
+// an interactive terminal (e.g. in CI or piped input).
+func promptConfirm(promptWriter io.Writer, stdinReader io.Reader, autoYes bool) bool {
+	if autoYes {
+		return true
+	}
+	if f, ok := stdinReader.(*os.File); ok {
+		if !term.IsTerminal(int(f.Fd())) {
+			_, _ = fmt.Fprintln(promptWriter, "Non-interactive mode: auto-declining. Use --yes to proceed.")
+			return false
+		}
+	} else {
+		// Non-*os.File reader (e.g. strings.Reader in tests) is non-interactive.
+		_, _ = fmt.Fprintln(promptWriter, "Non-interactive mode: auto-declining. Use --yes to proceed.")
+		return false
+	}
+	_, _ = fmt.Fprint(promptWriter, "Proceed? [y/N]: ")
+	var line string
+	_, _ = fmt.Fscan(stdinReader, &line)
+	return strings.ToLower(strings.TrimSpace(line)) == "y"
 }
 
 // setModelOverride applies a CLI --model value to the correct provider field in cfg.
@@ -867,6 +922,11 @@ remote. Use --dry-run to preview the generated message without committing.`,
 
 			if format != "json" {
 				_, _ = fmt.Fprintln(out, "Done.")
+				if remoteURL, remErr := getRemoteURL(); remErr == nil {
+					if createURL := prCreateURL(remoteURL, branch); createURL != "" {
+						_, _ = fmt.Fprintf(out, "\nOpen PR/MR: %s\n", createURL)
+					}
+				}
 			}
 			return nil
 		},
@@ -877,5 +937,77 @@ remote. Use --dry-run to preview the generated message without committing.`,
 	cmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Generate and print the commit message without staging, committing, or pushing")
 	cmd.Flags().BoolVar(&noPush, "no-push", false, "Commit but skip the push step")
+	return cmd
+}
+
+// aliasBlock is the shell snippet printed by gen-aliases.
+// It is a Go constant so tests can verify the exact output.
+const aliasBlock = `# ai-mr-comment aliases
+# Generated by: ai-mr-comment gen-aliases
+# Add to your ~/.bashrc or ~/.zshrc, then reload with: source ~/.bashrc
+
+alias amc='ai-mr-comment'                          # main command
+alias amc-review='ai-mr-comment'                   # review current diff
+alias amc-staged='ai-mr-comment --staged'          # review staged changes
+alias amc-commit='ai-mr-comment --commit-msg'      # generate commit message
+alias amc-title='ai-mr-comment --title'            # include a title
+alias amc-json='ai-mr-comment --format=json'       # JSON output
+alias amc-debug='ai-mr-comment --debug'            # token/cost estimate
+alias amc-qc='ai-mr-comment quick-commit'          # stage + AI commit + push
+alias amc-qc-dry='ai-mr-comment quick-commit --dry-run'  # preview commit msg
+alias amc-cl='ai-mr-comment changelog'             # generate changelog entry
+alias amc-models='ai-mr-comment models'            # list available models
+alias amc-init='ai-mr-comment init-config'         # write default config
+`
+
+// newGenAliasesCmd returns the gen-aliases subcommand, which prints a shell
+// alias block for ai-mr-comment to stdout. Users source the output into their
+// shell profile to get short amc-* aliases.
+func newGenAliasesCmd() *cobra.Command {
+	var shell, outputPath string
+
+	cmd := &cobra.Command{
+		Use:   "gen-aliases",
+		Short: "Print shell aliases for ai-mr-comment (amc and amc-*)",
+		Long: `Prints a block of shell alias definitions to stdout.
+
+Add them to your shell profile with one of:
+
+  # Append once:
+  ai-mr-comment gen-aliases >> ~/.bashrc   # or ~/.zshrc
+
+  # Re-generate on every shell start (always up-to-date):
+  eval "$(ai-mr-comment gen-aliases)"
+
+Aliases defined:
+  amc            — shorthand for ai-mr-comment
+  amc-review     — review current diff
+  amc-staged     — review staged changes
+  amc-commit     — generate a commit message (--commit-msg)
+  amc-title      — generate comment + title
+  amc-json       — output as JSON
+  amc-debug      — show token/cost estimate
+  amc-qc         — quick-commit (stage + AI commit + push)
+  amc-qc-dry     — quick-commit dry-run (preview only)
+  amc-cl         — changelog subcommand
+  amc-models     — list available models
+  amc-init       — write default config file`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if shell != "bash" && shell != "zsh" {
+				return fmt.Errorf("unsupported shell %q: must be bash or zsh", shell)
+			}
+
+			out := cmd.OutOrStdout()
+			_, _ = fmt.Fprint(out, aliasBlock)
+
+			if outputPath != "" {
+				return os.WriteFile(outputPath, []byte(aliasBlock), 0600) //nolint:gosec // G306: user-owned shell config file
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&shell, "shell", "bash", "Target shell: bash or zsh (both use the same alias syntax)")
+	cmd.Flags().StringVar(&outputPath, "output", "", "Also write aliases to this file (e.g. ~/.bashrc)")
 	return cmd
 }

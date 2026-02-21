@@ -34,6 +34,9 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 - Live streaming output to the terminal — tokens appear as they are generated
 - Bootstrap a config file with `init-config` (never edit TOML by hand again)
 - Shell completions for bash, zsh, fish, and PowerShell (`completion` subcommand)
+- **Shell aliases** (`gen-aliases`) — prints `amc` and `amc-*` convenience aliases ready to source into your shell profile
+- **Changelog generation** (`changelog`) — produces a user-facing Keep a Changelog entry from a commit range, grouped by Added / Fixed / Breaking Changes etc.
+- **Custom system prompt** (`--system-prompt`) — supply an ad-hoc prompt inline or from a file (`@path`), overriding the active template for a single run
 - Precise token counting for Gemini and heuristic estimation for others
 - Estimated cost calculation in debug mode
 - Native binary with no runtime dependencies
@@ -233,6 +236,24 @@ ai-mr-comment --verbose
 # Show token and cost estimation without calling the API
 ai-mr-comment --debug
 
+# Override the system prompt for a single run (inline)
+ai-mr-comment --system-prompt="Focus only on security vulnerabilities."
+
+# Override the system prompt from a file
+ai-mr-comment --system-prompt=@~/prompts/security-review.txt
+
+# Generate a user-facing changelog entry from the last 10 commits
+ai-mr-comment changelog --commit="HEAD~10..HEAD"
+
+# Generate a changelog entry for a release range, output as JSON
+ai-mr-comment changelog --commit="v1.2.0..HEAD" --format=json
+
+# Print shell aliases (amc, amc-qc, amc-cl, …) and add to profile
+ai-mr-comment gen-aliases >> ~/.zshrc
+
+# Or evaluate on every shell start to always stay up to date
+# eval "$(ai-mr-comment gen-aliases)"
+
 # Generate shell completion script
 ai-mr-comment completion bash >> ~/.bash_completion
 ai-mr-comment completion zsh > ~/.zsh/completions/_ai-mr-comment
@@ -259,6 +280,7 @@ ai-mr-comment init-config
 - `--provider <PROVIDER>`: Provider (openai, anthropic, gemini, ollama)
 - `--model <NAME>`: Override the model for this run (e.g. `gpt-4o`, `claude-opus-4-6`, `gemini-2.5-flash`)
 - `-t, --template <NAME>`: Template style — `default`, `conventional`, `technical`, `user-focused`, `emoji`, `sassy`, `monday`, `jira`, `commit`, `commit-emoji`
+- `--system-prompt <TEXT|@FILE>`: Override the system prompt for this run. Pass the prompt inline (`--system-prompt="Focus on security"`) or read it from a file with an `@` prefix (`--system-prompt=@review.txt`). Mutually exclusive with `--template`.
 - `--debug`: Show precise token usage and cost estimation without calling the generation API
 - `--verbose`: Print detailed debug lines to stderr — config file path, diff stats, template source, streaming decision, and per-API-call timing and response size
 - `-h, --help`: Print help
@@ -266,6 +288,8 @@ ai-mr-comment init-config
 ### Subcommands
 
 - `quick-commit [flags]`: Stage all changes, generate an AI commit message, commit, and push in one step. See [Quick Commit](#quick-commit) below.
+- `changelog [flags]`: Generate a user-facing changelog entry from a commit range or diff file. See [Changelog](#changelog) below.
+- `gen-aliases [--shell bash|zsh] [--output FILE]`: Print `amc` and `amc-*` shell aliases to stdout. See [Shell Aliases](#shell-aliases) below.
 - `models [--provider <NAME>]`: List known model names for a provider.
 - `init-config [--output <PATH>]`: Write a default config file to `~/.ai-mr-comment.toml` (or the given path). Refuses to overwrite an existing file.
 - `completion [bash|zsh|fish|powershell]`: Print a shell completion script to stdout.
@@ -533,6 +557,101 @@ Provides a secure foundation for user identity, allowing protected access to API
 ```json
 {"commit_message":"feat(auth): add JWT refresh token support"}
 ```
+
+## Custom System Prompt
+
+Use `--system-prompt` to replace the active template prompt for a single run — no template file needed.
+
+```bash
+# Inline prompt
+ai-mr-comment --system-prompt="Focus only on security vulnerabilities."
+
+# Read from a file (@ prefix)
+ai-mr-comment --system-prompt=@~/prompts/security-review.txt
+
+# Works on the changelog subcommand too
+ai-mr-comment changelog --commit="v1.2.0..HEAD" \
+  --system-prompt="List only breaking changes in one sentence each."
+```
+
+`--system-prompt` and `--template` are mutually exclusive — use one or the other per run.
+
+When `--exit-code` is also set, the verdict preamble is still prepended on top of the custom prompt (same behaviour as with templates).
+
+## Changelog
+
+`changelog` generates a user-facing changelog entry from any diff source. Output follows the [Keep a Changelog](https://keepachangelog.com/) format, grouped under the headings that apply: Added, Changed, Deprecated, Removed, Fixed, Security, Breaking Changes.
+
+```bash
+# Last 10 commits (Makefile default)
+make changelog
+
+# Specific release range
+ai-mr-comment changelog --commit="v1.2.0..HEAD"
+
+# From a diff file
+ai-mr-comment changelog --file=my.diff --provider=anthropic
+
+# JSON output for CI pipelines
+ai-mr-comment changelog --commit="v1.2.0..HEAD" --format=json
+
+# Write directly to a file
+ai-mr-comment changelog --commit="v1.2.0..HEAD" --output=CHANGELOG.md
+
+# Override the prompt for a custom format
+ai-mr-comment changelog --commit="v1.2.0..HEAD" \
+  --system-prompt="List only breaking changes."
+```
+
+| Flag | Description |
+|---|---|
+| `--commit` | Commit or commit range (e.g. `v1.2.0..HEAD`) |
+| `--file` | Read diff from a file instead of git |
+| `--format` | `text` (default) or `json` (`{"changelog":"...","provider":"...","model":"..."}`) |
+| `--output` | Write output to a file instead of stdout |
+| `--provider` | AI provider override |
+| `--model` | Model override |
+| `--system-prompt` | Override the changelog system prompt |
+
+## Shell Aliases
+
+`gen-aliases` prints a block of ready-to-source shell alias definitions.
+
+```bash
+# Append once to your profile
+ai-mr-comment gen-aliases >> ~/.zshrc
+
+# Or evaluate on every shell start (always up-to-date)
+eval "$(ai-mr-comment gen-aliases)"
+
+# Write directly to a file
+ai-mr-comment gen-aliases --output=~/.bashrc
+
+# Via make
+make gen-aliases
+```
+
+Aliases defined:
+
+| Alias | Expands to |
+|---|---|
+| `amc` | `ai-mr-comment` |
+| `amc-review` | `ai-mr-comment` |
+| `amc-staged` | `ai-mr-comment --staged` |
+| `amc-commit` | `ai-mr-comment --commit-msg` |
+| `amc-title` | `ai-mr-comment --title` |
+| `amc-json` | `ai-mr-comment --format=json` |
+| `amc-debug` | `ai-mr-comment --debug` |
+| `amc-qc` | `ai-mr-comment quick-commit` |
+| `amc-qc-dry` | `ai-mr-comment quick-commit --dry-run` |
+| `amc-cl` | `ai-mr-comment changelog` |
+| `amc-models` | `ai-mr-comment models` |
+| `amc-init` | `ai-mr-comment init-config` |
+
+| Flag | Description |
+|---|---|
+| `--shell` | `bash` (default) or `zsh` — both use identical alias syntax |
+| `--output` | Also write aliases to this file |
 
 ## Development
 

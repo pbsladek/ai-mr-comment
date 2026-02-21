@@ -1,0 +1,17 @@
+diff --git a/assets/logo.png b/assets/logo.png
+index a1b2c3d..e4f5a6b 100644
+Binary files a/assets/logo.png and b/assets/logo.png differ
+diff --git a/assets/banner.jpg b/assets/banner.jpg
+new file mode 100644
+index 0000000..9f8e7d6
+Binary files /dev/null and b/assets/banner.jpg differ
+diff --git a/bin/server b/bin/server
+index 3c4d5e6..7f8a9b0 100755
+Binary files a/bin/server and b/bin/server differ
+diff --git a/vendor/lib/native.so b/vendor/lib/native.so
+deleted file mode 100644
+index 2b3c4d5..0000000
+Binary files a/vendor/lib/native.so and /dev/null differ
+diff --git a/docs/architecture.pdf b/docs/architecture.pdf
+index 1a2b3c4..5d6e7f8 100644
+Binary files a/docs/architecture.pdf and b/docs/architecture.pdf differ

@@ -1,0 +1,147 @@
+diff --git a/internal/metrics/collector.go b/internal/metrics/collector.go
+new file mode 100644
+index 0000000..1a2b3c4
+--- /dev/null
++++ b/internal/metrics/collector.go
+@@ -0,0 +1,55 @@
++package metrics
++
++import (
++	"sync"
++	"time"
++)
++
++// Collector aggregates runtime metrics for the service.
++type Collector struct {
++	mu       sync.Mutex
++	counters map[string]int64
++	gauges   map[string]float64
++	start    time.Time
++}
++
++// NewCollector initialises a Collector with the current time as start.
++func NewCollector() *Collector {
++	return &Collector{
++		counters: make(map[string]int64),
++		gauges:   make(map[string]float64),
++		start:    time.Now(),
++	}
++}
++
++// Inc increments the named counter by 1.
++func (c *Collector) Inc(name string) {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	c.counters[name]++
++}
++
++// Add adds delta to the named counter.
++func (c *Collector) Add(name string, delta int64) {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	c.counters[name] += delta
++}
++
++// Set sets the named gauge to value.
++func (c *Collector) Set(name string, value float64) {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	c.gauges[name] = value
++}
++
++// Snapshot returns a copy of all current counters and gauges.
++func (c *Collector) Snapshot() (map[string]int64, map[string]float64) {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	counters := make(map[string]int64, len(c.counters))
++	gauges := make(map[string]float64, len(c.gauges))
++	for k, v := range c.counters {
++		counters[k] = v
++	}
++	for k, v := range c.gauges {
++		gauges[k] = v
++	}
++	return counters, gauges
++}
+diff --git a/internal/metrics/collector_test.go b/internal/metrics/collector_test.go
+new file mode 100644
+index 0000000..5d6e7f8
+--- /dev/null
++++ b/internal/metrics/collector_test.go
+@@ -0,0 +1,38 @@
++package metrics
++
++import (
++	"testing"
++)
++
++func TestCollectorInc(t *testing.T) {
++	c := NewCollector()
++	c.Inc("requests")
++	c.Inc("requests")
++	counters, _ := c.Snapshot()
++	if counters["requests"] != 2 {
++		t.Errorf("expected 2 got %d", counters["requests"])
++	}
++}
++
++func TestCollectorAdd(t *testing.T) {
++	c := NewCollector()
++	c.Add("bytes", 1024)
++	c.Add("bytes", 512)
++	counters, _ := c.Snapshot()
++	if counters["bytes"] != 1536 {
++		t.Errorf("expected 1536 got %d", counters["bytes"])
++	}
++}
++
++func TestCollectorSet(t *testing.T) {
++	c := NewCollector()
++	c.Set("cpu", 0.72)
++	_, gauges := c.Snapshot()
++	if gauges["cpu"] != 0.72 {
++		t.Errorf("expected 0.72 got %f", gauges["cpu"])
++	}
++}
++
++func TestCollectorSnapshotIsolation(t *testing.T) {
++	c := NewCollector()
++	c.Inc("hits")
++	counters, _ := c.Snapshot()
++	counters["hits"] = 999
++	counters2, _ := c.Snapshot()
++	if counters2["hits"] != 1 {
++		t.Error("Snapshot should return an isolated copy")
++	}
++}
+diff --git a/docs/metrics.md b/docs/metrics.md
+new file mode 100644
+index 0000000..9b8a7c6
+--- /dev/null
++++ b/docs/metrics.md
+@@ -0,0 +1,22 @@
++# Metrics
++
++The `internal/metrics` package provides a thread-safe in-process metrics
++collector suitable for embedding in long-running services.
++
++## Usage
++
++```go
++c := metrics.NewCollector()
++c.Inc("http_requests_total")
++c.Add("bytes_received", int64(n))
++c.Set("goroutines", float64(runtime.NumGoroutine()))
++
++counters, gauges := c.Snapshot()
++```
++
++## Exported via HTTP
++
++Mount the metrics handler on your mux:
++
++```go
++http.Handle("/metrics", metrics.Handler(c))
++```
++
++Counters reset on process restart. For persistent metrics use Prometheus.

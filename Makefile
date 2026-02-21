@@ -9,7 +9,7 @@ PLATFORMS := linux/amd64 darwin/amd64 darwin/arm64 windows/amd64
 # Raise this ceiling deliberately if you add large deps; shrink it to lock in gains.
 MAX_BINARY_BYTES := 36700160
 
-.PHONY: all clean build release test test-cover test-integration test-fuzz lint test-run quick-commit run-debug install install-completion-bash install-completion-zsh check-size help docker-build docker-run docker-quick-commit profile-cpu profile-mem profile-bench
+.PHONY: all clean build release test test-cover test-integration test-fuzz lint test-run quick-commit run-debug changelog gen-aliases install install-completion-bash install-completion-zsh check-size help docker-build docker-run docker-quick-commit profile-cpu profile-mem profile-bench
 
 all: build
 
@@ -47,6 +47,18 @@ quick-commit: ## Build and run quick-commit (pass extra flags with ARGS="--dry-r
 	@mkdir -p $(BUILD_DIR)
 	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) .
 	./dist/ai-mr-comment quick-commit $(ARGS)
+
+COMMIT_RANGE ?= HEAD~10..HEAD
+
+changelog: ## Build and generate a changelog entry (COMMIT_RANGE="v1.2.0..HEAD" ARGS="--provider gemini")
+	@mkdir -p $(BUILD_DIR)
+	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) .
+	./dist/ai-mr-comment changelog --commit="$(COMMIT_RANGE)" $(ARGS)
+
+gen-aliases: ## Print shell aliases for ai-mr-comment (append to ~/.bashrc or ~/.zshrc)
+	@mkdir -p $(BUILD_DIR)
+	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) .
+	./dist/ai-mr-comment gen-aliases
 
 run-debug: ## Build and run with --debug flag
 	@mkdir -p $(BUILD_DIR)

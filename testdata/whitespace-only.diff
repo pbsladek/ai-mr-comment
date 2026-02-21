@@ -1,0 +1,18 @@
+diff --git a/internal/handler.go b/internal/handler.go
+index 1a2b3c4..5d6e7f8 100644
+--- a/internal/handler.go
++++ b/internal/handler.go
+@@ -10,7 +10,7 @@ func Handle(w http.ResponseWriter, r *http.Request) {
+ 	ctx := r.Context()
+-
++
+ 	if err := validate(r); err != nil {
+ 		http.Error(w, err.Error(), http.StatusBadRequest)
+ 		return
+@@ -20,6 +20,6 @@ func Handle(w http.ResponseWriter, r *http.Request) {
+ 	data, err := fetch(ctx)
+ 	if err != nil {
+-		log.Printf("fetch error: %v\n",err)
++		log.Printf("fetch error: %v\n", err)
+ 	}
+ }
