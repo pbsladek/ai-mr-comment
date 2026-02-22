@@ -134,7 +134,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if versionFlag {
-				fmt.Fprintf(cmd.OutOrStdout(), "version=%s\ncommit=%s\nrepo=https://github.com/pbsladek/ai-mr-comment\n", Version, Commit)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "version=%s\ncommit=%s\nrepo=https://github.com/pbsladek/ai-mr-comment\n", Version, Commit)
 				return nil
 			}
 			runStart := time.Now()
