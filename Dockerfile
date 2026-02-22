@@ -18,7 +18,7 @@ RUN CGO_ENABLED=0 go build \
       -o /out/ai-mr-comment .
 
 # Runtime prep stage: install dependencies and create user in standard Alpine
-FROM alpine:3.23 AS runtime-prep
+FROM alpine:3.23@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659 AS runtime-prep
 
 RUN apk add --no-cache git ca-certificates
 RUN addgroup -S aiuser && adduser -S -G aiuser aiuser

@@ -26,11 +26,22 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
-          ref: ${{ github.event.inputs.tag || github.event.workflow_run.head_sha || github.ref_name }}
+          ref: refs/heads/main
 
-      - name: Resolve release tag
+      - name: Resolve and validate release tag
         id: resolve_tag
-        run: .github/scripts/resolve-release-tag.sh "${{ github.event.inputs.tag }}" "${GITHUB_OUTPUT}"
+        run: |
+          .github/scripts/resolve-release-tag.sh \
+            "${{ github.event.inputs.tag }}" \
+            "${{ github.event.workflow_run.head_sha }}" \
+            "${GITHUB_OUTPUT}"
+
+      - name: Checkout release tag
+        if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.resolve_tag.outputs.tag_commit }}
 
       - name: Skip release when no tag was created
         if: ${{ steps.resolve_tag.outputs.skip == 'true' }}
