@@ -94,6 +94,13 @@ For script-based installers and advanced verification flow, see `scripts/install
 ### Docker
 
 No Go toolchain required. The image includes git so all diff and commit commands work.
+Published image: `pwbsladek/ai-mr-comment` on Docker Hub.
+
+If you build locally, log in to DHI first (base images are pulled from `dhi.io`):
+
+```bash
+docker login dhi.io
+```
 
 ```bash
 # Build the image
@@ -105,11 +112,14 @@ make docker-run ARGS="--provider openai"
 # Run quick-commit
 make docker-quick-commit ARGS="--dry-run"
 
+# Pull the published image
+docker pull pwbsladek/ai-mr-comment:latest
+
 # Or use docker directly
 docker run --rm -it \
   -v "$(pwd):/repo" -w /repo \
   -e OPENAI_API_KEY \
-  ai-mr-comment --provider openai
+  pwbsladek/ai-mr-comment:latest --provider openai
 ```
 
 **Mounting your config file:**
@@ -118,7 +128,7 @@ docker run --rm -it \
   -v "$(pwd):/repo" -w /repo \
   -v "$HOME/.ai-mr-comment.toml:/home/aiuser/.ai-mr-comment.toml:ro" \
   -e OPENAI_API_KEY \
-  ai-mr-comment
+  pwbsladek/ai-mr-comment:latest
 ```
 
 **Fetching a PR/MR by URL (no repo mount needed):**
@@ -126,7 +136,7 @@ docker run --rm -it \
 docker run --rm \
   -e OPENAI_API_KEY \
   -e GITHUB_TOKEN \
-  ai-mr-comment --pr https://github.com/owner/repo/pull/42
+  pwbsladek/ai-mr-comment:latest --pr https://github.com/owner/repo/pull/42
 ```
 
 > **Note:** `--clipboard` is not available inside a container. Use `--output` or `--format json` instead to capture the output.
