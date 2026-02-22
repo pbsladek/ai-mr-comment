@@ -221,7 +221,9 @@ jobs:
 
       - name: Stage Docker provenance bundle
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        run: cp "${{ steps.attest_docker.outputs.bundle-path }}" "dist/provenance-docker.intoto.jsonl"
+        run: |
+          mkdir -p dist
+          cp "${{ steps.attest_docker.outputs.bundle-path }}" "dist/provenance-docker.intoto.jsonl"
 
       - name: Upload Docker provenance
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
