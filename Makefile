@@ -9,7 +9,7 @@ PLATFORMS := linux/amd64 darwin/amd64 darwin/arm64 windows/amd64
 # Raise this ceiling deliberately if you add large deps; shrink it to lock in gains.
 MAX_BINARY_BYTES := 36700160
 
-.PHONY: all clean build release test test-cover test-integration test-integration-ollama test-integration-ollama-8b eval-quality-ollama-8b eval-quality-commit eval-quality-pr eval-quality-writing eval-quality-writing-ollama-8b local-ollama-8b-ci test-fuzz lint test-run quick-commit run-debug changelog gen-aliases install install-completion-bash install-completion-zsh check-size help docker-build docker-build-fips docker-run docker-run-fips docker-quick-commit profile-cpu profile-mem profile-bench eval-quality-deps eval-quality eval-quality-view
+.PHONY: all clean build release test test-cover test-integration test-integration-ollama test-integration-ollama-8b eval-quality-ollama-8b eval-quality-commit eval-quality-pr eval-quality-writing eval-quality-writing-ollama-8b local-ollama-8b-ci test-fuzz lint lint-shell test-run quick-commit run-debug changelog gen-aliases install install-completion-bash install-completion-zsh check-size help docker-build docker-build-fips docker-run docker-run-fips docker-quick-commit profile-cpu profile-mem profile-bench eval-quality-deps eval-quality eval-quality-view
 
 all: build
 
@@ -167,6 +167,9 @@ test-fuzz: ## Run fuzz tests (30s per target)
 
 lint: ## Run golangci-lint
 	golangci-lint run ./...
+
+lint-shell: ## Lint shell scripts with shellcheck
+	shellcheck -x -P scripts -P .github/scripts scripts/*.sh .github/scripts/*.sh
 
 PROVIDER ?= gemini
 
