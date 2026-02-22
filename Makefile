@@ -1,6 +1,7 @@
 APP       := ai-mr-comment
 VERSION   ?= $(shell git describe --tags --always 2>/dev/null || echo dev)
-LDFLAGS   := -ldflags="-s -w -X 'main.Version=$(VERSION)'"
+COMMIT    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+LDFLAGS   := -ldflags="-s -w -X 'main.Version=$(VERSION)' -X 'main.Commit=$(COMMIT)'"
 BUILD_DIR := dist
 PLATFORMS := linux/amd64 darwin/amd64 darwin/arm64 windows/amd64
 

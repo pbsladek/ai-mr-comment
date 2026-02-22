@@ -41,7 +41,7 @@ require_cmd() {
 download_file() {
   local url="$1"
   local out="$2"
-  curl -fL --retry 3 --retry-delay 1 --proto '=https' --tlsv1.3 -o "${out}" "${url}"
+  curl -fL --retry 3 --retry-delay 1 --proto '=https' -o "${out}" "${url}"
 }
 
 verify_checksum() {

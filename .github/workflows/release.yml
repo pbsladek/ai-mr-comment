@@ -59,9 +59,6 @@ jobs:
         with:
           go-version: "1.26"
 
-      - name: Install cosign
-        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
-
       - name: Install syft
         uses: anchore/sbom-action/download-syft@28d71544de8eaf1b958d335707167c5f783590ad # v0
 
@@ -77,38 +74,6 @@ jobs:
       - name: Prepare release metadata
         id: release_meta
         run: .github/scripts/prepare-release-metadata.sh "${{ needs.validate.outputs.tag }}" "${GITHUB_OUTPUT}"
-
-      - name: Generate installer manifest
-        env:
-          TAG: ${{ needs.validate.outputs.tag }}
-        run: |
-          set -euo pipefail
-          COMMIT_SHA="$(git rev-list -n 1 "${TAG}")"
-          bash scripts/generate-installer-manifest.sh \
-            --repo "pbsladek/ai-mr-comment" \
-            --tag "${TAG}" \
-            --commit "${COMMIT_SHA}" \
-            --out "dist/installer-manifest.json"
-
-      - name: Sign installer manifest
-        run: |
-          set -euo pipefail
-          cosign sign-blob \
-            --yes \
-            --output-signature "dist/installer-manifest.json.sig" \
-            --output-certificate "dist/installer-manifest.json.pem" \
-            "dist/installer-manifest.json"
-
-      - name: Upload installer manifest assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.validate.outputs.tag }}
-        run: |
-          set -euo pipefail
-          bash .github/scripts/upload-release-assets.sh "${TAG}" \
-            "dist/installer-manifest.json" \
-            "dist/installer-manifest.json.sig" \
-            "dist/installer-manifest.json.pem"
 
       - name: Attest release archives provenance
         id: attest_binaries

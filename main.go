@@ -21,6 +21,12 @@ import (
 	"golang.org/x/term"
 )
 
+// Version is set at build time via -ldflags "-X 'main.Version=...'"
+var Version = "dev"
+
+// Commit is set at build time via -ldflags "-X 'main.Commit=...'"
+var Commit = "unknown"
+
 var debugWriterMu sync.Mutex
 
 func main() {
@@ -118,7 +124,7 @@ func isConventionalCommitLine(line string) bool {
 // Accepting chatFn as a parameter allows tests to inject a mock without real API calls.
 func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
 	var commit, diffFilePath, outputPath, provider, modelOverride, templateName, format, prURL, clipboardFlag, systemPromptFlag string
-	var debug, staged, smartChunk, generateTitle, generateCommitMsg, verbose, exitCodeFlag, postFlag, estimate, autoYes bool
+	var debug, staged, smartChunk, generateTitle, generateCommitMsg, verbose, exitCodeFlag, postFlag, estimate, autoYes, versionFlag bool
 	var exclude []string
 
 	rootCmd := &cobra.Command{
@@ -127,6 +133,10 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if versionFlag {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "version=%s\ncommit=%s\nrepo=https://github.com/pbsladek/ai-mr-comment\n", Version, Commit)
+				return nil
+			}
 			runStart := time.Now()
 			cfg, err := loadConfig()
 			if err != nil {
@@ -596,6 +606,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().StringVar(&systemPromptFlag, "system-prompt", "", `Override the system prompt for this run. Use @path to read from a file (e.g. --system-prompt=@review.txt). Mutually exclusive with --template.`)
 	rootCmd.Flags().BoolVar(&estimate, "estimate", false, "Show token/cost estimate and prompt for confirmation before calling the API")
 	rootCmd.Flags().BoolVarP(&autoYes, "yes", "y", false, "Auto-confirm the cost estimate prompt (use with --estimate)")
+	rootCmd.Flags().BoolVar(&versionFlag, "version", false, "Print version and exit")
 
 	rootCmd.AddCommand(newInitConfigCmd())
 	rootCmd.AddCommand(newModelsCmd())
