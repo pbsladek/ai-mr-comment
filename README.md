@@ -1,4 +1,4 @@
-# MR Comment Generator (Go)
+# ai-mr-comment
 
 [![Go Test](https://github.com/pbsladek/ai-mr-comment/actions/workflows/test.yml/badge.svg)](https://github.com/pbsladek/ai-mr-comment/actions/workflows/test.yml)
 [![Release](https://img.shields.io/github/v/release/pbsladek/ai-mr-comment)](https://github.com/pbsladek/ai-mr-comment/releases)
@@ -45,26 +45,8 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 
 ### Prerequisites
 
-- Go (1.26+)
 - Git
 - API Key for your preferred provider (OpenAI, Anthropic, or Google Gemini)
-
-### Building from source
-
-```bash
-# Clone the repository
-git clone https://github.com/pbsladek/ai-mr-comment.git
-cd ai-mr-comment
-
-# Build
-make build
-
-# The binary will be available at ./dist/ai-mr-comment
-# Build and run on current diff
-make test-run
-```
-
-### Installing
 
 ### macOS (Homebrew)
 
@@ -91,11 +73,28 @@ Download the latest binary for your OS from the [Releases](https://github.com/pb
 
 For Linux/macOS script installation, download and inspect `scripts/install.sh` from the [repository](https://github.com/pbsladek/ai-mr-comment), then run it directly. The script verifies the downloaded archive against the release `checksums.txt` (and optionally the cosign signature) before installing.
 
+### Building from Source
+
+Requires Go 1.26+.
+
+```bash
+# Clone the repository
+git clone https://github.com/pbsladek/ai-mr-comment.git
+cd ai-mr-comment
+
+# Build
+make build
+
+# The binary will be available at ./dist/ai-mr-comment
+# Build and run on current diff
+make test-run
+```
+
 ### Docker
 
 No Go toolchain required. The image includes git so all diff and commit commands work.
 Published image: `pwbsladek/ai-mr-comment` on Docker Hub.
-FIPS variant tag: `pwbsladek/ai-mr-comment:<version>-fips` (and `latest-fips` on stable releases).
+FIPS variant tag: `pwbsladek/ai-mr-comment:<version>-fips`.
 
 If you build locally, log in to DHI first (base images are pulled from `dhi.io`):
 
@@ -113,15 +112,15 @@ make docker-run ARGS="--provider openai"
 # Run quick-commit
 make docker-quick-commit ARGS="--dry-run"
 
-# Pull the published image
-docker pull pwbsladek/ai-mr-comment:latest
-docker pull pwbsladek/ai-mr-comment:latest-fips
+# Pull a specific version (replace v0.18.1 with the version you want)
+docker pull pwbsladek/ai-mr-comment:v0.18.1
+docker pull pwbsladek/ai-mr-comment:v0.18.1-fips
 
 # Or use docker directly
 docker run --rm -it \
   -v "$(pwd):/repo" -w /repo \
   -e OPENAI_API_KEY \
-  pwbsladek/ai-mr-comment:latest --provider openai
+  pwbsladek/ai-mr-comment:v0.18.1 --provider openai
 ```
 
 **Mounting your config file:**
@@ -130,7 +129,7 @@ docker run --rm -it \
   -v "$(pwd):/repo" -w /repo \
   -v "$HOME/.ai-mr-comment.toml:/home/nonroot/.ai-mr-comment.toml:ro" \
   -e OPENAI_API_KEY \
-  pwbsladek/ai-mr-comment:latest
+  pwbsladek/ai-mr-comment:v0.18.1
 ```
 
 **Fetching a PR/MR by URL (no repo mount needed):**
@@ -138,7 +137,7 @@ docker run --rm -it \
 docker run --rm \
   -e OPENAI_API_KEY \
   -e GITHUB_TOKEN \
-  pwbsladek/ai-mr-comment:latest --pr https://github.com/owner/repo/pull/42
+  pwbsladek/ai-mr-comment:v0.18.1 --pr https://github.com/owner/repo/pull/42
 ```
 
 > **Note:** `--clipboard` is not available inside a container. Use `--output` or `--format json` instead to capture the output.
@@ -194,6 +193,51 @@ gitlab_token = "xxxx"       # or set GITLAB_TOKEN env var (required for private 
 # Options: default, conventional, technical, user-focused, emoji, sassy, monday,
 #          jira, commit, commit-emoji
 template = "default"
+```
+
+## Example Output
+
+**Text mode (`--title`):**
+
+```
+── Title ────────────────────────────────
+
+feat: Add user authentication system
+
+
+── Description ──────────────────────────
+
+## Key Changes
+
+- Added user model with bcrypt password hashing
+- Implemented JWT authentication middleware
+- Created login and registration API endpoints
+- Added comprehensive unit tests for auth logic
+
+## Why These Changes
+
+Provides a secure foundation for user identity, allowing protected access to API resources.
+
+```
+
+**JSON mode (`--format json`):**
+
+```json
+{
+  "title": "feat: Add user authentication system",
+  "description": "## Key Changes\n\n- Added user model...",
+  "comment": "## Key Changes\n\n- Added user model...",
+  "provider": "openai",
+  "model": "gpt-4o-mini"
+}
+```
+
+`description` and `comment` carry the same value; `comment` is kept for backwards compatibility. When `--exit-code` is set, a `"verdict": "PASS"` or `"verdict": "FAIL"` field is also included.
+
+**Commit message mode (`--commit-msg --format json`):**
+
+```json
+{"commit_message":"feat(auth): add JWT refresh token support"}
 ```
 
 ## Usage
@@ -318,6 +362,7 @@ ai-mr-comment init-config
 - `--system-prompt <TEXT|@FILE>`: Override the system prompt for this run. Pass the prompt inline (`--system-prompt="Focus on security"`) or read it from a file with an `@` prefix (`--system-prompt=@review.txt`). Mutually exclusive with `--template`.
 - `--debug`: Show precise token usage and cost estimation without calling the generation API
 - `--verbose`: Print detailed debug lines to stderr — config file path, diff stats, template source, streaming decision, and per-API-call timing and response size
+- `--version`: Print version, commit SHA, and repository URL in `key=value` format and exit
 - `-h, --help`: Print help
 
 ### Subcommands
@@ -328,19 +373,6 @@ ai-mr-comment init-config
 - `models [--provider <NAME>]`: List known model names for a provider.
 - `init-config [--output <PATH>]`: Write a default config file to `~/.ai-mr-comment.toml` (or the given path). Refuses to overwrite an existing file.
 - `completion [bash|zsh|fish|powershell]`: Print a shell completion script to stdout.
-
-## Streaming Output
-
-When running interactively (stdout is a TTY), the tool streams tokens directly to the terminal as the model generates them, so you see the comment appear word by word rather than waiting for the full response.
-
-Streaming is automatically disabled and the output is fully buffered when:
-
-- `--format json` is set (the full response is needed before encoding)
-- `--smart-chunk` is set (multi-stage summarise + synthesise calls)
-- `--output <file>` is set (writing to a file)
-- stdout is not a TTY (piped output, CI, redirected to file)
-
-If a streaming call fails mid-flight, the tool transparently falls back to a standard buffered request and outputs the full comment normally.
 
 ## GitHub & GitLab Integration (`--pr`)
 
@@ -384,14 +416,6 @@ github_base_url = "https://github.mycompany.com"
 gitlab_base_url = "https://gitlab.mycompany.com"
 ```
 
-## Token & Cost Estimation
-
-When running with the `--debug` flag, the tool provides a detailed breakdown of the expected usage:
-
-- **Gemini**: Uses official SDK token counting (100% accurate).
-- **OpenAI/Anthropic/Ollama**: Uses a conservative character-based heuristic (~3.5 chars per token).
-- **Cost**: Calculates estimated input cost in USD based on current model pricing (Ollama is free).
-
 ## Templates
 
 Select a template with `-t` / `--template`. All templates receive the branch name as context (useful for ticket key extraction).
@@ -419,6 +443,26 @@ ai-mr-comment --template jira --staged
 ```
 
 This works because the current branch name is automatically prepended to the diff context for all local git operations (not `--file` or `--pr`).
+
+## Custom System Prompt
+
+Use `--system-prompt` to replace the active template prompt for a single run — no template file needed.
+
+```bash
+# Inline prompt
+ai-mr-comment --system-prompt="Focus only on security vulnerabilities."
+
+# Read from a file (@ prefix)
+ai-mr-comment --system-prompt=@~/prompts/security-review.txt
+
+# Works on the changelog subcommand too
+ai-mr-comment changelog --commit="v1.2.0..HEAD" \
+  --system-prompt="List only breaking changes in one sentence each."
+```
+
+`--system-prompt` and `--template` are mutually exclusive — use one or the other per run.
+
+When `--exit-code` is also set, the verdict preamble is still prepended on top of the custom prompt (same behaviour as with templates).
 
 ## Commit Messages
 
@@ -480,138 +524,6 @@ Steps performed:
 | `--format json` | Output `{"commit_message":"..."}` only; suppress status lines |
 | `--provider` | Override the AI provider |
 | `--model` | Override the model |
-
-## CI/CD Usage
-
-Three flags are designed specifically for pipeline integration:
-
-### `--exit-code` — Gate merges on AI review
-
-Instruct the AI to output a `VERDICT: PASS` or `VERDICT: FAIL` line before its review. If FAIL, the process exits with code 2, failing your pipeline step.
-
-```bash
-# Fail the pipeline if the AI detects critical issues
-ai-mr-comment --exit-code --pr "$PR_URL"
-echo $?  # 0 = PASS, 2 = FAIL, 1 = tool error
-
-# JSON includes the verdict field for downstream processing
-ai-mr-comment --exit-code --format json --pr "$PR_URL" | jq .verdict
-```
-
-**GitHub Actions example:**
-```yaml
-- name: AI Code Review
-  run: ai-mr-comment --exit-code --pr "${{ github.event.pull_request.html_url }}"
-  env:
-    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  # Step fails (exit 2) if AI detects critical issues
-```
-
-### `--post` — Auto-post comments to PRs/MRs
-
-After generating the comment, post it directly to the PR or MR via the GitHub/GitLab API. Uses the same token as diff fetching — no extra setup needed.
-
-```bash
-# Generate and post in one step
-ai-mr-comment --pr "$PR_URL" --post
-
-# Combine with exit-code: review, post, and gate in one command
-ai-mr-comment --exit-code --post --pr "$PR_URL"
-```
-
-**GitHub Actions example:**
-```yaml
-- name: AI Review & Comment
-  run: ai-mr-comment --post --pr "${{ github.event.pull_request.html_url }}"
-  env:
-    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-```
-
-### `--output` with `--format json` — Save review artifacts
-
-Write the full JSON review to a file. Useful for artifact upload, audit trails, or passing data between pipeline jobs.
-
-```bash
-# Write JSON to file
-ai-mr-comment --format json --output review.json --pr "$PR_URL"
-
-# Upload as artifact (GitHub Actions)
-# - uses: actions/upload-artifact@v4
-#   with: { name: ai-review, path: review.json }
-
-# Read in a later job
-cat review.json | jq -r '.description'
-cat review.json | jq -r '.verdict'  # when --exit-code was used
-```
-
-When `--commit-msg` is set, `--output` writes the commit message (with a trailing newline) rather than JSON.
-
-## Example Output
-
-**Text mode (`--title`):**
-
-```
-── Title ────────────────────────────────
-
-feat: Add user authentication system
-
-
-── Description ──────────────────────────
-
-## Key Changes
-
-- Added user model with bcrypt password hashing
-- Implemented JWT authentication middleware
-- Created login and registration API endpoints
-- Added comprehensive unit tests for auth logic
-
-## Why These Changes
-
-Provides a secure foundation for user identity, allowing protected access to API resources.
-
-```
-
-**JSON mode (`--format json`):**
-
-```json
-{
-  "title": "feat: Add user authentication system",
-  "description": "## Key Changes\n\n- Added user model...",
-  "comment": "## Key Changes\n\n- Added user model...",
-  "provider": "openai",
-  "model": "gpt-4o-mini"
-}
-```
-
-`description` and `comment` carry the same value; `comment` is kept for backwards compatibility. When `--exit-code` is set, a `"verdict": "PASS"` or `"verdict": "FAIL"` field is also included.
-
-**Commit message mode (`--commit-msg --format json`):**
-
-```json
-{"commit_message":"feat(auth): add JWT refresh token support"}
-```
-
-## Custom System Prompt
-
-Use `--system-prompt` to replace the active template prompt for a single run — no template file needed.
-
-```bash
-# Inline prompt
-ai-mr-comment --system-prompt="Focus only on security vulnerabilities."
-
-# Read from a file (@ prefix)
-ai-mr-comment --system-prompt=@~/prompts/security-review.txt
-
-# Works on the changelog subcommand too
-ai-mr-comment changelog --commit="v1.2.0..HEAD" \
-  --system-prompt="List only breaking changes in one sentence each."
-```
-
-`--system-prompt` and `--template` are mutually exclusive — use one or the other per run.
-
-When `--exit-code` is also set, the verdict preamble is still prepended on top of the custom prompt (same behaviour as with templates).
 
 ## Changelog
 
@@ -687,6 +599,94 @@ Aliases defined:
 |---|---|
 | `--shell` | `bash` (default) or `zsh` — both use identical alias syntax |
 | `--output` | Also write aliases to this file |
+
+## CI/CD Usage
+
+Three flags are designed specifically for pipeline integration:
+
+### `--exit-code` — Gate merges on AI review
+
+Instruct the AI to output a `VERDICT: PASS` or `VERDICT: FAIL` line before its review. If FAIL, the process exits with code 2, failing your pipeline step.
+
+```bash
+# Fail the pipeline if the AI detects critical issues
+ai-mr-comment --exit-code --pr "$PR_URL"
+echo $?  # 0 = PASS, 2 = FAIL, 1 = tool error
+
+# JSON includes the verdict field for downstream processing
+ai-mr-comment --exit-code --format json --pr "$PR_URL" | jq .verdict
+```
+
+**GitHub Actions example:**
+```yaml
+- name: AI Code Review
+  run: ai-mr-comment --exit-code --pr "${{ github.event.pull_request.html_url }}"
+  env:
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # Step fails (exit 2) if AI detects critical issues
+```
+
+### `--post` — Auto-post comments to PRs/MRs
+
+After generating the comment, post it directly to the PR or MR via the GitHub/GitLab API. Uses the same token as diff fetching — no extra setup needed.
+
+```bash
+# Generate and post in one step
+ai-mr-comment --pr "$PR_URL" --post
+
+# Combine with exit-code: review, post, and gate in one command
+ai-mr-comment --exit-code --post --pr "$PR_URL"
+```
+
+**GitHub Actions example:**
+```yaml
+- name: AI Review & Comment
+  run: ai-mr-comment --post --pr "${{ github.event.pull_request.html_url }}"
+  env:
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+### `--output` with `--format json` — Save review artifacts
+
+Write the full JSON review to a file. Useful for artifact upload, audit trails, or passing data between pipeline jobs.
+
+```bash
+# Write JSON to file
+ai-mr-comment --format json --output review.json --pr "$PR_URL"
+
+# Upload as artifact (GitHub Actions)
+# - uses: actions/upload-artifact@v4
+#   with: { name: ai-review, path: review.json }
+
+# Read in a later job
+cat review.json | jq -r '.description'
+cat review.json | jq -r '.verdict'  # when --exit-code was used
+```
+
+When `--commit-msg` is set, `--output` writes the commit message (with a trailing newline) rather than JSON.
+
+## Streaming Output
+
+When running interactively (stdout is a TTY), the tool streams tokens directly to the terminal as the model generates them, so you see the comment appear word by word rather than waiting for the full response.
+
+Streaming is automatically disabled and the output is fully buffered when:
+
+- `--format json` is set (the full response is needed before encoding)
+- `--smart-chunk` is set (multi-stage summarise + synthesise calls)
+- `--output <file>` is set (writing to a file)
+- stdout is not a TTY (piped output, CI, redirected to file)
+
+If a streaming call fails mid-flight, the tool transparently falls back to a standard buffered request and outputs the full comment normally.
+
+## Token & Cost Estimation
+
+When running with the `--debug` flag, the tool provides a detailed breakdown of the expected usage:
+
+- **Gemini**: Uses official SDK token counting (100% accurate).
+- **OpenAI/Anthropic/Ollama**: Uses a conservative character-based heuristic (~3.5 chars per token).
+- **Cost**: Calculates estimated input cost in USD based on current model pricing (Ollama is free).
 
 ## Development
 

@@ -15,7 +15,7 @@ A command-line tool written in Go that generates professional MR/PR comments bas
 
 - **Build**: `make build` (creates binary in `./dist/ai-mr-comment`)
 - **Run**: `make run` or `./dist/ai-mr-comment`
-- **Test**: `go test ./...`
+- **Test**: `make test` (or `go test $(go list ./... | grep -vE '/evals(/|$$)')` to skip the evals package)
 - **Lint**: `make lint`
 - **Install dependencies**: `go mod tidy`
 
