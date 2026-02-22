@@ -43,7 +43,8 @@ sboms:
       - "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}.sbom.json"
 
 signs:
-  - cmd: cosign
+  - id: checksums
+    cmd: cosign
     args:
       - sign-blob
       - --yes
@@ -51,6 +52,16 @@ signs:
       - --output-certificate=${certificate}
       - ${artifact}
     artifacts: checksum
+    output: true
+  - id: archives
+    cmd: cosign
+    args:
+      - sign-blob
+      - --yes
+      - --output-signature=${signature}
+      - --output-certificate=${certificate}
+      - ${artifact}
+    artifacts: archive
     output: true
 
 checksum:
