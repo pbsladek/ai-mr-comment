@@ -5,6 +5,11 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/codeql.yml"
   schedule:
     # Weekly scan every Monday at 08:00 UTC
     - cron: "0 8 * * 1"
@@ -32,11 +37,10 @@ jobs:
         uses: github/codeql-action/init@9e907b5e64f6b83e7804b09294d44122997950d6 # v4
         with:
           languages: go
-          # Use the default security-and-quality query suite.
-          queries: security-and-quality
+          queries: security-extended
 
-      - name: Build
-        run: go build ./...
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@9e907b5e64f6b83e7804b09294d44122997950d6 # v4
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@9e907b5e64f6b83e7804b09294d44122997950d6 # v4
