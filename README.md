@@ -89,7 +89,7 @@ brew upgrade ai-mr-comment
 
 Download the latest binary for your OS from the [Releases](https://github.com/pbsladek/ai-mr-comment/releases) page.
 
-For script-based installers and advanced verification flow, see `scripts/install.sh`.
+For Linux/macOS script installation, download and inspect `scripts/install.sh` from the [repository](https://github.com/pbsladek/ai-mr-comment), then run it directly. The script verifies the downloaded archive against the release `checksums.txt` (and optionally the cosign signature) before installing.
 
 ### Docker
 
@@ -806,8 +806,7 @@ When ready to publish a release:
 1. Go to **GitHub → Releases → Draft a new release**
 2. Pick the pre-created tag from the dropdown
 3. Click **Publish release** — GoReleaser builds and attaches signed binaries automatically
-4. Release workflow also publishes signed installer metadata (`installer-manifest.json`, `.sig`, `.pem`)
-5. Release workflow dispatches the source tarball metadata to `pbsladek/homebrew-tap` for Homebrew validation/update automation
+4. Release workflow dispatches the source tarball metadata to `pbsladek/homebrew-tap` for Homebrew validation/update automation
 
 ## License
 

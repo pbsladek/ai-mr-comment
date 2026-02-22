@@ -12,9 +12,6 @@ fi
 
 required_exact=(
   "checksums.txt"
-  "installer-manifest.json"
-  "installer-manifest.json.sig"
-  "installer-manifest.json.pem"
   "release-manifest.json"
   "release-manifest.json.sig"
   "release-manifest.json.pem"
