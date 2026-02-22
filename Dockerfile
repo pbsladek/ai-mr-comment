@@ -13,7 +13,8 @@ COPY api.go changelog.go config.go git.go main.go prompt.go token_estimator.go .
 COPY templates/default.tmpl ./templates/default.tmpl
 
 ARG VERSION=dev
-RUN CGO_ENABLED=0 go build \
+ARG GOFIPS140=off
+RUN CGO_ENABLED=0 GOFIPS140=${GOFIPS140} go build \
       -ldflags="-s -w -X 'main.Version=${VERSION}'" \
       -o /out/ai-mr-comment .
 

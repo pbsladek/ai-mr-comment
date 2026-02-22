@@ -95,6 +95,7 @@ For script-based installers and advanced verification flow, see `scripts/install
 
 No Go toolchain required. The image includes git so all diff and commit commands work.
 Published image: `pwbsladek/ai-mr-comment` on Docker Hub.
+FIPS variant tag: `pwbsladek/ai-mr-comment:<version>-fips` (and `latest-fips` on stable releases).
 
 If you build locally, log in to DHI first (base images are pulled from `dhi.io`):
 
@@ -114,6 +115,7 @@ make docker-quick-commit ARGS="--dry-run"
 
 # Pull the published image
 docker pull pwbsladek/ai-mr-comment:latest
+docker pull pwbsladek/ai-mr-comment:latest-fips
 
 # Or use docker directly
 docker run --rm -it \
@@ -126,7 +128,7 @@ docker run --rm -it \
 ```bash
 docker run --rm -it \
   -v "$(pwd):/repo" -w /repo \
-  -v "$HOME/.ai-mr-comment.toml:/home/aiuser/.ai-mr-comment.toml:ro" \
+  -v "$HOME/.ai-mr-comment.toml:/home/nonroot/.ai-mr-comment.toml:ro" \
   -e OPENAI_API_KEY \
   pwbsladek/ai-mr-comment:latest
 ```

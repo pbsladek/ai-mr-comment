@@ -22,6 +22,7 @@ base_url="https://github.com/pbsladek/ai-mr-comment/releases/download/${tag}"
   echo "- Binary provenance: [provenance-binaries.intoto.jsonl](${base_url}/provenance-binaries.intoto.jsonl)"
   if [ "${require_docker_provenance}" = "true" ]; then
     echo "- Docker provenance: [provenance-docker.intoto.jsonl](${base_url}/provenance-docker.intoto.jsonl)"
+    echo "- Docker FIPS provenance: [provenance-docker-fips.intoto.jsonl](${base_url}/provenance-docker-fips.intoto.jsonl)"
   else
     echo "- Docker provenance: not published (Docker credentials not configured)"
   fi

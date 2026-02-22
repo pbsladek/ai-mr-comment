@@ -8,6 +8,7 @@ A command-line tool written in Go that generates professional MR/PR comments bas
 - The Dockerfile uses hardened images pinned by digest:
   - `dhi.io/golang:1.26-debian13-dev@sha256:7c7ee6a2db0fa9a332ba1c96f2cc11b53dc7535a899ce66e45391db4dfa26350` (builder)
   - `dhi.io/debian-base:trixie-debian13-dev@sha256:2166e2eaef0651c9ad21de6ab5a34fda12541d89bccf7bcb0a94afceb1b1541b` (runtime)
+  - FIPS builds set `GOFIPS140=v1.0.0` at build time.
   Keep Go version in sync with `go.mod`.
 
 ## Build & Run
