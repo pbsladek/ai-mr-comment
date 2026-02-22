@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -62,9 +63,7 @@ func FuzzProcessDiff(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, raw string, maxLines int) {
 		// maxLines must be non-negative; reflect negative values to positive.
-		if maxLines < 0 {
-			maxLines = -maxLines
-		}
+		maxLines = absIntNoOverflow(maxLines)
 		_ = processDiff(raw, maxLines)
 	})
 }
@@ -99,14 +98,32 @@ func FuzzEstimateCost(f *testing.F) {
 	f.Add("gemini-pro-experimental", int32(0))
 
 	f.Fuzz(func(t *testing.T, model string, tokens int32) {
-		if tokens < 0 {
-			tokens = -tokens
-		}
+		tokens = absInt32NoOverflow(tokens)
 		cost := EstimateCost(model, tokens)
 		if cost < 0 {
 			t.Errorf("EstimateCost returned negative cost %f for model=%q tokens=%d", cost, model, tokens)
 		}
 	})
+}
+
+func absIntNoOverflow(v int) int {
+	if v >= 0 {
+		return v
+	}
+	if v == math.MinInt {
+		return math.MaxInt
+	}
+	return -v
+}
+
+func absInt32NoOverflow(v int32) int32 {
+	if v >= 0 {
+		return v
+	}
+	if v == math.MinInt32 {
+		return math.MaxInt32
+	}
+	return -v
 }
 
 func min(a, b int) int {

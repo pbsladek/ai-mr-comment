@@ -76,6 +76,10 @@ type ModelPrice struct {
 // It performs an exact lookup first, then falls back to substring matching.
 // Returns 0 for unknown models or Ollama (which runs locally at no cost).
 func EstimateCost(model string, inputTokens int32) float64 {
+	if inputTokens <= 0 {
+		return 0.0
+	}
+
 	model = strings.ToLower(model)
 
 	// Ollama models are local and free.
@@ -86,11 +90,11 @@ func EstimateCost(model string, inputTokens int32) float64 {
 	// Pricing table in USD per 1M tokens (approximate, subject to change).
 	prices := map[string]ModelPrice{
 		// OpenAI (current)
-		"o3":        {Input: 2.00},
-		"o3-mini":   {Input: 1.10},
-		"o3-pro":    {Input: 20.00},
-		"o1":        {Input: 15.00},
-		"o1-mini":   {Input: 1.10},
+		"o3":           {Input: 2.00},
+		"o3-mini":      {Input: 1.10},
+		"o3-pro":       {Input: 20.00},
+		"o1":           {Input: 15.00},
+		"o1-mini":      {Input: 1.10},
 		"gpt-4.1":      {Input: 2.00},
 		"gpt-4.1-mini": {Input: 0.40},
 		"gpt-4.1-nano": {Input: 0.10},
@@ -102,9 +106,9 @@ func EstimateCost(model string, inputTokens int32) float64 {
 		"gpt-3.5-turbo":     {Input: 0.50},
 
 		// Anthropic (current)
-		"claude-opus-4-6":            {Input: 5.00},
-		"claude-sonnet-4-6":          {Input: 3.00},
-		"claude-haiku-4-5-20251001":  {Input: 1.00},
+		"claude-opus-4-6":           {Input: 5.00},
+		"claude-sonnet-4-6":         {Input: 3.00},
+		"claude-haiku-4-5-20251001": {Input: 1.00},
 		// Anthropic (legacy)
 		"claude-opus-4-5-20251101":   {Input: 5.00},
 		"claude-opus-4-1-20250805":   {Input: 15.00},

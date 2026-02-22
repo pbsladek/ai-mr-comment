@@ -545,6 +545,9 @@ func processDiff(raw string, maxLines int) string {
 // truncateDiff keeps the first and last halves of lines when the total exceeds
 // max, inserting a marker at the cut point.
 func truncateDiff(lines []string, max int) string {
+	if max <= 0 {
+		return strings.Join(lines, "\n")
+	}
 	if len(lines) <= max {
 		return strings.Join(lines, "\n")
 	}

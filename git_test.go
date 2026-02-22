@@ -49,6 +49,16 @@ func TestProcessDiff_Truncation(t *testing.T) {
 	}
 }
 
+func TestProcessDiff_NonPositiveMax(t *testing.T) {
+	raw := "line1\nline2\nline3\n"
+	if got := processDiff(raw, 0); got != raw {
+		t.Fatalf("expected full diff for max=0, got %q", got)
+	}
+	if got := processDiff(raw, -1); got != raw {
+		t.Fatalf("expected full diff for max<0, got %q", got)
+	}
+}
+
 func TestGetGitDiff_NoArgs(t *testing.T) {
 	// We're in a git repo, so this should not error
 	_, err := getGitDiff("", false, nil)
