@@ -70,6 +70,7 @@ supplemental_candidates=(
   "dist/installer-manifest.json.pem"
   "dist/provenance-binaries.intoto.jsonl"
   "dist/provenance-docker.intoto.jsonl"
+  "dist/provenance-docker-fips.intoto.jsonl"
 )
 
 supplemental_artifacts='[]'

@@ -23,6 +23,7 @@ required_exact=(
 
 if [ "${require_docker_provenance}" = "true" ]; then
   required_exact+=("provenance-docker.intoto.jsonl")
+  required_exact+=("provenance-docker-fips.intoto.jsonl")
 fi
 
 max_attempts=6

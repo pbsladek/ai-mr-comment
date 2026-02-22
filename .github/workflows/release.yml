@@ -236,9 +236,118 @@ jobs:
           bash .github/scripts/upload-release-assets.sh "${TAG}" \
             "dist/provenance-docker.intoto.jsonl"
 
+  docker_fips:
+    name: Build and Push Docker FIPS Image
+    needs: validate
+    if: ${{ needs.validate.outputs.skip != 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      attestations: write
+      id-token: write
+    outputs:
+      docker_fips_digest: ${{ steps.docker_build_fips.outputs.digest }}
+      docker_fips_tags: ${{ steps.docker_tags_fips.outputs.tags }}
+      docker_fips_enabled: ${{ steps.docker_creds.outputs.enabled }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.validate.outputs.tag_commit }}
+
+      - name: Check Docker publish credentials
+        id: docker_creds
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DOCKERHUB_USERNAME}" ] || [ -z "${DOCKERHUB_TOKEN}" ]; then
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+            echo "Docker publish skipped: DOCKERHUB_USERNAME or DOCKERHUB_TOKEN is missing."
+          else
+            echo "enabled=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Set up QEMU
+        if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+
+      - name: Set up Docker Buildx
+        if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Log in to Docker Hub
+        if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to DHI registry
+        if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: dhi.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Compute Docker FIPS tags
+        if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
+        id: docker_tags_fips
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+          IMAGE: pwbsladek/ai-mr-comment
+        run: |
+          set -euo pipefail
+          if [[ "${TAG}" == *-* ]]; then
+            echo "tags=${IMAGE}:${TAG}-fips" >> "${GITHUB_OUTPUT}"
+          else
+            echo "tags=${IMAGE}:${TAG}-fips,${IMAGE}:latest-fips" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Build and push Docker FIPS image
+        if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
+        id: docker_build_fips
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.docker_tags_fips.outputs.tags }}
+          build-args: |
+            VERSION=${{ needs.validate.outputs.tag }}
+            GOFIPS140=v1.0.0
+
+      - name: Attest Docker FIPS image provenance
+        if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
+        id: attest_docker_fips
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-name: docker.io/pwbsladek/ai-mr-comment
+          subject-digest: ${{ steps.docker_build_fips.outputs.digest }}
+
+      - name: Stage Docker FIPS provenance bundle
+        if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
+        run: |
+          mkdir -p dist
+          cp "${{ steps.attest_docker_fips.outputs.bundle-path }}" "dist/provenance-docker-fips.intoto.jsonl"
+
+      - name: Upload Docker FIPS provenance
+        if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          bash .github/scripts/upload-release-assets.sh "${TAG}" \
+            "dist/provenance-docker-fips.intoto.jsonl"
+
   finalize:
     name: Finalize Release
-    needs: [validate, artifacts, docker]
+    needs: [validate, artifacts, docker, docker_fips]
     if: ${{ needs.validate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     permissions:
@@ -252,6 +361,12 @@ jobs:
 
       - name: Install cosign
         uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+
+      - name: Download checksums asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: .github/scripts/download-release-asset.sh "${TAG}" "checksums.txt" "dist"
 
       - name: Generate immutable release manifest
         env:
