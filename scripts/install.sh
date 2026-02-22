@@ -112,7 +112,7 @@ detect_os() {
     Linux) echo "Linux" ;;
     Darwin) echo "Darwin" ;;
     *)
-      echo "Unsupported OS for install.sh. Use install.ps1 on Windows." >&2
+      echo "Unsupported OS for install.sh." >&2
       exit 1
       ;;
   esac

@@ -1,10 +1,12 @@
 # syntax=docker/dockerfile:1
 
 # ── Build stage ──────────────────────────────────────────────────────────────
-FROM golang:1.26-alpine@sha256:d4c4845f5d60c6a974c6000ce58ae079328d03ab7f721a0734277e69905473e5 AS builder
+# Docker Hardened Images (DHI) are free and require authentication to dhi.io.
+# Use Docker Hub credentials: `docker login dhi.io`.
+FROM dhi.io/golang:1.26-debian13-dev AS builder
 
 # git is needed by 'go build' to embed VCS info and by tests.
-RUN apk add --no-cache git
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
 
@@ -21,9 +23,10 @@ RUN CGO_ENABLED=0 go build \
       -o /out/ai-mr-comment .
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
-# alpine gives us git (required for all local-diff commands) plus a small
-# footprint. The final image is typically ~30 MB.
-FROM alpine:3.23@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659
+# Keep runtime small but include git since local-diff/commit workflows need it.
+FROM dhi.io/alpine-base:3.23
+
+USER root
 
 # git: required for diff/commit/push commands
 # ca-certificates: required for HTTPS calls to AI provider APIs and GitHub/GitLab
