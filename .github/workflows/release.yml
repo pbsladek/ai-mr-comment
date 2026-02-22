@@ -83,12 +83,7 @@ jobs:
             "dist/installer-manifest.json.pem" \
             --clobber
 
-      - name: Homebrew tap dispatch skipped (token missing)
-        if: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN == '' }}
-        run: echo "HOMEBREW_TAP_DISPATCH_TOKEN is not set; skipping homebrew-tap dispatch."
-
       - name: Dispatch release metadata to Homebrew tap
-        if: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN != '' }}
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN }}
           TAG: ${{ steps.release_meta.outputs.tag }}

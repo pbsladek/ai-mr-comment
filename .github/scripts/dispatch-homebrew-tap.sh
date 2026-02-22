@@ -5,6 +5,11 @@ tag="${1:?tag is required}"
 source_url="${2:?source url is required}"
 source_sha256="${3:?source sha256 is required}"
 
+if [ -z "${GH_TOKEN:-}" ]; then
+  echo "HOMEBREW_TAP_DISPATCH_TOKEN is not set; skipping homebrew-tap dispatch."
+  exit 0
+fi
+
 gh api repos/pbsladek/homebrew-tap/dispatches \
   -f event_type=upstream_release \
   -f client_payload[formula]=ai-mr-comment \
