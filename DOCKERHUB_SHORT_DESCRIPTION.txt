@@ -1,0 +1,1 @@
+AI MR/PR comment generator from git diffs using OpenAI, Anthropic, Gemini, or Ollama.
