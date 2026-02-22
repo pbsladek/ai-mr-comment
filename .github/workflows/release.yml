@@ -1,8 +1,9 @@
 name: Release
 
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: ["Tag"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       tag:
@@ -15,7 +16,7 @@ permissions: read-all
 jobs:
   release:
     name: Create GitHub Release
-    if: ${{ github.event_name != 'release' || github.actor != 'github-actions[bot]' }}
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -24,20 +25,32 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
-          ref: ${{ github.event.inputs.tag || github.event.release.tag_name || github.ref_name }}
+          ref: ${{ github.event.inputs.tag || github.event.workflow_run.head_sha || github.ref_name }}
+
+      - name: Resolve release tag
+        id: resolve_tag
+        run: .github/scripts/resolve-release-tag.sh "${{ github.event.inputs.tag }}" "${GITHUB_OUTPUT}"
+
+      - name: Skip release when no tag was created
+        if: ${{ steps.resolve_tag.outputs.skip == 'true' }}
+        run: echo "No release tag on workflow commit; nothing to publish."
 
       - name: Set up Go
+        if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: "1.26"
 
       - name: Install cosign
+        if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
         uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
 
       - name: Install syft
+        if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
         uses: anchore/sbom-action/download-syft@28d71544de8eaf1b958d335707167c5f783590ad # v0
 
       - name: Run GoReleaser
+        if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
         uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
           distribution: goreleaser
@@ -48,9 +61,11 @@ jobs:
 
       - name: Prepare release metadata
         id: release_meta
-        run: .github/scripts/prepare-release-metadata.sh "${{ github.event.inputs.tag || github.event.release.tag_name || github.ref_name }}" "${GITHUB_OUTPUT}"
+        if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
+        run: .github/scripts/prepare-release-metadata.sh "${{ steps.resolve_tag.outputs.tag }}" "${GITHUB_OUTPUT}"
 
       - name: Generate installer manifest
+        if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
         env:
           TAG: ${{ steps.release_meta.outputs.tag }}
         run: |
@@ -63,6 +78,7 @@ jobs:
             --out "dist/installer-manifest.json"
 
       - name: Sign installer manifest
+        if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
         run: |
           set -euo pipefail
           cosign sign-blob \
@@ -72,6 +88,7 @@ jobs:
             "dist/installer-manifest.json"
 
       - name: Upload installer manifest assets
+        if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.release_meta.outputs.tag }}
@@ -84,6 +101,7 @@ jobs:
             --clobber
 
       - name: Check Docker publish credentials
+        if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
         id: docker_creds
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -147,6 +165,7 @@ jobs:
             VERSION=${{ steps.release_meta.outputs.tag }}
 
       - name: Dispatch release metadata to Homebrew tap
+        if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN }}
           TAG: ${{ steps.release_meta.outputs.tag }}

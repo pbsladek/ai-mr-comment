@@ -11,7 +11,6 @@ jobs:
     name: Create Version Tag
     runs-on: ubuntu-latest
     permissions:
-      actions: write
       contents: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -22,16 +21,7 @@ jobs:
         with:
           node-version: lts/*
 
-      - name: Capture latest tag before semantic-release
-        id: before
-        run: echo "tag=$(git describe --tags --abbrev=0 2>/dev/null || true)" >> "${GITHUB_OUTPUT}"
-
       - name: Create version tag
         run: npx --yes semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Trigger release workflow for new tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: .github/scripts/dispatch-release-workflow.sh "${{ steps.before.outputs.tag }}"
