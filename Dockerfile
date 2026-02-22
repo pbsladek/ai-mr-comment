@@ -1,7 +1,6 @@
 # syntax=docker/dockerfile:1
 
-# Build stage: compile the Go binary
-FROM dhi.io/golang:1.26-debian13-dev AS builder
+FROM dhi.io/golang:1.26-debian13-dev@sha256:7c7ee6a2db0fa9a332ba1c96f2cc11b53dc7535a899ce66e45391db4dfa26350 AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
 
@@ -10,32 +9,28 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY . .
+COPY api.go changelog.go config.go git.go main.go prompt.go token_estimator.go ./
+COPY templates/default.tmpl ./templates/default.tmpl
 
 ARG VERSION=dev
 RUN CGO_ENABLED=0 go build \
       -ldflags="-s -w -X 'main.Version=${VERSION}'" \
       -o /out/ai-mr-comment .
 
-# Runtime prep stage: install dependencies and create user in standard Alpine
-FROM alpine:3.23@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659 AS runtime-prep
+FROM dhi.io/debian-base:trixie-debian13-dev@sha256:2166e2eaef0651c9ad21de6ab5a34fda12541d89bccf7bcb0a94afceb1b1541b
 
-RUN apk add --no-cache git ca-certificates
-RUN addgroup -S aiuser && adduser -S -G aiuser aiuser
-
-# Runtime stage: use DHI base and copy prepared components
-FROM dhi.io/alpine-base:3.23
-
-COPY --from=runtime-prep /etc /etc
-COPY --from=runtime-prep /usr/bin/git /usr/bin/git
-COPY --from=runtime-prep /usr/libexec/git-core /usr/libexec/git-core
-COPY --from=runtime-prep /usr/share/git-core /usr/share/git-core
-COPY --from=runtime-prep /lib/libz.so.1 /lib/libz.so.1
-COPY --from=runtime-prep /usr/lib/libpcre2-8.so.0 /usr/lib/libpcre2-8.so.0
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    sed -i '/^nonroot:/d' /etc/passwd && \
+    sed -i '/^nonroot:/d' /etc/group && \
+    printf 'ai-mr-comment:x:65532:65532::/home/nonroot:/bin/sh\n' >> /etc/passwd && \
+    printf 'ai-mr-comment:x:65532:\n' >> /etc/group
 
 COPY --from=builder /out/ai-mr-comment /usr/local/bin/ai-mr-comment
 
-USER aiuser
+ENV HOME=/tmp
+USER ai-mr-comment
 
 ENTRYPOINT ["ai-mr-comment"]
 CMD ["--help"]
