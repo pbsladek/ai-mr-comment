@@ -100,6 +100,12 @@ jobs:
             "dist/installer-manifest.json.pem" \
             --clobber
 
+      - name: Verify release assets
+        if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/verify-release-assets.sh "${{ steps.release_meta.outputs.tag }}"
+
       - name: Check Docker publish credentials
         if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
         id: docker_creds
