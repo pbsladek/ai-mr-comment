@@ -6,7 +6,6 @@ TAG=""
 COMMIT_SHA=""
 OUT_PATH="installer-manifest.json"
 BASH_PATH="scripts/bootstrap-install.sh"
-PS1_PATH="scripts/bootstrap-install.ps1"
 
 usage() {
   cat <<'EOF'
@@ -21,7 +20,6 @@ Options:
   --commit <sha>           Tag target commit SHA (required)
   --out <path>             Output file path (default: installer-manifest.json)
   --bash-path <path>       Bootstrap bash script path in repo (default: scripts/bootstrap-install.sh)
-  --ps1-path <path>        Bootstrap PowerShell script path in repo (default: scripts/bootstrap-install.ps1)
   -h, --help               Show this help
 EOF
 }
@@ -70,10 +68,6 @@ parse_args() {
         BASH_PATH="${2:?missing value for --bash-path}"
         shift 2
         ;;
-      --ps1-path)
-        PS1_PATH="${2:?missing value for --ps1-path}"
-        shift 2
-        ;;
       -h|--help)
         usage
         exit 0
@@ -112,10 +106,6 @@ validate_inputs() {
     echo "Bootstrap bash script not found: ${BASH_PATH}" >&2
     exit 1
   fi
-  if [ ! -f "${PS1_PATH}" ]; then
-    echo "Bootstrap PowerShell script not found: ${PS1_PATH}" >&2
-    exit 1
-  fi
 }
 
 main() {
@@ -124,12 +114,10 @@ main() {
   require_cmd date
   validate_inputs
 
-  local bash_sha ps1_sha generated_at bash_url ps1_url
+  local bash_sha generated_at bash_url
   bash_sha="$(sha256_file "${BASH_PATH}")"
-  ps1_sha="$(sha256_file "${PS1_PATH}")"
   generated_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   bash_url="https://raw.githubusercontent.com/${REPO}/${COMMIT_SHA}/${BASH_PATH}"
-  ps1_url="https://raw.githubusercontent.com/${REPO}/${COMMIT_SHA}/${PS1_PATH}"
 
   cat > "${OUT_PATH}" <<EOF
 {
@@ -144,11 +132,6 @@ main() {
       "path": "${BASH_PATH}",
       "url": "${bash_url}",
       "sha256": "${bash_sha}"
-    },
-    "powershell": {
-      "path": "${PS1_PATH}",
-      "url": "${ps1_url}",
-      "sha256": "${ps1_sha}"
     }
   }
 }

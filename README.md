@@ -89,7 +89,7 @@ brew upgrade ai-mr-comment
 
 Download the latest binary for your OS from the [Releases](https://github.com/pbsladek/ai-mr-comment/releases) page.
 
-For script-based installers and advanced verification flow, see `scripts/install.sh` and `scripts/install.ps1`.
+For script-based installers and advanced verification flow, see `scripts/install.sh`.
 
 ### Docker
 

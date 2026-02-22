@@ -24,9 +24,7 @@ manifest_tag="$(jq -r '.tag' "${out}")"
 manifest_commit="$(jq -r '.commit_sha' "${out}")"
 bootstrap_commit="$(jq -r '.bootstrap.commit_sha' "${out}")"
 bash_url="$(jq -r '.bootstrap.bash.url' "${out}")"
-ps1_url="$(jq -r '.bootstrap.powershell.url' "${out}")"
 bash_sha="$(jq -r '.bootstrap.bash.sha256' "${out}")"
-ps1_sha="$(jq -r '.bootstrap.powershell.sha256' "${out}")"
 
 if [ "${manifest_repo}" != "${repo}" ]; then
   echo "unexpected repository in manifest: ${manifest_repo}" >&2
@@ -48,25 +46,15 @@ if [ "${bash_url}" != "https://raw.githubusercontent.com/${repo}/${commit}/scrip
   echo "unexpected bootstrap bash URL: ${bash_url}" >&2
   exit 1
 fi
-if [ "${ps1_url}" != "https://raw.githubusercontent.com/${repo}/${commit}/scripts/bootstrap-install.ps1" ]; then
-  echo "unexpected bootstrap powershell URL: ${ps1_url}" >&2
-  exit 1
-fi
 
 if command -v sha256sum >/dev/null 2>&1; then
   expected_bash_sha="$(sha256sum "${SCRIPT_DIR}/bootstrap-install.sh" | awk '{print $1}')"
-  expected_ps1_sha="$(sha256sum "${SCRIPT_DIR}/bootstrap-install.ps1" | awk '{print $1}')"
 else
   expected_bash_sha="$(shasum -a 256 "${SCRIPT_DIR}/bootstrap-install.sh" | awk '{print $1}')"
-  expected_ps1_sha="$(shasum -a 256 "${SCRIPT_DIR}/bootstrap-install.ps1" | awk '{print $1}')"
 fi
 
 if [ "${bash_sha}" != "${expected_bash_sha}" ]; then
   echo "unexpected bootstrap bash sha256 in manifest" >&2
-  exit 1
-fi
-if [ "${ps1_sha}" != "${expected_ps1_sha}" ]; then
-  echo "unexpected bootstrap powershell sha256 in manifest" >&2
   exit 1
 fi
 
