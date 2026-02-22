@@ -35,26 +35,10 @@ jobs:
         env:
           OLLAMA_VERSION: "0.16.3"
           OLLAMA_SHA256: "0c0bb0ff7cc77079f259e75ba4f3494e4ab3d33af49b62644f9880ec50329fed"
-        run: |
-          set -euo pipefail
-          curl -fsSL "https://github.com/ollama/ollama/releases/download/v${OLLAMA_VERSION}/ollama-linux-amd64.tar.zst" -o /tmp/ollama-linux-amd64.tar.zst
-          echo "${OLLAMA_SHA256}  /tmp/ollama-linux-amd64.tar.zst" | sha256sum -c -
-          sudo tar --zstd -xvf /tmp/ollama-linux-amd64.tar.zst -C /usr
-          ollama --version
+        run: .github/scripts/install-ollama-pinned.sh "${OLLAMA_VERSION}" "${OLLAMA_SHA256}"
 
       - name: Start Ollama
-        run: |
-          set -euo pipefail
-          nohup ollama serve > /tmp/ollama.log 2>&1 &
-          for i in {1..60}; do
-            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "Ollama failed to start"
-          tail -n 200 /tmp/ollama.log || true
-          exit 1
+        run: .github/scripts/start-ollama.sh
 
       - name: Pull matrix model
         run: ollama pull ${{ matrix.model }}
@@ -76,64 +60,11 @@ jobs:
           AI_MR_COMMENT_OLLAMA_ENDPOINT: http://127.0.0.1:11434/api/generate
           PROMPTFOO_MAX_CONCURRENCY: "1"
           PROMPTFOO_EVAL_TIMEOUT_MS: "300000"
-        run: |
-          set -euo pipefail
-          if make eval-quality > /tmp/promptfoo-eval.log 2>&1; then
-            echo "promptfoo eval completed successfully"
-          else
-            status=$?
-            echo "promptfoo eval failed with exit code ${status}"
-            echo "Last 120 lines of eval log:"
-            tail -n 120 /tmp/promptfoo-eval.log || true
-            exit ${status}
-          fi
+        run: .github/scripts/run-promptfoo-eval.sh
 
       - name: Summarize quality evals
         if: ${{ matrix.run_evals }}
-        run: |
-          set -euo pipefail
-          RESULT_FILE="evals/promptfoo-results.json"
-
-          if [ -f "$RESULT_FILE" ]; then
-            jq -r '
-              def eval_rows:
-                if (.results | type) == "array" then .results
-                elif (.results | type) == "object" and (.results.results | type) == "array" then .results.results
-                else []
-                end;
-              eval_rows as $r |
-              "Promptfoo summary: total=\($r|length) pass=\($r|map(objects | select(.success == true or (.gradingResult.pass // false) == true))|length) fail=\($r|map(objects | select((.success == false or (.gradingResult.pass // true) == false) and (.error == null) and (.failureReason != 2)) )|length) error=\($r|map(objects | select(.error != null or .failureReason == 2))|length)"
-            ' "$RESULT_FILE" | tee /tmp/promptfoo-summary.txt
-
-            {
-              echo "### Promptfoo Eval Summary (${{ matrix.lane }})"
-              cat /tmp/promptfoo-summary.txt
-              echo ""
-              echo "Top failures/errors:"
-              jq -r '
-                def eval_rows:
-                  if (.results | type) == "array" then .results
-                  elif (.results | type) == "object" and (.results.results | type) == "array" then .results.results
-                  else []
-                  end;
-                eval_rows[]
-                | select(type == "object")
-                | select(.error != null or .success == false or ((.gradingResult.pass // true) == false))
-                | "- " + (.description // .testCase.description // "unnamed test") + " :: " + (((.error // .gradingResult.reason // (if .failureReason == 2 then "error" else "failed" end)) | tostring))
-              ' "$RESULT_FILE" | head -n 15
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "promptfoo results file not found at $RESULT_FILE" | tee /tmp/promptfoo-summary.txt
-            {
-              echo "### Promptfoo Eval Summary (${{ matrix.lane }})"
-              cat /tmp/promptfoo-summary.txt
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-          if [ "${{ steps.quality_evals.outcome }}" != "success" ]; then
-            echo "promptfoo eval failed; see summary above and evals/promptfoo-results.json in workspace" >&2
-            exit 1
-          fi
+        run: .github/scripts/summarize-promptfoo-eval.sh "${{ matrix.lane }}" "${{ steps.quality_evals.outcome }}"
 
       - name: Ollama logs on failure
         if: failure()

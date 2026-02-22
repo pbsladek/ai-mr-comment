@@ -1,9 +1,14 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.6.0)"
+        required: true
+        type: string
 
 permissions: read-all
 
@@ -18,6 +23,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.event.release.tag_name || github.ref_name }}
 
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -39,9 +45,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Prepare release metadata
+        id: release_meta
+        run: .github/scripts/prepare-release-metadata.sh "${{ github.event.inputs.tag || github.event.release.tag_name || github.ref_name }}" "${GITHUB_OUTPUT}"
+
       - name: Generate installer manifest
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ steps.release_meta.outputs.tag }}
         run: |
           set -euo pipefail
           COMMIT_SHA="$(git rev-list -n 1 "${TAG}")"
@@ -63,7 +73,7 @@ jobs:
       - name: Upload installer manifest assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ steps.release_meta.outputs.tag }}
         run: |
           set -euo pipefail
           gh release upload "${TAG}" \
@@ -71,3 +81,16 @@ jobs:
             "dist/installer-manifest.json.sig" \
             "dist/installer-manifest.json.pem" \
             --clobber
+
+      - name: Homebrew tap dispatch skipped (token missing)
+        if: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN == '' }}
+        run: echo "HOMEBREW_TAP_DISPATCH_TOKEN is not set; skipping homebrew-tap dispatch."
+
+      - name: Dispatch release metadata to Homebrew tap
+        if: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN }}
+          TAG: ${{ steps.release_meta.outputs.tag }}
+          SOURCE_URL: ${{ steps.release_meta.outputs.source_url }}
+          SOURCE_SHA256: ${{ steps.release_meta.outputs.source_sha256 }}
+        run: .github/scripts/dispatch-homebrew-tap.sh "${TAG}" "${SOURCE_URL}" "${SOURCE_SHA256}"
