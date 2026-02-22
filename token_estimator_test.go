@@ -90,6 +90,18 @@ func TestEstimateCost(t *testing.T) {
 	}
 }
 
+func TestEstimateCost_NonPositiveTokens(t *testing.T) {
+	if got := EstimateCost("gpt-4o-mini", 0); got != 0 {
+		t.Fatalf("expected 0 cost for zero tokens, got %f", got)
+	}
+	if got := EstimateCost("gpt-4o-mini", -1); got != 0 {
+		t.Fatalf("expected 0 cost for negative tokens, got %f", got)
+	}
+	if got := EstimateCost("gpt-4o-mini", math.MinInt32); got != 0 {
+		t.Fatalf("expected 0 cost for MinInt32 tokens, got %f", got)
+	}
+}
+
 func TestGeminiTokenEstimator_Mock(t *testing.T) {
 	// Create a mock server
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
