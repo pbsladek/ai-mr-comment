@@ -422,6 +422,19 @@ jobs:
           REQUIRE_DOCKER_PROVENANCE: ${{ needs.docker.outputs.docker_enabled }}
         run: bash .github/scripts/write-release-summary.sh "${TAG}" "${REQUIRE_DOCKER_PROVENANCE}"
 
+  homebrew_tap:
+    name: Dispatch Homebrew Tap Update
+    needs: [validate, artifacts]
+    if: ${{ needs.validate.outputs.skip != 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 1
+          ref: ${{ needs.validate.outputs.tag_commit }}
+
       - name: Dispatch release metadata to Homebrew tap
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN }}
