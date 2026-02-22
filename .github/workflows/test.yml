@@ -35,6 +35,14 @@ jobs:
       - name: Validate Installer Scripts
         run: .github/scripts/validate-installer-scripts.sh
 
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck
+
+      - name: Lint Shell Scripts
+        run: make lint-shell
+
       - name: Run Tests
         run: make test
 
