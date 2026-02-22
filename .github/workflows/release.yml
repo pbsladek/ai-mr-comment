@@ -366,7 +366,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.validate.outputs.tag }}
-        run: .github/scripts/download-release-asset.sh "${TAG}" "checksums.txt" "dist"
+        run: bash .github/scripts/download-release-asset.sh "${TAG}" "checksums.txt" "dist"
 
       - name: Generate immutable release manifest
         env:
