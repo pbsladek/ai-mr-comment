@@ -20,6 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      attestations: write
       id-token: write # required for keyless cosign signing
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -94,17 +95,10 @@ jobs:
           TAG: ${{ steps.release_meta.outputs.tag }}
         run: |
           set -euo pipefail
-          gh release upload "${TAG}" \
+          bash .github/scripts/upload-release-assets.sh "${TAG}" \
             "dist/installer-manifest.json" \
             "dist/installer-manifest.json.sig" \
-            "dist/installer-manifest.json.pem" \
-            --clobber
-
-      - name: Verify release assets
-        if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: .github/scripts/verify-release-assets.sh "${{ steps.release_meta.outputs.tag }}"
+            "dist/installer-manifest.json.pem"
 
       - name: Check Docker publish credentials
         if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
@@ -160,6 +154,7 @@ jobs:
 
       - name: Build and push Docker image
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
+        id: docker_build
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: .
@@ -169,6 +164,89 @@ jobs:
           tags: ${{ steps.docker_tags.outputs.tags }}
           build-args: |
             VERSION=${{ steps.release_meta.outputs.tag }}
+
+      - name: Attest release archives provenance
+        if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
+        id: attest_binaries
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-checksums: dist/checksums.txt
+
+      - name: Stage archive provenance bundle
+        if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
+        run: cp "${{ steps.attest_binaries.outputs.bundle-path }}" "dist/provenance-binaries.intoto.jsonl"
+
+      - name: Attest Docker image provenance
+        if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
+        id: attest_docker
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-name: docker.io/pwbsladek/ai-mr-comment
+          subject-digest: ${{ steps.docker_build.outputs.digest }}
+
+      - name: Stage Docker provenance bundle
+        if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
+        run: cp "${{ steps.attest_docker.outputs.bundle-path }}" "dist/provenance-docker.intoto.jsonl"
+
+      - name: Generate immutable release manifest
+        if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
+        env:
+          TAG: ${{ steps.release_meta.outputs.tag }}
+          SOURCE_URL: ${{ steps.release_meta.outputs.source_url }}
+          SOURCE_SHA256: ${{ steps.release_meta.outputs.source_sha256 }}
+          DOCKER_IMAGE: pwbsladek/ai-mr-comment
+          DOCKER_TAGS: ${{ steps.docker_tags.outputs.tags }}
+          DOCKER_DIGEST: ${{ steps.docker_build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          COMMIT_SHA="$(git rev-list -n 1 "${TAG}")"
+          bash .github/scripts/generate-release-manifest.sh \
+            "${TAG}" \
+            "${COMMIT_SHA}" \
+            "${SOURCE_URL}" \
+            "${SOURCE_SHA256}" \
+            "${DOCKER_IMAGE}" \
+            "${DOCKER_TAGS}" \
+            "${DOCKER_DIGEST}" \
+            "dist/release-manifest.json"
+
+      - name: Sign immutable release manifest
+        if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
+        run: |
+          set -euo pipefail
+          cosign sign-blob \
+            --yes \
+            --output-signature "dist/release-manifest.json.sig" \
+            --output-certificate "dist/release-manifest.json.pem" \
+            "dist/release-manifest.json"
+
+      - name: Upload release manifest and provenance assets
+        if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release_meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          bash .github/scripts/upload-release-assets.sh "${TAG}" \
+            "dist/release-manifest.json" \
+            "dist/release-manifest.json.sig" \
+            "dist/release-manifest.json.pem" \
+            "dist/provenance-binaries.intoto.jsonl" \
+            "dist/provenance-docker.intoto.jsonl"
+
+      - name: Verify release assets
+        if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REQUIRE_DOCKER_PROVENANCE: ${{ steps.docker_creds.outputs.enabled }}
+        run: .github/scripts/verify-release-assets.sh "${{ steps.release_meta.outputs.tag }}" "pbsladek/ai-mr-comment" "${REQUIRE_DOCKER_PROVENANCE}"
+
+      - name: Publish release summary
+        if: ${{ steps.resolve_tag.outputs.skip != 'true' }}
+        env:
+          TAG: ${{ steps.release_meta.outputs.tag }}
+          REQUIRE_DOCKER_PROVENANCE: ${{ steps.docker_creds.outputs.enabled }}
+        run: bash .github/scripts/write-release-summary.sh "${TAG}" "${REQUIRE_DOCKER_PROVENANCE}"
 
       - name: Dispatch release metadata to Homebrew tap
         if: ${{ steps.resolve_tag.outputs.skip != 'true' }}

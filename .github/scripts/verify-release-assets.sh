@@ -3,6 +3,7 @@ set -euo pipefail
 
 tag="${1:?tag is required}"
 repo="${2:-pbsladek/ai-mr-comment}"
+require_docker_provenance="${3:-false}"
 
 if [ -z "${GH_TOKEN:-}" ]; then
   echo "GH_TOKEN is required to verify release assets." >&2
@@ -14,13 +15,29 @@ required_exact=(
   "installer-manifest.json"
   "installer-manifest.json.sig"
   "installer-manifest.json.pem"
+  "release-manifest.json"
+  "release-manifest.json.sig"
+  "release-manifest.json.pem"
+  "provenance-binaries.intoto.jsonl"
 )
+
+if [ "${require_docker_provenance}" = "true" ]; then
+  required_exact+=("provenance-docker.intoto.jsonl")
+fi
 
 max_attempts=6
 sleep_seconds=5
 
 for attempt in $(seq 1 "${max_attempts}"); do
-  mapfile -t assets < <(gh release view "${tag}" --repo "${repo}" --json assets --jq '.assets[].name')
+  if ! mapfile -t assets < <(gh release view "${tag}" --repo "${repo}" --json assets --jq '.assets[].name'); then
+    if [ "${attempt}" -lt "${max_attempts}" ]; then
+      echo "Attempt ${attempt}/${max_attempts}: release not ready yet; retrying in ${sleep_seconds}s..."
+      sleep "${sleep_seconds}"
+      continue
+    fi
+    echo "Failed to query release ${tag} in ${repo}." >&2
+    exit 1
+  fi
 
   missing=()
   for name in "${required_exact[@]}"; do
