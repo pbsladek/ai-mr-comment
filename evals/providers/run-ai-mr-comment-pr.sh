@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [ "$#" -lt 1 ]; then
-  echo "usage: run-ai-mr-comment.sh <diff-path>" >&2
+  echo "usage: run-ai-mr-comment-pr.sh <diff-path>" >&2
   exit 1
 fi
 
@@ -26,7 +26,7 @@ fi
 bin="${AMC_BIN:-${repo_root}/dist/ai-mr-comment}"
 provider="${AMC_EVAL_PROVIDER:-ollama}"
 model="${AMC_EVAL_MODEL:-llama3.2:1b}"
-template="${AMC_EVAL_TEMPLATE:-technical}"
+template="${AMC_EVAL_TEMPLATE:-default}"
 extra_flags="${AMC_EVAL_FLAGS:-}"
 
 if [ -x "${bin}" ]; then
@@ -43,6 +43,7 @@ if [ -n "${extra_flags}" ]; then
     --model "${model}" \
     --template "${template}" \
     --file "${diff_path}" \
+    --title \
     --format json \
     "${extra[@]}"
 else
@@ -51,5 +52,6 @@ else
     --model "${model}" \
     --template "${template}" \
     --file "${diff_path}" \
+    --title \
     --format json
 fi

@@ -1,0 +1,49 @@
+description: "ai-mr-comment commit message quality evals on curated git diffs"
+
+prompts:
+  - "{{diff_path}}"
+
+providers:
+  - id: "exec:bash ./providers/run-ai-mr-comment-commit.sh"
+    label: "ai-mr-comment-commit"
+
+tests:
+  - description: "Commit message: README wording change should be docs-focused"
+    vars:
+      diff_path: "testdata/simple.diff"
+      min_score: 0.7
+      expected_keywords: "readme|docs|wording|project"
+      forbidden_terms: "sql injection|race condition"
+    assert:
+      - type: javascript
+        value: "file://./scorers/commit-quality.js"
+
+  - description: "Commit message: multi-file hello world tweak and helper comment"
+    vars:
+      diff_path: "testdata/multiple-files.diff"
+      min_score: 0.7
+      expected_keywords: "hello|world|comment|utils"
+      forbidden_terms: "sql injection|auth bypass"
+    assert:
+      - type: javascript
+        value: "file://./scorers/commit-quality.js"
+
+  - description: "Commit message: rename/move heavy diff should mention move or rename"
+    vars:
+      diff_path: "testdata/rename-move.diff"
+      min_score: 0.7
+      expected_keywords: "rename|move|utils|config"
+      forbidden_terms: "sql injection|panic"
+    assert:
+      - type: javascript
+        value: "file://./scorers/commit-quality.js"
+
+  - description: "Commit message: deleted legacy files should indicate removal"
+    vars:
+      diff_path: "testdata/deleted-files-only.diff"
+      min_score: 0.7
+      expected_keywords: "remove|delete|legacy|cleanup"
+      forbidden_terms: "new feature|add"
+    assert:
+      - type: javascript
+        value: "file://./scorers/commit-quality.js"

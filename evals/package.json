@@ -8,6 +8,9 @@
   },
   "scripts": {
     "eval": "promptfoo eval -c promptfooconfig.yaml",
+    "eval:commit": "promptfoo eval -c promptfooconfig-commit.yaml",
+    "eval:pr": "promptfoo eval -c promptfooconfig-pr.yaml",
+    "eval:writing": "npm run eval:commit && npm run eval:pr",
     "view": "promptfoo view"
   },
   "devDependencies": {

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	anthropicopt "github.com/anthropics/anthropic-sdk-go/option"
@@ -651,5 +652,45 @@ func TestStreamToWriter_UnsupportedProvider(t *testing.T) {
 	_, err := streamToWriter(context.Background(), cfg, "unknown", "sys", "diff", io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "unsupported provider") {
 		t.Errorf("expected unsupported provider error, got %v", err)
+	}
+}
+
+func TestGetOllamaHTTPTimeout_Default(t *testing.T) {
+	t.Setenv("AI_MR_COMMENT_OLLAMA_TIMEOUT_MS", "")
+	got := getOllamaHTTPTimeout()
+	if got != defaultOllamaHTTPTimeout {
+		t.Fatalf("expected default timeout %v, got %v", defaultOllamaHTTPTimeout, got)
+	}
+}
+
+func TestGetOllamaHTTPTimeout_Override(t *testing.T) {
+	t.Setenv("AI_MR_COMMENT_OLLAMA_TIMEOUT_MS", "300000")
+	got := getOllamaHTTPTimeout()
+	if got != 5*time.Minute {
+		t.Fatalf("expected 5m timeout, got %v", got)
+	}
+}
+
+func TestGetOllamaHTTPTimeout_InvalidFallback(t *testing.T) {
+	t.Setenv("AI_MR_COMMENT_OLLAMA_TIMEOUT_MS", "not-a-number")
+	got := getOllamaHTTPTimeout()
+	if got != defaultOllamaHTTPTimeout {
+		t.Fatalf("expected fallback timeout %v, got %v", defaultOllamaHTTPTimeout, got)
+	}
+}
+
+func TestGetOllamaHTTPTimeout_NonPositiveFallback(t *testing.T) {
+	t.Setenv("AI_MR_COMMENT_OLLAMA_TIMEOUT_MS", "0")
+	got := getOllamaHTTPTimeout()
+	if got != defaultOllamaHTTPTimeout {
+		t.Fatalf("expected fallback timeout %v, got %v", defaultOllamaHTTPTimeout, got)
+	}
+}
+
+func TestGetOllamaHTTPTimeout_WhitespaceTrimmed(t *testing.T) {
+	t.Setenv("AI_MR_COMMENT_OLLAMA_TIMEOUT_MS", " 120000 ")
+	got := getOllamaHTTPTimeout()
+	if got != 2*time.Minute {
+		t.Fatalf("expected 2m timeout, got %v", got)
 	}
 }

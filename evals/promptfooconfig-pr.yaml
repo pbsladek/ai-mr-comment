@@ -1,0 +1,53 @@
+description: "ai-mr-comment PR title/description quality evals on curated git diffs"
+
+prompts:
+  - "{{diff_path}}"
+
+providers:
+  - id: "exec:bash ./providers/run-ai-mr-comment-pr.sh"
+    label: "ai-mr-comment-pr"
+
+tests:
+  - description: "PR output: README wording diff should produce docs/readme-focused summary"
+    vars:
+      diff_path: "testdata/simple.diff"
+      min_score: 0.75
+      expected_title_keywords: "readme|docs|project"
+      expected_description_keywords: "key changes|why|checklist|notes"
+      forbidden_terms: "sql injection|race condition"
+    assert:
+      - type: javascript
+        value: "file://./scorers/pr-quality.js"
+
+  - description: "PR output: multi-file diff should mention hello world/comment changes"
+    vars:
+      diff_path: "testdata/multiple-files.diff"
+      min_score: 0.75
+      expected_title_keywords: "hello|world|main"
+      expected_description_keywords: "key changes|why|checklist|notes"
+      forbidden_terms: "sql injection|auth bypass"
+    assert:
+      - type: javascript
+        value: "file://./scorers/pr-quality.js"
+
+  - description: "PR output: rename/move diff should summarize file moves/refactor"
+    vars:
+      diff_path: "testdata/rename-move.diff"
+      min_score: 0.75
+      expected_title_keywords: "rename|move|refactor"
+      expected_description_keywords: "key changes|why|checklist|notes"
+      forbidden_terms: "sql injection|panic"
+    assert:
+      - type: javascript
+        value: "file://./scorers/pr-quality.js"
+
+  - description: "PR output: deleted legacy files should indicate cleanup/removal"
+    vars:
+      diff_path: "testdata/deleted-files-only.diff"
+      min_score: 0.75
+      expected_title_keywords: "remove|delete|cleanup|legacy"
+      expected_description_keywords: "key changes|why|checklist|notes"
+      forbidden_terms: "new feature|add endpoint"
+    assert:
+      - type: javascript
+        value: "file://./scorers/pr-quality.js"
