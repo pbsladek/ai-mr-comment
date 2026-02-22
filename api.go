@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,7 +38,23 @@ var (
 	geminiClientMu        sync.Mutex
 )
 
-var ollamaHTTPClient = &http.Client{Timeout: 2 * time.Minute}
+const defaultOllamaHTTPTimeout = 2 * time.Minute
+
+func getOllamaHTTPTimeout() time.Duration {
+	// Optional override for slower local/CI CPU inference runs.
+	// Example: AI_MR_COMMENT_OLLAMA_TIMEOUT_MS=300000
+	raw := strings.TrimSpace(os.Getenv("AI_MR_COMMENT_OLLAMA_TIMEOUT_MS"))
+	if raw == "" {
+		return defaultOllamaHTTPTimeout
+	}
+	ms, err := strconv.Atoi(raw)
+	if err != nil || ms <= 0 {
+		return defaultOllamaHTTPTimeout
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+var ollamaHTTPClient = &http.Client{Timeout: getOllamaHTTPTimeout()}
 
 // getGeminiClient returns a cached *genai.Client for apiKey, creating it on
 // first use. If the API key changes (rare in practice) the cache is refreshed.

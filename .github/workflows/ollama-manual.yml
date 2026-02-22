@@ -74,7 +74,19 @@ jobs:
           AMC_EVAL_PROVIDER: ollama
           AMC_EVAL_MODEL: ${{ matrix.model }}
           AI_MR_COMMENT_OLLAMA_ENDPOINT: http://127.0.0.1:11434/api/generate
-        run: make eval-quality
+          PROMPTFOO_MAX_CONCURRENCY: "1"
+          PROMPTFOO_EVAL_TIMEOUT_MS: "300000"
+        run: |
+          set -euo pipefail
+          if make eval-quality > /tmp/promptfoo-eval.log 2>&1; then
+            echo "promptfoo eval completed successfully"
+          else
+            status=$?
+            echo "promptfoo eval failed with exit code ${status}"
+            echo "Last 120 lines of eval log:"
+            tail -n 120 /tmp/promptfoo-eval.log || true
+            exit ${status}
+          fi
 
       - name: Summarize quality evals
         if: ${{ matrix.run_evals }}
@@ -84,8 +96,13 @@ jobs:
 
           if [ -f "$RESULT_FILE" ]; then
             jq -r '
-              .results as $r |
-              "Promptfoo summary: total=\($r|length) pass=\($r|map(select((.gradingResult.pass // .pass // false)==true))|length) fail=\($r|map(select((.gradingResult.pass // .pass // true)==false and (.error == null)))|length) error=\($r|map(select(.error != null))|length)"
+              def eval_rows:
+                if (.results | type) == "array" then .results
+                elif (.results | type) == "object" and (.results.results | type) == "array" then .results.results
+                else []
+                end;
+              eval_rows as $r |
+              "Promptfoo summary: total=\($r|length) pass=\($r|map(objects | select(.success == true or (.gradingResult.pass // false) == true))|length) fail=\($r|map(objects | select((.success == false or (.gradingResult.pass // true) == false) and (.error == null) and (.failureReason != 2)) )|length) error=\($r|map(objects | select(.error != null or .failureReason == 2))|length)"
             ' "$RESULT_FILE" | tee /tmp/promptfoo-summary.txt
 
             {
@@ -94,9 +111,15 @@ jobs:
               echo ""
               echo "Top failures/errors:"
               jq -r '
-                .results[]
-                | select(.error != null or ((.gradingResult.pass // .pass // true)==false))
-                | "- " + (.description // .test?.description // "unnamed test") + " :: " + (.error?.message // .gradingResult?.reason // .failureReason // "failed")
+                def eval_rows:
+                  if (.results | type) == "array" then .results
+                  elif (.results | type) == "object" and (.results.results | type) == "array" then .results.results
+                  else []
+                  end;
+                eval_rows[]
+                | select(type == "object")
+                | select(.error != null or .success == false or ((.gradingResult.pass // true) == false))
+                | "- " + (.description // .testCase.description // "unnamed test") + " :: " + (((.error // .gradingResult.reason // (if .failureReason == 2 then "error" else "failed" end)) | tostring))
               ' "$RESULT_FILE" | head -n 15
             } >> "$GITHUB_STEP_SUMMARY"
           else

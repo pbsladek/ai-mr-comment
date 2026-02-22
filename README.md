@@ -780,6 +780,9 @@ make test-fuzz
 # Run response-quality evals on curated diff fixtures (promptfoo)
 make eval-quality
 
+# Run writing-quality evals for commit messages + PR title/description
+make eval-quality-writing
+
 # Install/update pinned eval dependencies only
 make eval-quality-deps
 
@@ -795,6 +798,7 @@ Open GitHub Actions, select that workflow, then click **Run workflow**.
 
 `make eval-quality` runs end-to-end evals against fixture diffs in `evals/` and scores the generated review for recall, severity coverage, actionability, and false positives.
 In CI, evals write a compact JSON report to `evals/promptfoo-results.json` and print a short summary.
+CI uses serialized eval calls and extended per-test timeout for CPU models (`PROMPTFOO_MAX_CONCURRENCY=1`, `PROMPTFOO_EVAL_TIMEOUT_MS=300000`).
 
 Prerequisites:
 - Node.js + `npm`
@@ -811,6 +815,9 @@ Useful overrides:
 ```bash
 # Example: run evals against local Ollama 1B model
 AMC_EVAL_PROVIDER=ollama AMC_EVAL_MODEL=llama3.2:1b make eval-quality
+
+# Example: run commit + PR writing evals against local Ollama 8B model
+AMC_EVAL_PROVIDER=ollama AMC_EVAL_MODEL=llama3.1:8b AMC_EVAL_TEMPLATE=default make eval-quality-writing
 
 # Open the latest promptfoo report UI
 make eval-quality-view

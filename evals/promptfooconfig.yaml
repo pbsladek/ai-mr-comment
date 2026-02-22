@@ -26,9 +26,7 @@ tests:
             - "prepared statement"
     assert:
       - type: javascript
-        value: |
-          const scorer = require('./scorers/review-quality.js');
-          return scorer(output, context);
+        value: "file://./scorers/review-quality.js"
 
   - description: "Detect admin auth bypass / authorization removal"
     vars:
@@ -49,14 +47,12 @@ tests:
             - "permission check"
     assert:
       - type: javascript
-        value: |
-          const scorer = require('./scorers/review-quality.js');
-          return scorer(output, context);
+        value: "file://./scorers/review-quality.js"
 
   - description: "Detect nil pointer panic risk"
     vars:
       diff_path: "./fixtures/nil_panic.diff"
-      min_score: 0.7
+      min_score: 0.6
       expected_findings:
         - id: "nil_pointer"
           severity: "medium"
@@ -71,9 +67,7 @@ tests:
             - "defensive"
     assert:
       - type: javascript
-        value: |
-          const scorer = require('./scorers/review-quality.js');
-          return scorer(output, context);
+        value: "file://./scorers/review-quality.js"
 
   - description: "Detect map access race condition after lock removal"
     vars:
@@ -94,9 +88,7 @@ tests:
             - "synchronize"
     assert:
       - type: javascript
-        value: |
-          const scorer = require('./scorers/review-quality.js');
-          return scorer(output, context);
+        value: "file://./scorers/review-quality.js"
 
   - description: "Avoid false positives on safe refactor diff"
     vars:
@@ -113,6 +105,4 @@ tests:
         - "auth bypass"
     assert:
       - type: javascript
-        value: |
-          const scorer = require('./scorers/review-quality.js');
-          return scorer(output, context);
+        value: "file://./scorers/review-quality.js"

@@ -32,6 +32,9 @@ dist/
 # Promptfoo eval artifacts
 .promptfoo/
 evals/node_modules/
+evals/promptfoo-results.json
+evals/promptfoo-commit-results.json
+evals/promptfoo-pr-results.json
 
 # IDE and editor files
 .vscode/
