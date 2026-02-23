@@ -29,6 +29,38 @@ Valid types: feat, fix, docs, style, refactor, test, chore, perf, ci, build
 The scope is optional; omit it if it would be too broad or redundant.
 Example: feat(auth): add JWT refresh token support`
 
+// commitMsgBodyPrompt is the system prompt used when --commit-msg --body is set.
+// It instructs the model to produce a multi-line git commit message:
+// a conventional subject line, a blank line, and a markdown body suitable
+// for use as a GitHub/GitLab PR/MR title + description.
+const commitMsgBodyPrompt = `Generate a git commit message for the following diff.
+Output only the commit message — no explanation, no quotes, no code fences.
+Format: subject line, blank line, then a markdown body.
+
+Subject line rules:
+- Under 72 characters
+- Imperative mood (e.g. "Add", "Fix", "Refactor")
+- Follow Conventional Commits format: type(scope): description
+- Valid types: feat, fix, docs, style, refactor, test, chore, perf, ci, build
+- The scope is optional; omit it if it would be too broad or redundant
+
+Body rules:
+- Write for a developer opening a GitHub/GitLab PR — this text becomes the PR description
+- Use markdown: ## headings and bullet lists
+- Cover: what changed, why, and any notable implementation details
+- Keep it concise: 5-15 lines total
+- No filler phrases like "This commit..." or "In this PR..."
+
+Example:
+feat(auth): add JWT refresh token support
+
+## What Changed
+- Added /auth/refresh endpoint that issues a new access token
+- Refresh tokens are stored hashed in Redis with a 7-day TTL
+
+## Why
+Access tokens expire after 15 minutes; users were being logged out unexpectedly.`
+
 // changelogPrompt is the system prompt used by the changelog subcommand.
 // It instructs the model to produce a user-facing changelog entry in
 // Keep a Changelog markdown format, grouped by change type.

@@ -120,36 +120,78 @@ func isConventionalCommitLine(line string) bool {
 	return false
 }
 
-// enforceBreakingChange ensures a conventional commit message uses the feat!
-// type to signal a breaking change. If the message already has a ! it is
-// returned unchanged. Otherwise the type is rewritten (e.g. "feat" → "feat!",
-// "feat(scope)" → "feat!(scope)"). Non-conventional messages are prefixed with
-// "feat!: ".
-func enforceBreakingChange(msg string) string {
-	if strings.Contains(msg, "!") {
-		return msg
+// enforceBreakingChangeSubject rewrites a single-line conventional commit
+// subject to include the breaking-change marker (e.g. "feat" → "feat!").
+// If the subject already contains "!" it is returned unchanged.
+// Non-conventional subjects are prefixed with "feat!: ".
+func enforceBreakingChangeSubject(subject string) string {
+	if strings.Contains(subject, "!") {
+		return subject
 	}
 	types := []string{"feat", "fix", "chore", "refactor", "perf", "docs", "style", "test", "ci", "build"}
 	for _, t := range types {
 		// type(scope): description
-		scopePrefix := t + "("
-		if strings.HasPrefix(msg, scopePrefix) {
-			return t + "!" + msg[len(t):]
+		if strings.HasPrefix(subject, t+"(") {
+			return t + "!" + subject[len(t):]
 		}
 		// type: description
-		colonPrefix := t + ":"
-		if strings.HasPrefix(msg, colonPrefix) {
-			return t + "!" + msg[len(t):]
+		if strings.HasPrefix(subject, t+":") {
+			return t + "!" + subject[len(t):]
 		}
 	}
-	return "feat!: " + msg
+	return "feat!: " + subject
+}
+
+// enforceBreakingChange ensures a commit message (single- or multi-line) uses
+// the feat! type to signal a breaking change. Only the subject (first line) is
+// rewritten; the body (everything after the first newline) is preserved as-is.
+func enforceBreakingChange(msg string) string {
+	subject, rest, hasRest := strings.Cut(msg, "\n")
+	enforced := enforceBreakingChangeSubject(subject)
+	if hasRest {
+		return enforced + "\n" + rest
+	}
+	return enforced
+}
+
+// normalizeCommitBody lightly normalises a multi-line commit message returned
+// by the AI when --multi-line is set. Unlike normalizeCommitMessage it does NOT
+// collapse the output to a single line — the subject + body structure is kept.
+// It strips surrounding whitespace, normalises line endings, unwraps a single
+// fenced-code block if the model wrapped the whole output in one, and ensures
+// the subject line is a valid conventional commit (prepending "feat: " if not).
+func normalizeCommitBody(raw string) string {
+	// Normalise line endings.
+	out := strings.ReplaceAll(raw, "\r\n", "\n")
+	out = strings.ReplaceAll(out, "\r", "\n")
+	out = strings.TrimSpace(out)
+
+	// Strip a surrounding fenced code block if the model wrapped the output.
+	if strings.HasPrefix(out, "```") {
+		lines := strings.Split(out, "\n")
+		// Remove first line (``` or ```markdown etc.) and last line (```).
+		if len(lines) >= 2 && strings.HasPrefix(lines[len(lines)-1], "```") {
+			out = strings.TrimSpace(strings.Join(lines[1:len(lines)-1], "\n"))
+		}
+	}
+
+	// Validate the subject line; prepend "feat: " if it doesn't look conventional.
+	subject, rest, hasRest := strings.Cut(out, "\n")
+	subject = strings.TrimSpace(subject)
+	if !isConventionalCommitLine(subject) {
+		subject = "feat: " + subject
+	}
+	if hasRest {
+		return subject + "\n" + rest
+	}
+	return subject
 }
 
 // newRootCmd builds the root cobra command, wiring flags to the provided chatFn.
 // Accepting chatFn as a parameter allows tests to inject a mock without real API calls.
 func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
 	var commit, diffFilePath, outputPath, provider, modelOverride, templateName, format, prURL, clipboardFlag, systemPromptFlag, profileName string
-	var debug, staged, smartChunk, generateTitle, generateCommitMsg, verbose, exitCodeFlag, postFlag, estimate, autoYes, versionFlag bool
+	var debug, staged, smartChunk, generateTitle, generateCommitMsg, multiLine, verbose, exitCodeFlag, postFlag, estimate, autoYes, versionFlag bool
 	var exclude []string
 
 	rootCmd := &cobra.Command{
@@ -196,6 +238,9 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			}
 			if prURL != "" && (staged || commit != "" || diffFilePath != "") {
 				return errors.New("--pr cannot be combined with --staged, --commit, or --file")
+			}
+			if multiLine && !generateCommitMsg {
+				return errors.New("--multi-line requires --commit-msg")
 			}
 			if generateCommitMsg && generateTitle {
 				return errors.New("--commit-msg and --title cannot be used together")
@@ -339,9 +384,13 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			var commitMessage string
 			if generateCommitMsg {
 				// Skip description generation; produce only a commit message.
-				debugLog(cfg, "commit-msg: generating commit message with separate API call")
+				debugLog(cfg, "commit-msg: generating commit message with separate API call (multi-line=%v)", multiLine)
+				prompt := commitMsgPrompt
+				if multiLine {
+					prompt = commitMsgBodyPrompt
+				}
 				commitMessage, err = timedCall(cfg, "commit-msg", func() (string, error) {
-					return chatFn(cmd.Context(), cfg, cfg.Provider, commitMsgPrompt, diffContent)
+					return chatFn(cmd.Context(), cfg, cfg.Provider, prompt, diffContent)
 				})
 				if err != nil {
 					if cfg.Provider == Ollama && strings.Contains(err.Error(), "connection refused") {
@@ -349,7 +398,11 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 					}
 					return err
 				}
-				commitMessage = normalizeCommitMessage(commitMessage)
+				if multiLine {
+					commitMessage = normalizeCommitBody(commitMessage)
+				} else {
+					commitMessage = normalizeCommitMessage(commitMessage)
+				}
 			} else if smartChunk {
 				chunks := splitDiffByFile(diffContent)
 				debugLog(cfg, "smart-chunk: files=%d", len(chunks))
@@ -626,6 +679,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().BoolVar(&smartChunk, "smart-chunk", false, "Split large diffs by file, summarize each, then combine")
 	rootCmd.Flags().BoolVar(&generateTitle, "title", false, "Generate a concise MR/PR title in addition to the comment")
 	rootCmd.Flags().BoolVar(&generateCommitMsg, "commit-msg", false, "Generate a git commit message instead of a full MR/PR description")
+	rootCmd.Flags().BoolVar(&multiLine, "multi-line", false, "Generate a multi-line commit message (subject + body) when used with --commit-msg; body pre-fills the PR/MR description")
 	rootCmd.Flags().BoolVar(&exitCodeFlag, "exit-code", false, "Exit with code 2 if the AI detects critical issues in the diff")
 	rootCmd.Flags().BoolVar(&postFlag, "post", false, "Post the generated comment back to the GitHub PR or GitLab MR (requires --pr)")
 	rootCmd.Flags().StringVar(&systemPromptFlag, "system-prompt", "", `Override the system prompt for this run. Use @path to read from a file (e.g. --system-prompt=@review.txt). Mutually exclusive with --template.`)
@@ -972,7 +1026,7 @@ func newModelsCmd() *cobra.Command {
 // AI commit message, commits, and pushes — all in one step.
 func newQuickCommitCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
 	var provider, modelOverride, format, profileName string
-	var dryRun, noPush, breaking bool
+	var dryRun, noPush, breaking, multiLine bool
 
 	cmd := &cobra.Command{
 		Use:   "quick-commit",
@@ -1040,6 +1094,9 @@ remote. Use --dry-run to preview the generated message without committing.`,
 
 			// Generate commit message via AI.
 			prompt := commitMsgPrompt
+			if multiLine {
+				prompt = commitMsgBodyPrompt
+			}
 			if breaking {
 				prompt += "\n\nThis is a BREAKING CHANGE release. You MUST use the 'feat!' type (with an exclamation mark) to signal a breaking change, e.g. \"feat!(scope): description\" or \"feat!: description\"."
 				diffContent += "\n\nBREAKING CHANGE: this release introduces a breaking change and must use the feat! conventional commit type."
@@ -1048,7 +1105,11 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			if err != nil {
 				return fmt.Errorf("generating commit message: %w", err)
 			}
-			commitMessage = normalizeCommitMessage(commitMessage)
+			if multiLine {
+				commitMessage = normalizeCommitBody(commitMessage)
+			} else {
+				commitMessage = normalizeCommitMessage(commitMessage)
+			}
 			if breaking {
 				commitMessage = enforceBreakingChange(commitMessage)
 			}
@@ -1114,6 +1175,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Generate and print the commit message without staging, committing, or pushing")
 	cmd.Flags().BoolVar(&noPush, "no-push", false, "Commit but skip the push step")
 	cmd.Flags().BoolVar(&breaking, "breaking", false, "Mark as a breaking change: forces feat! conventional commit type for a major version bump")
+	cmd.Flags().BoolVar(&multiLine, "multi-line", false, "Generate a multi-line commit message (subject + body) that pre-fills the PR/MR title and description")
 	cmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate (defined in ~/.ai-mr-comment.toml under [profile.<name>])")
 	return cmd
 }

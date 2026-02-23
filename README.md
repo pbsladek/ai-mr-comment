@@ -376,6 +376,7 @@ ai-mr-comment --profile anthropic --title
 - `--smart-chunk`: Split large diffs by file, summarize each, then synthesize a final comment
 - `--title`: Generate a concise MR/PR title alongside the comment; printed as a distinct `── Title ──` section in text mode. When `--format=json` is used, title is always generated automatically (no need for `--title`). Mutually exclusive with `--commit-msg`.
 - `--commit-msg`: Generate a single-line git commit message instead of a full MR/PR description. Output is clean text or `{"commit_message":"..."}` in JSON mode. Mutually exclusive with `--title`.
+- `--multi-line`: Generate a multi-line commit message (subject + blank line + markdown body) when used with `--commit-msg` or `quick-commit`. GitHub and GitLab use this format to pre-fill the PR/MR title and description automatically.
 - `--exit-code`: Exit with code 2 when the AI detects critical issues (bugs, security vulnerabilities, data loss risks). Exit 0 = pass, exit 2 = AI-flagged fail, exit 1 = tool error. Mutually exclusive with `--commit-msg`.
 - `--post`: Post the generated comment back to the GitHub PR or GitLab MR via API (requires `--pr`). Uses the same token as diff fetching.
 - `--file <FILE>`: Read diff from file instead of git
@@ -511,6 +512,13 @@ ai-mr-comment --commit-msg --staged --clipboard=commit-msg
 
 # Gitmoji style
 ai-mr-comment --commit-msg --template commit-emoji --staged
+
+# Multi-line message: subject + blank line + markdown body
+# GitHub/GitLab use this to pre-fill the PR/MR title and description
+ai-mr-comment --commit-msg --multi-line --staged
+
+# Use it with quick-commit too
+ai-mr-comment quick-commit --multi-line
 ```
 
 `--commit-msg` and `--title` are mutually exclusive. In JSON mode, the response contains only `commit_message` (no `description` or `title` fields).
@@ -555,6 +563,7 @@ Steps performed:
 | `--dry-run` | Generate and print the message, skip all git operations |
 | `--no-push` | Commit but skip the push |
 | `--breaking` | Force `feat!` conventional commit type to signal a breaking change (major version bump) |
+| `--multi-line` | Generate a multi-line message (subject + body) that pre-fills the PR/MR title and description |
 | `--format json` | Output `{"commit_message":"..."}` only; suppress status lines |
 | `--provider` | Override the AI provider |
 | `--model` | Override the model |

@@ -45,9 +45,10 @@ A command-line tool written in Go that generates professional MR/PR comments bas
 - Estimates token usage.
 - Outputs to console or file.
 - `changelog` subcommand: generates Keep a Changelog entries from a commit range.
-- `quick-commit` subcommand: stage → AI commit message → commit → push in one step; `--breaking` forces `feat!` type.
+- `quick-commit` subcommand: stage → AI commit message → commit → push in one step; `--breaking` forces `feat!` type; `--multi-line` generates subject + body for PR/MR pre-fill.
 - `gen-aliases` subcommand: prints `amc` / `amc-*` shell aliases to stdout.
 - `--system-prompt`: inline or `@file` override of the system prompt; mutually exclusive with `--template`.
+- `--multi-line`: with `--commit-msg` or `quick-commit`, generates a subject + blank line + markdown body; GitHub/GitLab use this to pre-fill the PR/MR title and description. Uses `commitMsgBodyPrompt` and `normalizeCommitBody`.
 - `--profile <name>`: activates a named config profile from `[profile.<name>]` in `~/.ai-mr-comment.toml`; available on root cmd, `changelog`, and `quick-commit`.
 
 ## Config Profiles

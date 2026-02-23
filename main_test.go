@@ -2351,3 +2351,142 @@ func TestGenAliases_MatchesConstant(t *testing.T) {
 		t.Errorf("output does not match aliasBlock constant.\ngot:\n%s\nwant:\n%s", buf.String(), aliasBlock)
 	}
 }
+
+// --- --multi-line flag tests ---
+
+func TestNormalizeCommitBody_PreservesStructure(t *testing.T) {
+	raw := "feat(auth): add refresh token\n\n## What Changed\n- Added endpoint\n\n## Why\nUsers were logged out."
+	got := normalizeCommitBody(raw)
+	if got != raw {
+		t.Errorf("expected structure preserved, got:\n%s", got)
+	}
+}
+
+func TestNormalizeCommitBody_StripsFencedCodeBlock(t *testing.T) {
+	raw := "```\nfeat(auth): add refresh token\n\n## What Changed\n- Added endpoint\n```"
+	got := normalizeCommitBody(raw)
+	want := "feat(auth): add refresh token\n\n## What Changed\n- Added endpoint"
+	if got != want {
+		t.Errorf("expected fence stripped, got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestNormalizeCommitBody_NonConventionalSubject(t *testing.T) {
+	raw := "add some stuff\n\n## Why\nIt was needed."
+	got := normalizeCommitBody(raw)
+	if !strings.HasPrefix(got, "feat: ") {
+		t.Errorf("expected feat: prefix added to non-conventional subject, got: %q", got)
+	}
+	if !strings.Contains(got, "## Why") {
+		t.Errorf("expected body preserved, got: %q", got)
+	}
+}
+
+func TestEnforceBreakingChange_MultiLine(t *testing.T) {
+	msg := "feat(config): add profiles\n\n## What Changed\n- Added --profile flag"
+	got := enforceBreakingChange(msg)
+	want := "feat!(config): add profiles\n\n## What Changed\n- Added --profile flag"
+	if got != want {
+		t.Errorf("expected:\n%q\ngot:\n%q", want, got)
+	}
+}
+
+func TestEnforceBreakingChange_MultiLine_BodyUnchanged(t *testing.T) {
+	// Body already has ! in subject — should be a no-op
+	msg := "feat!(config): add profiles\n\n## Why\nBreaking."
+	got := enforceBreakingChange(msg)
+	if got != msg {
+		t.Errorf("expected no change when ! already present, got:\n%q", got)
+	}
+}
+
+func TestCommitMsg_Body_RootCmd(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	multiLine := "feat(auth): add refresh token\n\n## What Changed\n- Added endpoint\n\n## Why\nUsers were logged out."
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		// Verify the body prompt was used (contains "markdown body")
+		if !strings.Contains(prompt, "markdown body") {
+			return "", fmt.Errorf("expected body prompt, got: %s", prompt)
+		}
+		return multiLine, nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--commit-msg", "--multi-line", "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "feat(auth): add refresh token") {
+		t.Errorf("expected subject line in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "## What Changed") {
+		t.Errorf("expected body in output, got:\n%s", out)
+	}
+}
+
+func TestCommitMsg_Body_RequiresCommitMsg(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--multi-line", "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when --multi-line used without --commit-msg, got nil")
+	}
+	if !strings.Contains(err.Error(), "--multi-line requires --commit-msg") {
+		t.Errorf("expected --multi-line requires --commit-msg error, got: %v", err)
+	}
+}
+
+func TestQuickCommit_Body_DryRun(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	skipIfDetachedHead(t)
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	multiLine := "feat(config): add profiles\n\n## What Changed\n- Added --profile flag\n\n## Why\nUsers need to switch providers easily."
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		if !strings.Contains(prompt, "markdown body") {
+			return "", fmt.Errorf("expected body prompt, got: %s", prompt)
+		}
+		return multiLine, nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--multi-line", "--dry-run", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil && (strings.Contains(err.Error(), "no staged changes") || strings.Contains(err.Error(), "no changes found")) {
+		t.Skip("skipping: no diff available in working tree")
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "feat(config): add profiles") {
+		t.Errorf("expected subject line in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "## What Changed") {
+		t.Errorf("expected body in output, got:\n%s", out)
+	}
+}
