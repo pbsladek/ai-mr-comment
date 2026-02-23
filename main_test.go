@@ -2490,3 +2490,41 @@ func TestQuickCommit_Body_DryRun(t *testing.T) {
 		t.Errorf("expected body in output, got:\n%s", out)
 	}
 }
+
+// --- --emoji flag tests ---
+
+func TestAppendCommitEmoji_Types(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"feat: add login", "feat: add login ✨"},
+		{"fix(auth): null pointer", "fix(auth): null pointer 🐛"},
+		{"docs: update readme", "docs: update readme 📝"},
+		{"style: format code", "style: format code 💄"},
+		{"refactor: extract helper", "refactor: extract helper ♻️"},
+		{"test: add unit tests", "test: add unit tests 🧪"},
+		{"chore: update deps", "chore: update deps 🔧"},
+		{"perf: cache results", "perf: cache results ⚡"},
+		{"ci: fix workflow", "ci: fix workflow 👷"},
+		{"build: upgrade go", "build: upgrade go 🏗️"},
+		{"feat!: breaking api change", "feat!: breaking api change 💥"},
+		{"feat!(scope): breaking", "feat!(scope): breaking 💥"},
+		{"unknown: something", "unknown: something 🚀"},
+	}
+	for _, tc := range cases {
+		got := appendCommitEmoji(tc.input)
+		if got != tc.want {
+			t.Errorf("appendCommitEmoji(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestAppendCommitEmoji_PreservesBody(t *testing.T) {
+	msg := "feat: add thing\n\n## Why\nBecause."
+	got := appendCommitEmoji(msg)
+	want := "feat: add thing ✨\n\n## Why\nBecause."
+	if got != want {
+		t.Errorf("appendCommitEmoji with body:\ngot:  %q\nwant: %q", got, want)
+	}
+}
