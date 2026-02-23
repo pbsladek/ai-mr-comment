@@ -25,6 +25,7 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 - **`quick-commit` subcommand** — stages all changes, generates a commit message, commits, and pushes in one step
 - **CI/CD gate** (`--exit-code`) — exits with code 2 when the AI flags critical issues, enabling pipeline enforcement
 - **Auto-post comments** (`--post`) — publishes the generated comment directly to the GitHub PR or GitLab MR via API
+- **Named config profiles** (`--profile`) — switch between providers/models/templates with a single flag; define profiles in `~/.ai-mr-comment.toml` under `[profile.<name>]`
 - Configuration file support (`~/.ai-mr-comment.toml`)
 - Environment variable configuration
 - Outputs to console, a file (`--output`), or the system clipboard (`--clipboard=title|description|commit-msg|all`)
@@ -166,19 +167,22 @@ provider = "gemini"
 # === Gemini Settings ===
 gemini_api_key = "xxxx"
 gemini_model = "gemini-2.5-flash"
+# Other Gemini models: gemini-2.5-pro, gemini-2.5-flash-lite
 
 # === OpenAI Settings ===
 openai_api_key = "xxxx"
-openai_model = "gpt-4o-mini"
+openai_model = "gpt-4.1-mini"
 openai_endpoint = "https://api.openai.com/v1/"
+# Other OpenAI models: gpt-4.1, gpt-4.1-nano, o3, o3-mini
 
 # === Anthropic Settings ===
 anthropic_api_key = "xxxx"
-anthropic_model = "claude-sonnet-4-5"
+anthropic_model = "claude-sonnet-4-6"
 anthropic_endpoint = "https://api.anthropic.com"
+# Other Anthropic models: claude-opus-4-6, claude-haiku-4-5-20251001
 
 # === Ollama Settings ===
-ollama_model = "llama3"
+ollama_model = "llama3.2"
 ollama_endpoint = "http://localhost:11434/api/generate"
 
 # === GitHub / GitHub Enterprise ===
@@ -193,6 +197,24 @@ gitlab_token = "xxxx"       # or set GITLAB_TOKEN env var (required for private 
 # Options: default, conventional, technical, user-focused, emoji, sassy, monday,
 #          jira, commit, commit-emoji
 template = "default"
+
+# === Named Profiles ===
+# Switch with: ai-mr-comment --profile <name>
+# A profile overrides any top-level setting for that invocation only.
+
+[profile.fast]
+provider     = "openai"
+openai_model = "gpt-4.1-nano"
+template     = "conventional"
+
+[profile.anthropic]
+provider        = "anthropic"
+anthropic_model = "claude-opus-4-6"
+template        = "technical"
+
+[profile.local]
+provider     = "ollama"
+ollama_model = "llama3.2"
 ```
 
 ## Example Output
@@ -339,6 +361,10 @@ ai-mr-comment completion zsh > ~/.zsh/completions/_ai-mr-comment
 
 # Bootstrap a config file (writes ~/.ai-mr-comment.toml)
 ai-mr-comment init-config
+
+# Use a named profile (provider/model/template preset)
+ai-mr-comment --profile fast
+ai-mr-comment --profile anthropic --title
 ```
 
 ### Options
@@ -350,6 +376,7 @@ ai-mr-comment init-config
 - `--smart-chunk`: Split large diffs by file, summarize each, then synthesize a final comment
 - `--title`: Generate a concise MR/PR title alongside the comment; printed as a distinct `── Title ──` section in text mode. When `--format=json` is used, title is always generated automatically (no need for `--title`). Mutually exclusive with `--commit-msg`.
 - `--commit-msg`: Generate a single-line git commit message instead of a full MR/PR description. Output is clean text or `{"commit_message":"..."}` in JSON mode. Mutually exclusive with `--title`.
+- `--multi-line`: Generate a multi-line commit message (subject + blank line + markdown body) when used with `--commit-msg` or `quick-commit`. GitHub and GitLab use this format to pre-fill the PR/MR title and description automatically.
 - `--exit-code`: Exit with code 2 when the AI detects critical issues (bugs, security vulnerabilities, data loss risks). Exit 0 = pass, exit 2 = AI-flagged fail, exit 1 = tool error. Mutually exclusive with `--commit-msg`.
 - `--post`: Post the generated comment back to the GitHub PR or GitLab MR via API (requires `--pr`). Uses the same token as diff fetching.
 - `--file <FILE>`: Read diff from file instead of git
@@ -360,6 +387,7 @@ ai-mr-comment init-config
 - `--model <NAME>`: Override the model for this run (e.g. `gpt-4o`, `claude-opus-4-6`, `gemini-2.5-flash`)
 - `-t, --template <NAME>`: Template style — `default`, `conventional`, `technical`, `user-focused`, `emoji`, `sassy`, `monday`, `jira`, `commit`, `commit-emoji`
 - `--system-prompt <TEXT|@FILE>`: Override the system prompt for this run. Pass the prompt inline (`--system-prompt="Focus on security"`) or read it from a file with an `@` prefix (`--system-prompt=@review.txt`). Mutually exclusive with `--template`.
+- `--profile <NAME>`: Activate a named config profile defined under `[profile.<name>]` in `~/.ai-mr-comment.toml`. Overrides top-level provider, model, template, and other settings for this run only.
 - `--debug`: Show precise token usage and cost estimation without calling the generation API
 - `--verbose`: Print detailed debug lines to stderr — config file path, diff stats, template source, streaming decision, and per-API-call timing and response size
 - `--version`: Print version, commit SHA, and repository URL in `key=value` format and exit
@@ -484,6 +512,13 @@ ai-mr-comment --commit-msg --staged --clipboard=commit-msg
 
 # Gitmoji style
 ai-mr-comment --commit-msg --template commit-emoji --staged
+
+# Multi-line message: subject + blank line + markdown body
+# GitHub/GitLab use this to pre-fill the PR/MR title and description
+ai-mr-comment --commit-msg --multi-line --staged
+
+# Use it with quick-commit too
+ai-mr-comment quick-commit --multi-line
 ```
 
 `--commit-msg` and `--title` are mutually exclusive. In JSON mode, the response contains only `commit_message` (no `description` or `title` fields).
@@ -503,7 +538,13 @@ ai-mr-comment quick-commit --dry-run
 ai-mr-comment quick-commit --no-push
 
 # Use a specific provider or model
-ai-mr-comment quick-commit --provider anthropic --model claude-sonnet-4-5
+ai-mr-comment quick-commit --provider anthropic --model claude-opus-4-6
+
+# Use a named profile
+ai-mr-comment quick-commit --profile anthropic
+
+# Force a breaking-change commit (feat!) for a major version bump
+ai-mr-comment quick-commit --breaking
 
 # JSON output — only commit_message is printed, all status lines suppressed
 ai-mr-comment quick-commit --format json
@@ -521,9 +562,12 @@ Steps performed:
 |---|---|
 | `--dry-run` | Generate and print the message, skip all git operations |
 | `--no-push` | Commit but skip the push |
+| `--breaking` | Force `feat!` conventional commit type to signal a breaking change (major version bump) |
+| `--multi-line` | Generate a multi-line message (subject + body) that pre-fills the PR/MR title and description |
 | `--format json` | Output `{"commit_message":"..."}` only; suppress status lines |
 | `--provider` | Override the AI provider |
 | `--model` | Override the model |
+| `--profile` | Activate a named config profile |
 
 ## Changelog
 
@@ -558,6 +602,7 @@ ai-mr-comment changelog --commit="v1.2.0..HEAD" \
 | `--output` | Write output to a file instead of stdout |
 | `--provider` | AI provider override |
 | `--model` | Model override |
+| `--profile` | Activate a named config profile |
 | `--system-prompt` | Override the changelog system prompt |
 
 ## Shell Aliases
@@ -599,6 +644,58 @@ Aliases defined:
 |---|---|
 | `--shell` | `bash` (default) or `zsh` — both use identical alias syntax |
 | `--output` | Also write aliases to this file |
+
+## Named Profiles
+
+Define named profiles in `~/.ai-mr-comment.toml` under `[profile.<name>]` sections. Each profile can override any top-level setting — provider, model, template, endpoint, etc.
+
+```toml
+provider        = "openai"
+openai_model    = "gpt-4.1-mini"
+template        = "default"
+
+[profile.fast]
+provider     = "openai"
+openai_model = "gpt-4.1-nano"
+template     = "conventional"
+
+[profile.openai]
+provider     = "openai"
+openai_model = "gpt-4.1"
+template     = "technical"
+
+[profile.anthropic]
+provider        = "anthropic"
+anthropic_model = "claude-opus-4-6"
+template        = "technical"
+
+[profile.gemini]
+provider     = "gemini"
+gemini_model = "gemini-3-pro-preview"
+template     = "technical"
+
+[profile.local]
+provider     = "ollama"
+ollama_model = "llama3.2"
+```
+
+Activate a profile by passing `--profile <name>` to any command:
+
+```bash
+# Quick review with the fast profile
+ai-mr-comment --profile fast
+
+# Deep technical review with Anthropic Opus
+ai-mr-comment --profile anthropic --title
+
+# Generate a changelog with Gemini Pro
+ai-mr-comment changelog --profile gemini --commit="v1.2.0..HEAD"
+
+# Commit with Ollama (no API key needed)
+ai-mr-comment quick-commit --profile local --dry-run
+```
+
+Run `ai-mr-comment init-config` to generate a config file pre-populated with the standard profiles above.
 
 ## CI/CD Usage
 
