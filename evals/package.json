@@ -15,5 +15,8 @@
   },
   "devDependencies": {
     "promptfoo": "0.120.25"
+  },
+  "overrides": {
+    "minimatch": "^10.2.1"
   }
 }
