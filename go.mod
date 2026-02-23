@@ -5,6 +5,7 @@ go 1.26
 require (
 	github.com/anthropics/anthropic-sdk-go v1.24.0
 	github.com/atotto/clipboard v0.1.4
+	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/google/generative-ai-go v0.20.1
 	github.com/google/go-github/v68 v68.0.0
 	github.com/openai/openai-go v1.12.0
@@ -29,7 +30,6 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/google/uuid v1.6.0 // indirect

@@ -813,7 +813,7 @@ func TestInitConfig_ContentIsValidTOML(t *testing.T) {
 
 	// Load the generated file through loadConfigWith to verify it parses cleanly.
 	v := newViperFromFile(dest)
-	_, err := loadConfigWith(v)
+	_, err := loadConfigWith(v, "")
 	if err != nil {
 		t.Fatalf("generated config failed to parse: %v", err)
 	}
@@ -1546,6 +1546,78 @@ func TestQuickCommit_DetachedHead(t *testing.T) {
 	}
 	if !strings.Contains(execErr.Error(), "detached HEAD") {
 		t.Errorf("expected detached HEAD error, got: %v", execErr)
+	}
+}
+
+// --- enforceBreakingChange unit tests ---
+
+func TestEnforceBreakingChange(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		// Already has ! — unchanged
+		{"feat!: add profiles", "feat!: add profiles"},
+		{"feat!(config)!: add profiles", "feat!(config)!: add profiles"},
+		// Plain type: rewrite
+		{"feat: add profiles", "feat!: add profiles"},
+		{"fix: correct typo", "fix!: correct typo"},
+		{"chore: bump deps", "chore!: bump deps"},
+		// type(scope): rewrite
+		{"feat(config): add profiles", "feat!(config): add profiles"},
+		{"fix(api): handle error", "fix!(api): handle error"},
+		// Non-conventional — prefix
+		{"add named config profiles", "feat!: add named config profiles"},
+	}
+	for _, c := range cases {
+		got := enforceBreakingChange(c.in)
+		if got != c.want {
+			t.Errorf("enforceBreakingChange(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestQuickCommit_Breaking_DryRun(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	skipIfDetachedHead(t)
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	// AI returns a plain feat without !, enforceBreakingChange should add it.
+	var capturedPrompt, capturedDiff string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, diff string) (string, error) {
+		capturedPrompt = prompt
+		capturedDiff = diff
+		return "feat(config): add named profiles", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--dry-run", "--breaking", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil && (strings.Contains(err.Error(), "no staged changes") || strings.Contains(err.Error(), "no changes found")) {
+		t.Skip("skipping: no diff available in working tree")
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Prompt must instruct feat!
+	if !strings.Contains(capturedPrompt, "feat!") {
+		t.Errorf("expected prompt to mention feat!, got:\n%s", capturedPrompt)
+	}
+	// Diff must contain BREAKING CHANGE footer
+	if !strings.Contains(capturedDiff, "BREAKING CHANGE") {
+		t.Errorf("expected diff to contain BREAKING CHANGE footer, got:\n%s", capturedDiff)
+	}
+	// Output message must have ! even though AI omitted it
+	if !strings.Contains(buf.String(), "feat!(config): add named profiles") {
+		t.Errorf("expected feat!(config) in output, got:\n%s", buf.String())
 	}
 }
 

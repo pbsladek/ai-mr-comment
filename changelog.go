@@ -19,13 +19,14 @@ type changelogArgs struct {
 	modelOverride    string
 	format           string
 	systemPromptFlag string
+	profile          string
 	estimate         bool
 	autoYes          bool
 }
 
 // runChangelog executes the changelog generation logic.
 func runChangelog(cmd *cobra.Command, a changelogArgs, chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) error {
-	cfg, err := loadConfig()
+	cfg, err := loadConfigForProfile(a.profile)
 	if err != nil {
 		return err
 	}
@@ -184,5 +185,6 @@ Examples:
 	cmd.Flags().StringVar(&a.systemPromptFlag, "system-prompt", "", `Override the system prompt for this run. Use @path to read from a file (e.g. --system-prompt=@notes.txt).`)
 	cmd.Flags().BoolVar(&a.estimate, "estimate", false, "Show token/cost estimate and prompt for confirmation before calling the API")
 	cmd.Flags().BoolVarP(&a.autoYes, "yes", "y", false, "Auto-confirm the cost estimate prompt (use with --estimate)")
+	cmd.Flags().StringVar(&a.profile, "profile", "", "Named config profile to activate (defined in ~/.ai-mr-comment.toml under [profile.<name>])")
 	return cmd
 }

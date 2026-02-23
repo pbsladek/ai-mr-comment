@@ -120,10 +120,35 @@ func isConventionalCommitLine(line string) bool {
 	return false
 }
 
+// enforceBreakingChange ensures a conventional commit message uses the feat!
+// type to signal a breaking change. If the message already has a ! it is
+// returned unchanged. Otherwise the type is rewritten (e.g. "feat" → "feat!",
+// "feat(scope)" → "feat!(scope)"). Non-conventional messages are prefixed with
+// "feat!: ".
+func enforceBreakingChange(msg string) string {
+	if strings.Contains(msg, "!") {
+		return msg
+	}
+	types := []string{"feat", "fix", "chore", "refactor", "perf", "docs", "style", "test", "ci", "build"}
+	for _, t := range types {
+		// type(scope): description
+		scopePrefix := t + "("
+		if strings.HasPrefix(msg, scopePrefix) {
+			return t + "!" + msg[len(t):]
+		}
+		// type: description
+		colonPrefix := t + ":"
+		if strings.HasPrefix(msg, colonPrefix) {
+			return t + "!" + msg[len(t):]
+		}
+	}
+	return "feat!: " + msg
+}
+
 // newRootCmd builds the root cobra command, wiring flags to the provided chatFn.
 // Accepting chatFn as a parameter allows tests to inject a mock without real API calls.
 func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
-	var commit, diffFilePath, outputPath, provider, modelOverride, templateName, format, prURL, clipboardFlag, systemPromptFlag string
+	var commit, diffFilePath, outputPath, provider, modelOverride, templateName, format, prURL, clipboardFlag, systemPromptFlag, profileName string
 	var debug, staged, smartChunk, generateTitle, generateCommitMsg, verbose, exitCodeFlag, postFlag, estimate, autoYes, versionFlag bool
 	var exclude []string
 
@@ -138,7 +163,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				return nil
 			}
 			runStart := time.Now()
-			cfg, err := loadConfig()
+			cfg, err := loadConfigForProfile(profileName)
 			if err != nil {
 				return err
 			}
@@ -607,6 +632,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().BoolVar(&estimate, "estimate", false, "Show token/cost estimate and prompt for confirmation before calling the API")
 	rootCmd.Flags().BoolVarP(&autoYes, "yes", "y", false, "Auto-confirm the cost estimate prompt (use with --estimate)")
 	rootCmd.Flags().BoolVar(&versionFlag, "version", false, "Print version and exit")
+	rootCmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate (defined in ~/.ai-mr-comment.toml under [profile.<name>])")
 
 	rootCmd.AddCommand(newInitConfigCmd())
 	rootCmd.AddCommand(newModelsCmd())
@@ -655,7 +681,7 @@ template = "default"
 # openai_api_key = ""   # or set OPENAI_API_KEY env var
 openai_model    = "gpt-4.1-mini"
 openai_endpoint = "https://api.openai.com/v1/"
-# Other OpenAI models: gpt-4.1, o3, o3-mini, gpt-4o, gpt-4o-mini
+# Other OpenAI models: gpt-4.1, gpt-4.1-nano, o3, o3-mini, gpt-4o, gpt-4o-mini
 
 # --- Anthropic ---
 # anthropic_api_key = ""   # or set ANTHROPIC_API_KEY env var
@@ -666,12 +692,12 @@ anthropic_endpoint = "https://api.anthropic.com"
 # --- Google Gemini ---
 # gemini_api_key = ""   # or set GEMINI_API_KEY env var
 gemini_model = "gemini-2.5-flash"
-# Other Gemini models: gemini-2.5-pro, gemini-3-flash-preview, gemini-3-pro-preview
+# Other Gemini models: gemini-2.5-pro, gemini-2.5-flash-lite, gemini-3-flash-preview, gemini-3-pro-preview
 
 # --- Ollama (local) ---
-ollama_model    = "llama3"
+ollama_model    = "llama3.2"
 ollama_endpoint = "http://localhost:11434/api/generate"
-# Other Ollama models: llama3.1, llama3.2, mistral, codellama, phi3
+# Other Ollama models: llama3.1, llama3, mistral, codellama, phi3
 
 # --- GitHub / GitHub Enterprise ---
 # github_token = ""    # or set GITHUB_TOKEN env var
@@ -680,6 +706,42 @@ ollama_endpoint = "http://localhost:11434/api/generate"
 # --- GitLab / Self-Hosted GitLab ---
 # gitlab_token = ""    # or set GITLAB_TOKEN env var
 # gitlab_base_url = "" # Self-hosted GitLab host, e.g. https://gitlab.mycompany.com
+
+# ---------------------------------------------------------------------------
+# Named Profiles
+# Switch profiles with: ai-mr-comment --profile <name>
+# A profile overrides any top-level setting for that invocation only.
+# ---------------------------------------------------------------------------
+
+# Fast / cheap — gpt-4.1-nano for quick reviews and commit messages
+[profile.fast]
+provider     = "openai"
+openai_model = "gpt-4.1-nano"
+template     = "conventional"
+
+# OpenAI — gpt-4.1 with technical template for thorough reviews
+[profile.openai]
+provider     = "openai"
+openai_model = "gpt-4.1"
+template     = "technical"
+
+# Anthropic — claude-opus-4-6 with technical template
+[profile.anthropic]
+provider        = "anthropic"
+anthropic_model = "claude-opus-4-6"
+template        = "technical"
+
+# Gemini — gemini-3-pro-preview with technical template
+[profile.gemini]
+provider     = "gemini"
+gemini_model = "gemini-3-pro-preview"
+template     = "technical"
+
+# Local / offline — Ollama, no API key required
+[profile.local]
+provider     = "ollama"
+ollama_model = "llama3.2"
+template     = "default"
 `
 
 // newInitConfigCmd returns the init-config subcommand, which writes a commented
@@ -909,8 +971,8 @@ func newModelsCmd() *cobra.Command {
 // newQuickCommitCmd returns a command that stages all changes, generates an
 // AI commit message, commits, and pushes — all in one step.
 func newQuickCommitCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
-	var provider, modelOverride, format string
-	var dryRun, noPush bool
+	var provider, modelOverride, format, profileName string
+	var dryRun, noPush, breaking bool
 
 	cmd := &cobra.Command{
 		Use:   "quick-commit",
@@ -923,7 +985,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 				return fmt.Errorf("not a git repository")
 			}
 
-			cfg, err := loadConfig()
+			cfg, err := loadConfigForProfile(profileName)
 			if err != nil {
 				return err
 			}
@@ -977,11 +1039,19 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			diffContent = processDiff(diffContent, 4000)
 
 			// Generate commit message via AI.
-			commitMessage, err := chatFn(cmd.Context(), cfg, cfg.Provider, commitMsgPrompt, diffContent)
+			prompt := commitMsgPrompt
+			if breaking {
+				prompt += "\n\nThis is a BREAKING CHANGE release. You MUST use the 'feat!' type (with an exclamation mark) to signal a breaking change, e.g. \"feat!(scope): description\" or \"feat!: description\"."
+				diffContent += "\n\nBREAKING CHANGE: this release introduces a breaking change and must use the feat! conventional commit type."
+			}
+			commitMessage, err := chatFn(cmd.Context(), cfg, cfg.Provider, prompt, diffContent)
 			if err != nil {
 				return fmt.Errorf("generating commit message: %w", err)
 			}
 			commitMessage = normalizeCommitMessage(commitMessage)
+			if breaking {
+				commitMessage = enforceBreakingChange(commitMessage)
+			}
 			if commitMessage == "" {
 				return fmt.Errorf("AI returned an empty commit message")
 			}
@@ -1043,6 +1113,8 @@ remote. Use --dry-run to preview the generated message without committing.`,
 	cmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Generate and print the commit message without staging, committing, or pushing")
 	cmd.Flags().BoolVar(&noPush, "no-push", false, "Commit but skip the push step")
+	cmd.Flags().BoolVar(&breaking, "breaking", false, "Mark as a breaking change: forces feat! conventional commit type for a major version bump")
+	cmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate (defined in ~/.ai-mr-comment.toml under [profile.<name>])")
 	return cmd
 }
 
