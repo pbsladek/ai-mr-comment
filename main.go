@@ -1151,6 +1151,10 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			}
 			if breaking {
 				commitMessage = enforceBreakingChange(commitMessage)
+				// Append a BREAKING CHANGE footer so semantic-release detects the
+				// major bump even when the commit is squashed into a merge commit
+				// (where the subject line is replaced by "Merge pull request #N...").
+				commitMessage += "\n\nBREAKING CHANGE: breaking change"
 			}
 			if emoji {
 				commitMessage = appendCommitEmoji(commitMessage)
