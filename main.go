@@ -120,6 +120,45 @@ func isConventionalCommitLine(line string) bool {
 	return false
 }
 
+// commitTypeEmoji maps a conventional commit type to a trailing gitmoji.
+// Breaking changes (type containing "!") map to 💥.
+// Unknown types fall back to 🚀.
+var commitTypeEmoji = map[string]string{
+	"feat":     "✨",
+	"fix":      "🐛",
+	"docs":     "📝",
+	"style":    "💄",
+	"refactor": "♻️",
+	"test":     "🧪",
+	"chore":    "🔧",
+	"perf":     "⚡",
+	"ci":       "👷",
+	"build":    "🏗️",
+}
+
+// appendCommitEmoji appends a type-matched gitmoji to the subject line of msg.
+// The body (everything after the first newline) is left untouched.
+// Breaking changes (subject contains "!") always get 💥.
+func appendCommitEmoji(msg string) string {
+	subject, rest, hasRest := strings.Cut(msg, "\n")
+	emoji := "🚀"
+	if strings.Contains(subject, "!") {
+		emoji = "💥"
+	} else {
+		for t, e := range commitTypeEmoji {
+			if strings.HasPrefix(subject, t+":") || strings.HasPrefix(subject, t+"(") {
+				emoji = e
+				break
+			}
+		}
+	}
+	subject = subject + " " + emoji
+	if hasRest {
+		return subject + "\n" + rest
+	}
+	return subject
+}
+
 // enforceBreakingChangeSubject rewrites a single-line conventional commit
 // subject to include the breaking-change marker (e.g. "feat" → "feat!").
 // If the subject already contains "!" it is returned unchanged.
@@ -1026,7 +1065,7 @@ func newModelsCmd() *cobra.Command {
 // AI commit message, commits, and pushes — all in one step.
 func newQuickCommitCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
 	var provider, modelOverride, format, profileName string
-	var dryRun, noPush, breaking, multiLine bool
+	var dryRun, noPush, breaking, multiLine, emoji bool
 
 	cmd := &cobra.Command{
 		Use:   "quick-commit",
@@ -1113,6 +1152,9 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			if breaking {
 				commitMessage = enforceBreakingChange(commitMessage)
 			}
+			if emoji {
+				commitMessage = appendCommitEmoji(commitMessage)
+			}
 			if commitMessage == "" {
 				return fmt.Errorf("AI returned an empty commit message")
 			}
@@ -1176,6 +1218,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 	cmd.Flags().BoolVar(&noPush, "no-push", false, "Commit but skip the push step")
 	cmd.Flags().BoolVar(&breaking, "breaking", false, "Mark as a breaking change: forces feat! conventional commit type for a major version bump")
 	cmd.Flags().BoolVar(&multiLine, "multi-line", false, "Generate a multi-line commit message (subject + body) that pre-fills the PR/MR title and description")
+	cmd.Flags().BoolVar(&emoji, "emoji", false, "Append a type-matched gitmoji to the commit subject (e.g. feat → ✨, fix → 🐛, breaking → 💥)")
 	cmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate (defined in ~/.ai-mr-comment.toml under [profile.<name>])")
 	return cmd
 }
