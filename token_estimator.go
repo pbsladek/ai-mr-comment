@@ -140,58 +140,47 @@ func EstimateCost(model string, inputTokens int32) float64 {
 		return float64(inputTokens) / 1_000_000 * price.Input
 	}
 
-	// Substring fallback for model name variants not in the exact table.
-	// OpenAI
-	if strings.Contains(model, "gpt-4.1-nano") {
-		return float64(inputTokens) / 1_000_000 * 0.10
-	}
-	if strings.Contains(model, "gpt-4.1-mini") {
-		return float64(inputTokens) / 1_000_000 * 0.40
-	}
-	if strings.Contains(model, "gpt-4.1") {
-		return float64(inputTokens) / 1_000_000 * 2.00
-	}
-	if strings.Contains(model, "gpt-4o-mini") {
-		return float64(inputTokens) / 1_000_000 * 0.15
-	}
-	if strings.Contains(model, "gpt-4o") {
-		return float64(inputTokens) / 1_000_000 * 2.50
-	}
-	if strings.Contains(model, "o3-mini") {
-		return float64(inputTokens) / 1_000_000 * 1.10
-	}
-	if strings.Contains(model, "o3") {
-		return float64(inputTokens) / 1_000_000 * 2.00
-	}
-	// Anthropic
-	if strings.Contains(model, "claude") && strings.Contains(model, "opus") {
-		return float64(inputTokens) / 1_000_000 * 5.00
-	}
-	if strings.Contains(model, "claude") && strings.Contains(model, "sonnet") {
-		return float64(inputTokens) / 1_000_000 * 3.00
-	}
-	if strings.Contains(model, "claude") && strings.Contains(model, "haiku") {
-		return float64(inputTokens) / 1_000_000 * 1.00
-	}
-	// Gemini
-	if strings.Contains(model, "gemini-3") && strings.Contains(model, "pro") {
-		return float64(inputTokens) / 1_000_000 * 2.00
-	}
-	if strings.Contains(model, "gemini-3") && strings.Contains(model, "flash") {
-		return float64(inputTokens) / 1_000_000 * 0.50
-	}
-	if strings.Contains(model, "gemini-2.5") && strings.Contains(model, "pro") {
-		return float64(inputTokens) / 1_000_000 * 1.25
-	}
-	if strings.Contains(model, "gemini-2.5") && strings.Contains(model, "flash") {
-		return float64(inputTokens) / 1_000_000 * 0.30
-	}
-	if strings.Contains(model, "gemini") && strings.Contains(model, "flash") {
-		return float64(inputTokens) / 1_000_000 * 0.10
-	}
-	if strings.Contains(model, "gemini") && strings.Contains(model, "pro") {
-		return float64(inputTokens) / 1_000_000 * 1.25
+	return substringFallbackPrice(model, inputTokens)
+}
+
+// substringRule matches a model name by one or two required substrings.
+type substringRule struct {
+	must1, must2 string
+	inputPerM    float64
+}
+
+// substringFallbackPrice returns the cost for model name variants not in the
+// exact pricing table, evaluated in priority order (most-specific first).
+func substringFallbackPrice(model string, inputTokens int32) float64 {
+	// Rules are checked in order; the first match wins.
+	// More-specific patterns (e.g. "gpt-4.1-nano") must appear before
+	// less-specific ones (e.g. "gpt-4.1") to avoid shadowing.
+	rules := []substringRule{
+		// OpenAI
+		{"gpt-4.1-nano", "", 0.10},
+		{"gpt-4.1-mini", "", 0.40},
+		{"gpt-4.1", "", 2.00},
+		{"gpt-4o-mini", "", 0.15},
+		{"gpt-4o", "", 2.50},
+		{"o3-mini", "", 1.10},
+		{"o3", "", 2.00},
+		// Anthropic
+		{"claude", "opus", 5.00},
+		{"claude", "sonnet", 3.00},
+		{"claude", "haiku", 1.00},
+		// Gemini — most-specific generation/tier first
+		{"gemini-3", "pro", 2.00},
+		{"gemini-3", "flash", 0.50},
+		{"gemini-2.5", "pro", 1.25},
+		{"gemini-2.5", "flash", 0.30},
+		{"gemini", "flash", 0.10},
+		{"gemini", "pro", 1.25},
 	}
 
+	for _, r := range rules {
+		if strings.Contains(model, r.must1) && (r.must2 == "" || strings.Contains(model, r.must2)) {
+			return float64(inputTokens) / 1_000_000 * r.inputPerM
+		}
+	}
 	return 0.0
 }
