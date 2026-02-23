@@ -2267,10 +2267,12 @@ func TestGenAliases_DefaultOutput(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		"alias amc=",
-		"alias amc-review=",
 		"alias amc-staged=",
 		"alias amc-commit=",
+		"alias amc-commit-multi=",
 		"alias amc-qc=",
+		"alias amc-qc-dry=",
+		"alias amc-qc-breaking=",
 		"alias amc-cl=",
 		"alias amc-models=",
 		"alias amc-init=",
