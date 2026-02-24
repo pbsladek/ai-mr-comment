@@ -22,18 +22,21 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 - Multiple prompt styles — `default`, `conventional`, `technical`, `user-focused`, `emoji`, `sassy`, `monday`, `jira`, `commit`, `commit-emoji`
 - **Jira-aware template** (`--template=jira`) — extracts ticket key from branch name and places it first so Jira auto-links
 - **Commit message generation** (`--commit-msg`) — outputs a single conventional-style line ready for `git commit -m`
-- **`quick-commit` subcommand** — stages all changes, generates a commit message, commits, and pushes in one step
+- **`quick-commit` subcommand** — stages all changes, generates a conventional commit message (type and scope derived from the diff), commits, and pushes in one step
+- **Gitmoji support** (`--emoji` on `quick-commit`) — appends a type-matched emoji to the commit subject (✨ feat, 🐛 fix, ♻️ refactor, etc.)
+- **Opt-out conventional commits** (`--no-conventional` on `quick-commit`) — skips conventional format enforcement for free-form messages
 - **CI/CD gate** (`--exit-code`) — exits with code 2 when the AI flags critical issues, enabling pipeline enforcement
 - **Auto-post comments** (`--post`) — publishes the generated comment directly to the GitHub PR or GitLab MR via API
 - **Named config profiles** (`--profile`) — switch between providers/models/templates with a single flag; define profiles in `~/.ai-mr-comment.toml` under `[profile.<name>]`
 - Configuration file support (`~/.ai-mr-comment.toml`)
 - Environment variable configuration
-- Outputs to console, a file (`--output`), or the system clipboard (`--clipboard=title|description|commit-msg|all`)
+- Outputs to a file (`--output`) or the system clipboard (`--clipboard=title|description|commit-msg|all`); when `--output` is set, stdout is suppressed — output goes to the file only
 - `--output` writes JSON when `--format=json` is set — ideal for saving structured review artifacts
 - Structured JSON output for scripting and CI (`--format json`)
 - Verbose debug logging to stderr (`--verbose`) — API timing, diff stats, config details
 - Live streaming output to the terminal — tokens appear as they are generated
 - Bootstrap a config file with `init-config` (never edit TOML by hand again)
+- All prompt templates stored as editable files in `templates/` — embedded at build time, overridable at `~/.config/ai-mr-comment/templates/<name>.tmpl`
 - Shell completions for bash, zsh, fish, and PowerShell (`completion` subcommand)
 - **Shell aliases** (`gen-aliases`) — prints `amc` and `amc-*` convenience aliases ready to source into your shell profile
 - **Changelog generation** (`changelog`) — produces a user-facing Keep a Changelog entry from a commit range, grouped by Added / Fixed / Breaking Changes etc.
@@ -89,6 +92,9 @@ make build
 # The binary will be available at ./dist/ai-mr-comment
 # Build and run on current diff
 make test-run
+
+# Fetch latest tags first so --version shows the correct release tag
+make fetch-tags build
 ```
 
 ### Docker
@@ -178,7 +184,7 @@ openai_endpoint = "https://api.openai.com/v1/"
 # === Anthropic Settings ===
 anthropic_api_key = "xxxx"
 anthropic_model = "claude-sonnet-4-6"
-anthropic_endpoint = "https://api.anthropic.com"
+anthropic_endpoint = "https://api.anthropic.com/"
 # Other Anthropic models: claude-opus-4-6, claude-haiku-4-5-20251001
 
 # === Ollama Settings ===
@@ -228,6 +234,10 @@ feat: Add user authentication system
 
 
 ── Description ──────────────────────────
+
+## Summary
+
+Adds a complete user authentication system using JWT tokens and bcrypt password hashing. Required to protect API endpoints and support user identity across sessions.
 
 ## Key Changes
 
@@ -380,7 +390,7 @@ ai-mr-comment --profile anthropic --title
 - `--exit-code`: Exit with code 2 when the AI detects critical issues (bugs, security vulnerabilities, data loss risks). Exit 0 = pass, exit 2 = AI-flagged fail, exit 1 = tool error. Mutually exclusive with `--commit-msg`.
 - `--post`: Post the generated comment back to the GitHub PR or GitLab MR via API (requires `--pr`). Uses the same token as diff fetching.
 - `--file <FILE>`: Read diff from file instead of git
-- `--output <FILE>`: Write output to file instead of stdout. Writes JSON when `--format=json` is set; writes the commit message when `--commit-msg` is set.
+- `--output <FILE>`: Write output to file instead of stdout — **suppresses all terminal output**. Writes JSON when `--format=json` is set; writes the commit message when `--commit-msg` is set.
 - `--clipboard <WHAT>`: Copy to system clipboard — `title`, `description` (or `comment`), `commit-msg`, or `all` (title + description separated by a blank line)
 - `--format <FORMAT>`: Output format — `text` (default) or `json`
 - `--provider <PROVIDER>`: Provider (openai, anthropic, gemini, ollama)
@@ -448,16 +458,18 @@ gitlab_base_url = "https://gitlab.mycompany.com"
 
 Select a template with `-t` / `--template`. All templates receive the branch name as context (useful for ticket key extraction).
 
+All built-in templates live in `templates/` in the repository and are embedded into the binary at build time. You can override any template by placing a file at `~/.config/ai-mr-comment/templates/<name>.tmpl`.
+
 | Name | Description |
 |---|---|
-| `default` | Professional description with Key Changes, Why, Checklist, Notes |
+| `default` | Professional description with Summary, Key Changes, Why, Checklist, Notes |
 | `conventional` | Conventional Commits body with optional BREAKING CHANGE and Refs |
-| `technical` | Deep technical focus — Implementation Details, Rationale, Testing Strategy |
+| `technical` | Deep technical focus — Summary, Implementation Details, Rationale, Testing Strategy |
 | `user-focused` | Non-technical perspective — What's New, Why Important, Impact |
-| `emoji` | Fun emoji-rich format |
+| `emoji` | Fun emoji-rich format with Summary section |
 | `sassy` | Dry-wit tone, technically accurate |
 | `monday` | Casual "pre-coffee" tone |
-| `jira` | Puts the Jira ticket key from the branch name first so Jira auto-links |
+| `jira` | Puts the Jira ticket key from the branch name first so Jira auto-links; includes Summary section |
 | `commit` | Single-line conventional commit message (useful with `--commit-msg`) |
 | `commit-emoji` | Single-line gitmoji-style commit message (useful with `--commit-msg`) |
 
@@ -546,9 +558,16 @@ ai-mr-comment quick-commit --profile anthropic
 # Force a breaking-change commit (feat!) for a major version bump
 ai-mr-comment quick-commit --breaking
 
+# Append a type-matched gitmoji to the subject
+ai-mr-comment quick-commit --emoji
+# e.g. feat(cli): add flag ✨
+
+# Skip conventional commits format — free-form message
+ai-mr-comment quick-commit --no-conventional
+
 # JSON output — only commit_message is printed, all status lines suppressed
 ai-mr-comment quick-commit --format json
-# {"commit_message":"feat: add login endpoint"}
+# {"commit_message":"feat(cli): add login endpoint"}
 ```
 
 Steps performed:
@@ -564,6 +583,8 @@ Steps performed:
 | `--no-push` | Commit but skip the push |
 | `--breaking` | Force `feat!` conventional commit type to signal a breaking change (major version bump) |
 | `--multi-line` | Generate a multi-line message (subject + body) that pre-fills the PR/MR title and description |
+| `--emoji` | Append a type-matched gitmoji to the subject (✨ feat, 🐛 fix, ♻️ refactor, 💥 breaking, etc.) |
+| `--no-conventional` | Skip conventional commits format — AI generates a free-form message instead |
 | `--format json` | Output `{"commit_message":"..."}` only; suppress status lines |
 | `--provider` | Override the AI provider |
 | `--model` | Override the model |
@@ -628,14 +649,15 @@ Aliases defined:
 | Alias | Expands to |
 |---|---|
 | `amc` | `ai-mr-comment` |
-| `amc-review` | `ai-mr-comment` |
 | `amc-staged` | `ai-mr-comment --staged` |
-| `amc-commit` | `ai-mr-comment --commit-msg` |
+| `amc-commit` | `ai-mr-comment --commit-msg --staged` |
+| `amc-commit-multi` | `ai-mr-comment --commit-msg --multi-line --staged` |
 | `amc-title` | `ai-mr-comment --title` |
 | `amc-json` | `ai-mr-comment --format=json` |
 | `amc-debug` | `ai-mr-comment --debug` |
 | `amc-qc` | `ai-mr-comment quick-commit` |
 | `amc-qc-dry` | `ai-mr-comment quick-commit --dry-run` |
+| `amc-qc-breaking` | `ai-mr-comment quick-commit --breaking` |
 | `amc-cl` | `ai-mr-comment changelog` |
 | `amc-models` | `ai-mr-comment models` |
 | `amc-init` | `ai-mr-comment init-config` |

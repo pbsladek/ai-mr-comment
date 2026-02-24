@@ -1,5 +1,8 @@
 APP       := ai-mr-comment
-VERSION   ?= $(shell git describe --tags --always 2>/dev/null || echo dev)
+# VERSION is the nearest reachable tag, with any -N-gSHA dev suffix stripped.
+# If your local tags are stale, run `make fetch-tags build` or override:
+#   make build VERSION=v1.2.3
+VERSION   ?= $(shell git describe --tags --always 2>/dev/null | sed 's/-[0-9]*-g[0-9a-f]*$$//' || echo dev)
 COMMIT    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 LDFLAGS   := -ldflags="-s -w -X 'main.Version=$(VERSION)' -X 'main.Commit=$(COMMIT)'"
 BUILD_DIR := dist
@@ -10,12 +13,15 @@ PLATFORMS := linux/amd64 darwin/amd64 darwin/arm64 windows/amd64
 # Raise this ceiling deliberately if you add large deps; shrink it to lock in gains.
 MAX_BINARY_BYTES := 36700160
 
-.PHONY: all clean build release test test-cover test-integration test-integration-ollama test-integration-ollama-8b eval-quality-ollama-8b eval-quality-commit eval-quality-pr eval-quality-writing eval-quality-writing-ollama-8b local-ollama-8b-ci test-fuzz lint lint-shell test-run quick-commit run-debug changelog gen-aliases install install-completion-bash install-completion-zsh check-size help docker-build docker-build-fips docker-run docker-run-fips docker-quick-commit profile-cpu profile-mem profile-bench eval-quality-deps eval-quality eval-quality-view
+.PHONY: all clean build fetch-tags release test test-cover test-integration test-integration-ollama test-integration-ollama-8b eval-quality-ollama-8b eval-quality-commit eval-quality-pr eval-quality-writing eval-quality-writing-ollama-8b local-ollama-8b-ci test-fuzz lint lint-shell test-run quick-commit run-debug changelog gen-aliases install install-completion-bash install-completion-zsh check-size help docker-build docker-build-fips docker-run docker-run-fips docker-quick-commit profile-cpu profile-mem profile-bench eval-quality-deps eval-quality eval-quality-view
 
 all: build
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*?##/ { printf "  %-26s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+
+fetch-tags: ## Fetch all remote tags so VERSION reflects the latest release
+	git fetch --tags --quiet
 
 build: ## Build binary to dist/
 	@mkdir -p $(BUILD_DIR)

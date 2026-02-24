@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -22,10 +23,33 @@ import (
 )
 
 // Version is set at build time via -ldflags "-X 'main.Version=...'"
+// Falls back to VCS info embedded by the Go toolchain (go install / go build).
 var Version = "dev"
 
 // Commit is set at build time via -ldflags "-X 'main.Commit=...'"
+// Falls back to VCS info embedded by the Go toolchain (go install / go build).
 var Commit = "unknown"
+
+func init() {
+	if Version != "dev" || Commit != "unknown" {
+		return
+	}
+	// Attempt to read VCS metadata that `go build` embeds automatically (Go 1.18+).
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, s := range info.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				if len(s.Value) >= 7 {
+					Commit = s.Value[:7]
+				}
+			case "vcs.version":
+				if s.Value != "" {
+					Version = s.Value
+				}
+			}
+		}
+	}
+}
 
 var debugWriterMu sync.Mutex
 
