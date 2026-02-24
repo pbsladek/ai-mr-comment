@@ -26,9 +26,13 @@ import (
 // Falls back to VCS info embedded by the Go toolchain (go install / go build).
 var Version = "dev"
 
-// Commit is set at build time via -ldflags "-X 'main.Commit=...'"
+// Commit is the short (7-char) commit SHA, set at build time via -ldflags "-X 'main.Commit=...'"
 // Falls back to VCS info embedded by the Go toolchain (go install / go build).
 var Commit = "unknown"
+
+// CommitFull is the full commit SHA, set at build time via -ldflags "-X 'main.CommitFull=...'"
+// Falls back to VCS info embedded by the Go toolchain (go install / go build).
+var CommitFull = "unknown"
 
 func init() {
 	if Version != "dev" || Commit != "unknown" {
@@ -40,6 +44,7 @@ func init() {
 			switch s.Key {
 			case "vcs.revision":
 				if len(s.Value) >= 7 {
+					CommitFull = s.Value
 					Commit = s.Value[:7]
 				}
 			case "vcs.version":
@@ -260,7 +265,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if versionFlag {
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "version=%s\ncommit=%s\nrepo=https://github.com/pbsladek/ai-mr-comment\n", Version, Commit)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "version=%s\ncommit=%s\ncommit_full=%s\nrepo=https://github.com/pbsladek/ai-mr-comment\n", Version, Commit, CommitFull)
 				return nil
 			}
 			runStart := time.Now()

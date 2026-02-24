@@ -22,6 +22,7 @@ if [ -z "${tag}" ]; then
     echo "skip=true"
     echo "tag="
     echo "tag_commit="
+    echo "tag_commit_short="
   } >> "${output_file}"
   exit 0
 fi
@@ -40,10 +41,13 @@ if ! git merge-base --is-ancestor "${tag_commit}" HEAD; then
   exit 1
 fi
 
-echo "Resolved and validated tag: ${tag} at commit ${tag_commit}"
+tag_commit_short="${tag_commit:0:7}"
+
+echo "Resolved and validated tag: ${tag} at commit ${tag_commit} (short: ${tag_commit_short})"
 
 {
   echo "skip=false"
   echo "tag=${tag}"
   echo "tag_commit=${tag_commit}"
+  echo "tag_commit_short=${tag_commit_short}"
 } >> "${output_file}"

@@ -17,9 +17,10 @@ Rules:
     chore     — maintenance, dependency updates, tooling
     ci        — CI/CD pipeline changes
     build     — build system or compilation changes
-- Choose the scope from the actual diff: the component, package, file area, or
-  subsystem being changed (e.g. cli, api, config, auth, docker, logs, parser).
-  Use a short lowercase word. Omit scope only if the change truly spans the whole codebase.
+- Choose the scope from the actual diff: the primary component, package, file area, or
+  subsystem being changed (e.g. cli, api, config, auth, docker, logs, parser, templates, build).
+  Use a short lowercase word. The scope is REQUIRED — omit it only in the rare case that
+  the change is a project-wide rename or reorganisation with no single primary focus area.
 - The description must summarise what the diff actually does — be specific.
 
 Examples of good messages (type and scope vary with the diff):
@@ -30,3 +31,7 @@ Examples of good messages (type and scope vary with the diff):
   docs(readme): add quick-commit usage examples
   ci(release): pin cosign-installer action to digest
   chore(deps): bump golang.org/x/term to v0.18.0
+  chore(build): embed full commit SHA in binary and Docker labels
+
+BAD — missing scope:
+  chore: enhance build metadata    ← WRONG, always include a scope

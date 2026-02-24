@@ -1,12 +1,12 @@
+Carefully review the provided git diff and generate a thorough, technically precise MR/PR description. Use this format:
+
 ### Summary
 
 [Brief, high-level overview of the changes.]
 
 ### Implementation Details
 
--   **Component A**: [Description of changes to this component, including data structures, algorithms, and key function modifications.]
--   **Component B**: [Description of changes to this component.]
--   **API Changes**: [Details of any new, modified, or deprecated API endpoints, including request/response schemas.]
+[Derive implementation details from the actual diff. For each changed component, describe what changed — data structures, algorithms, key functions, API changes. Only include subsections that are relevant to the diff; omit any that are not applicable.]
 
 ### Rationale
 
@@ -14,6 +14,11 @@
 
 ### Testing Strategy
 
--   **Unit Tests**: [Description of new or updated unit tests.]
--   **Integration Tests**: [Description of how the components are tested together.]
--   **Manual Verification**: [Steps for a reviewer to manually verify the changes.]
+[Describe the testing approach based on what is visible in the diff — new tests added, existing tests modified, or manual verification steps a reviewer should take. Only include subsections that apply; omit any that do not.]
+
+Formatting rules:
+- Use precise technical terminology
+- Only include sections and subsections with content derived from the actual diff — never output placeholder text like "N/A", "[Description]", or "Component A/B"
+- Output only the description body — no title line, no preamble
+
+The git diff may be truncated – focus analysis on visible changes.

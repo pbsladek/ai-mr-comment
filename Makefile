@@ -3,8 +3,9 @@ APP       := ai-mr-comment
 # If your local tags are stale, run `make fetch-tags build` or override:
 #   make build VERSION=v1.2.3
 VERSION   ?= $(shell git describe --tags --always 2>/dev/null | sed 's/-[0-9]*-g[0-9a-f]*$$//' || echo dev)
-COMMIT    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
-LDFLAGS   := -ldflags="-s -w -X 'main.Version=$(VERSION)' -X 'main.Commit=$(COMMIT)'"
+COMMIT       ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+COMMIT_FULL  ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+LDFLAGS      := -ldflags="-s -w -X 'main.Version=$(VERSION)' -X 'main.Commit=$(COMMIT)' -X 'main.CommitFull=$(COMMIT_FULL)'"
 BUILD_DIR := dist
 PLATFORMS := linux/amd64 darwin/amd64 darwin/arm64 windows/amd64
 
@@ -219,11 +220,15 @@ DOCKER_RUN_FLAGS ?= \
 docker-build: ## Build the Docker image (IMAGE=name TAG=tag)
 	docker build \
 		--build-arg VERSION=$(VERSION) \
+		--build-arg COMMIT=$(COMMIT) \
+		--build-arg COMMIT_FULL=$(COMMIT_FULL) \
 		-t $(DOCKER_IMAGE):$(DOCKER_TAG) .
 
 docker-build-fips: ## Build the FIPS Docker image (IMAGE=name TAG=tag-fips)
 	docker build \
 		--build-arg VERSION=$(VERSION) \
+		--build-arg COMMIT=$(COMMIT) \
+		--build-arg COMMIT_FULL=$(COMMIT_FULL) \
 		--build-arg GOFIPS140=v1.0.0 \
 		-t $(DOCKER_IMAGE):$(DOCKER_TAG)-fips .
 

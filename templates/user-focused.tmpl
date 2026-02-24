@@ -1,16 +1,25 @@
+Carefully review the provided git diff and generate a user-focused MR/PR description written for a product or non-technical audience. Use this format:
+
 ### What's New?
 
-[A clear, non-technical explanation of the new feature or improvement from a user's perspective.]
+[A clear, non-technical explanation of the new feature, improvement, or fix from a user's perspective. Derive this from the actual diff.]
 
 ### Why is This Important?
 
-[Explanation of the user problem this change solves or the value it provides. E.g., "This makes it easier for users to manage their settings by..." or "This fixes a bug where users were unable to..."]
+[Explain the user problem this change solves or the value it provides. Be specific to the diff — do not use generic placeholder text.]
 
 ### How It Works
 
-[A brief walkthrough of the new user flow, possibly with screenshots or GIFs if applicable.]
+[A brief walkthrough of the new or changed behaviour. Only include if there is a meaningful user-facing flow to describe; omit if the change is purely internal with no visible user impact.]
 
 ### Impact
 
--   **Users**: [How this change will affect users.]
--   **Internal Teams**: [Any impact on support, marketing, or other teams.]
+[Describe the actual impact visible in the diff. Only include bullet points that apply — omit any that are not relevant to this change. Never output placeholder text like "[How this change will affect users]".]
+
+Formatting rules:
+- Use plain language accessible to non-technical readers
+- Only include sections with content derived from the actual diff
+- Never output placeholder text like "N/A", "[Description]", or "[How this change will affect users]"
+- Output only the description body — no title line, no preamble
+
+The git diff may be truncated – focus analysis on visible changes.
