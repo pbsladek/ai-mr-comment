@@ -354,6 +354,10 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			}
 
 			out := cmd.OutOrStdout()
+			// When writing to a file, suppress all text output to the terminal.
+			if outputPath != "" {
+				out = io.Discard
+			}
 			// Split once; reuse the slice for line-count logging and truncation.
 			diffLines := strings.Split(diffContent, "\n")
 			rawLines := len(diffLines)
@@ -779,7 +783,7 @@ openai_endpoint = "https://api.openai.com/v1/"
 # --- Anthropic ---
 # anthropic_api_key = ""   # or set ANTHROPIC_API_KEY env var
 anthropic_model    = "claude-sonnet-4-6"
-anthropic_endpoint = "https://api.anthropic.com"
+anthropic_endpoint = "https://api.anthropic.com/"
 # Other Anthropic models: claude-opus-4-6, claude-haiku-4-5-20251001
 
 # --- Google Gemini ---

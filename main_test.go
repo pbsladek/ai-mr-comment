@@ -157,17 +157,23 @@ func TestNewRootCmd_OutputToFile(t *testing.T) {
 	outputFile := "testdata/output.txt"
 	defer func() { _ = os.Remove(outputFile) }()
 
+	var stdoutBuf strings.Builder
 	cmd := newRootCmd(dummyChatFn)
 	cmd.SetArgs([]string{"--file=testdata/diff.txt", "--provider=openai", "--output=" + outputFile})
 
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
-	cmd.SetOut(io.Discard)
+	cmd.SetOut(&stdoutBuf)
 	cmd.SetErr(io.Discard)
 
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
+	}
+
+	// --output must write to the file only — nothing should appear on stdout.
+	if stdoutBuf.Len() > 0 {
+		t.Errorf("expected no stdout output when --output is set, got: %q", stdoutBuf.String())
 	}
 
 	data, err := os.ReadFile(outputFile)
@@ -269,6 +275,68 @@ func TestNewRootCmd_MissingAnthropicKey(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "missing Anthropic API key") {
 		t.Fatalf("expected missing API key error, got %v", err)
+	}
+}
+
+func TestNoConfigFile_ProviderEnvVarWorks(t *testing.T) {
+	// Verify that each provider works when only the API key env var is set and
+	// there is no config file — the defaults in config.go must be sufficient.
+	cases := []struct {
+		provider string
+		envKey   string
+	}{
+		{"openai", "OPENAI_API_KEY"},
+		{"anthropic", "ANTHROPIC_API_KEY"},
+		{"gemini", "GEMINI_API_KEY"},
+		{"ollama", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.provider, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			if tc.envKey != "" {
+				t.Setenv(tc.envKey, "dummy-key")
+			}
+			cmd := newRootCmd(dummyChatFn)
+			cmd.SetArgs([]string{"--file=testdata/simple.diff", "--provider=" + tc.provider})
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("expected no error with no config file and provider=%s, got %v", tc.provider, err)
+			}
+		})
+	}
+}
+
+func TestDefaultAnthropicEndpointHasTrailingSlash(t *testing.T) {
+	// Anthropic SDK WithBaseURL uses url.Parse relative resolution which strips
+	// the last path segment if there is no trailing slash, causing doubled paths
+	// like /v1/messages/v1/messages. The default must have a trailing slash.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ANTHROPIC_API_KEY", "dummy")
+
+	var capturedCfg *Config
+	chatFn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
+		capturedCfg = cfg
+		return "ok", nil
+	}
+	cmd := newRootCmd(chatFn)
+	cmd.SetArgs([]string{"--file=testdata/simple.diff", "--provider=anthropic"})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedCfg == nil {
+		t.Fatal("chatFn was not called")
+	}
+	if !strings.HasSuffix(capturedCfg.AnthropicEndpoint, "/") {
+		t.Errorf("AnthropicEndpoint default must end with '/'; got %q", capturedCfg.AnthropicEndpoint)
 	}
 }
 

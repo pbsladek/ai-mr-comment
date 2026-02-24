@@ -105,7 +105,7 @@ func loadConfigWith(v *viper.Viper, profile string) (*Config, error) {
 	v.SetDefault("openai_model", "gpt-4.1-mini")
 	v.SetDefault("openai_endpoint", "https://api.openai.com/v1/")
 	v.SetDefault("anthropic_model", "claude-sonnet-4-6")
-	v.SetDefault("anthropic_endpoint", "https://api.anthropic.com")
+	v.SetDefault("anthropic_endpoint", "https://api.anthropic.com/")
 	v.SetDefault("ollama_model", "llama3")
 	v.SetDefault("ollama_endpoint", "http://localhost:11434/api/generate")
 	v.SetDefault("gemini_model", "gemini-2.5-flash")
