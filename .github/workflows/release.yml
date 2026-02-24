@@ -22,6 +22,7 @@ jobs:
       skip: ${{ steps.resolve_tag.outputs.skip }}
       tag: ${{ steps.resolve_tag.outputs.tag }}
       tag_commit: ${{ steps.resolve_tag.outputs.tag_commit }}
+      tag_commit_short: ${{ steps.resolve_tag.outputs.tag_commit_short }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -178,6 +179,9 @@ jobs:
           tags: ${{ steps.docker_tags.outputs.tags }}
           build-args: |
             VERSION=${{ needs.validate.outputs.tag }}
+            COMMIT=${{ needs.validate.outputs.tag_commit_short }}
+            COMMIT_FULL=${{ needs.validate.outputs.tag_commit }}
+            CREATED=${{ github.run_started_at }}
 
       - name: Attest Docker image provenance
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
@@ -286,6 +290,9 @@ jobs:
           tags: ${{ steps.docker_tags_fips.outputs.tags }}
           build-args: |
             VERSION=${{ needs.validate.outputs.tag }}
+            COMMIT=${{ needs.validate.outputs.tag_commit_short }}
+            COMMIT_FULL=${{ needs.validate.outputs.tag_commit }}
+            CREATED=${{ github.run_started_at }}
             GOFIPS140=v1.0.0
 
       - name: Attest Docker FIPS image provenance

@@ -8,4 +8,4 @@
 !main.go
 !prompt.go
 !token_estimator.go
-!templates/default.tmpl
+!templates/
