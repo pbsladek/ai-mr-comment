@@ -222,7 +222,7 @@ func chatCompletions(ctx context.Context, cfg *Config, provider ApiProvider, sys
 		debugLog(cfg, "api: calling anthropic model=%s endpoint=%s mode=buffered", cfg.AnthropicModel, cfg.AnthropicEndpoint)
 		client := anthropic.NewClient(
 			anthropicopt.WithAPIKey(cfg.AnthropicAPIKey),
-			anthropicopt.WithBaseURL(cfg.AnthropicEndpoint),
+			anthropicopt.WithBaseURL(strings.TrimRight(cfg.AnthropicEndpoint, "/")+"/"),
 		)
 		return callAnthropic(ctx, &client, cfg, systemPrompt, diffContent)
 	case Ollama:
@@ -252,7 +252,7 @@ func streamToWriter(ctx context.Context, cfg *Config, provider ApiProvider, syst
 		debugLog(cfg, "api: calling anthropic model=%s endpoint=%s mode=stream", cfg.AnthropicModel, cfg.AnthropicEndpoint)
 		client := anthropic.NewClient(
 			anthropicopt.WithAPIKey(cfg.AnthropicAPIKey),
-			anthropicopt.WithBaseURL(cfg.AnthropicEndpoint),
+			anthropicopt.WithBaseURL(strings.TrimRight(cfg.AnthropicEndpoint, "/")+"/"),
 		)
 		return streamAnthropic(ctx, &client, cfg, systemPrompt, diffContent, w)
 	case Ollama:
