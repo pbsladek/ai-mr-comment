@@ -416,4 +416,6 @@ jobs:
           TAG: ${{ needs.validate.outputs.tag }}
           SOURCE_URL: ${{ needs.artifacts.outputs.source_url }}
           SOURCE_SHA256: ${{ needs.artifacts.outputs.source_sha256 }}
-        run: .github/scripts/dispatch-homebrew-tap.sh "${TAG}" "${SOURCE_URL}" "${SOURCE_SHA256}"
+          COMMIT: ${{ needs.validate.outputs.tag_commit_short }}
+          COMMIT_FULL: ${{ needs.validate.outputs.tag_commit }}
+        run: .github/scripts/dispatch-homebrew-tap.sh "${TAG}" "${SOURCE_URL}" "${SOURCE_SHA256}" "${COMMIT}" "${COMMIT_FULL}"
