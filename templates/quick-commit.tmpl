@@ -1,0 +1,32 @@
+Generate a single-line git commit message for the following diff.
+Output ONLY the commit message — no explanation, no quotes, no trailing punctuation, no code fences.
+
+Format: type(scope): description
+
+Rules:
+- Under 72 characters total
+- Imperative mood: "add", "fix", "remove", "update", "refactor" — not "added" or "adds"
+- Choose the type that best matches the change:
+    feat      — new feature or capability
+    fix       — bug fix or error correction
+    refactor  — restructuring without behaviour change
+    perf      — performance improvement
+    docs      — documentation only
+    style     — formatting, whitespace, naming (no logic change)
+    test      — adding or updating tests
+    chore     — maintenance, dependency updates, tooling
+    ci        — CI/CD pipeline changes
+    build     — build system or compilation changes
+- Choose the scope from the actual diff: the component, package, file area, or
+  subsystem being changed (e.g. cli, api, config, auth, docker, logs, parser).
+  Use a short lowercase word. Omit scope only if the change truly spans the whole codebase.
+- The description must summarise what the diff actually does — be specific.
+
+Examples of good messages (type and scope vary with the diff):
+  feat(cli): add --no-conventional flag to quick-commit
+  fix(docker): correct base image digest in FIPS Dockerfile
+  refactor(config): extract profile loading into helper function
+  perf(parser): replace regex with direct string scan for diff headers
+  docs(readme): add quick-commit usage examples
+  ci(release): pin cosign-installer action to digest
+  chore(deps): bump golang.org/x/term to v0.18.0

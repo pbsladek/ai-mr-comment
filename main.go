@@ -214,12 +214,8 @@ func normalizeCommitBody(raw string) string {
 		}
 	}
 
-	// Validate the subject line; prepend "feat: " if it doesn't look conventional.
 	subject, rest, hasRest := strings.Cut(out, "\n")
 	subject = strings.TrimSpace(subject)
-	if !isConventionalCommitLine(subject) {
-		subject = "feat: " + subject
-	}
 	if hasRest {
 		return subject + "\n" + rest
 	}
@@ -1069,7 +1065,7 @@ func newModelsCmd() *cobra.Command {
 // AI commit message, commits, and pushes — all in one step.
 func newQuickCommitCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
 	var provider, modelOverride, format, profileName string
-	var dryRun, noPush, breaking, multiLine, emoji bool
+	var dryRun, noPush, breaking, multiLine, emoji, noConventional bool
 
 	cmd := &cobra.Command{
 		Use:   "quick-commit",
@@ -1136,9 +1132,14 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			diffContent = processDiff(diffContent, 4000)
 
 			// Generate commit message via AI.
-			prompt := commitMsgPrompt
-			if multiLine {
+			var prompt string
+			switch {
+			case multiLine:
 				prompt = commitMsgBodyPrompt
+			case noConventional:
+				prompt = quickCommitFreePrompt
+			default:
+				prompt = quickCommitPrompt
 			}
 			if breaking {
 				prompt += "\n\nThis is a BREAKING CHANGE release. You MUST use the 'feat!' type (with an exclamation mark) to signal a breaking change, e.g. \"feat!(scope): description\" or \"feat!: description\"."
@@ -1227,6 +1228,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 	cmd.Flags().BoolVar(&breaking, "breaking", false, "Mark as a breaking change: forces feat! conventional commit type for a major version bump")
 	cmd.Flags().BoolVar(&multiLine, "multi-line", false, "Generate a multi-line commit message (subject + body) that pre-fills the PR/MR title and description")
 	cmd.Flags().BoolVar(&emoji, "emoji", false, "Append a type-matched gitmoji to the commit subject (e.g. feat → ✨, fix → 🐛, breaking → 💥)")
+	cmd.Flags().BoolVar(&noConventional, "no-conventional", false, "Disable conventional commits enforcement (use the AI output as-is)")
 	cmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate (defined in ~/.ai-mr-comment.toml under [profile.<name>])")
 	return cmd
 }

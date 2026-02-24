@@ -11,86 +11,27 @@ import (
 //go:embed templates/default.tmpl
 var defaultPromptTemplate string
 
+//go:embed templates/commit-msg.tmpl
+var commitMsgPrompt string
+
+//go:embed templates/quick-commit.tmpl
+var quickCommitPrompt string
+
+//go:embed templates/quick-commit-free.tmpl
+var quickCommitFreePrompt string
+
+//go:embed templates/commit-msg-body.tmpl
+var commitMsgBodyPrompt string
+
+//go:embed templates/changelog.tmpl
+var changelogPrompt string
+
 // titlePrompt is the system prompt used when --title is set. It instructs the
 // model to produce only a single concise title line with no extra text.
 const titlePrompt = `Generate a single-line MR/PR title for the following diff.
 Output only the title text — no explanation, no punctuation at the end, no quotes.
 Keep it under 72 characters. Use the imperative mood (e.g. "Add", "Fix", "Refactor").
 If the active template follows Conventional Commits style, prefix with the appropriate type (feat, fix, chore, etc.).`
-
-// commitMsgPrompt is the system prompt used when --commit-msg is set. It
-// instructs the model to produce a single conventional-style commit message
-// with no extra text, suitable for use in git commit -m "...".
-const commitMsgPrompt = `Generate a single-line git commit message for the following diff.
-Output only the commit message — no explanation, no quotes, no trailing punctuation.
-Keep it under 72 characters. Use the imperative mood (e.g. "Add", "Fix", "Refactor").
-Follow Conventional Commits format: type(scope): description
-Valid types: feat, fix, docs, style, refactor, test, chore, perf, ci, build
-The scope is optional; omit it if it would be too broad or redundant.
-Example: feat(auth): add JWT refresh token support`
-
-// commitMsgBodyPrompt is the system prompt used when --commit-msg --body is set.
-// It instructs the model to produce a multi-line git commit message:
-// a conventional subject line, a blank line, and a markdown body suitable
-// for use as a GitHub/GitLab PR/MR title + description.
-const commitMsgBodyPrompt = `Generate a git commit message for the following diff.
-Output only the commit message — no explanation, no quotes, no code fences.
-Format: subject line, blank line, then a markdown body.
-
-Subject line rules:
-- Under 72 characters
-- Imperative mood (e.g. "Add", "Fix", "Refactor")
-- Follow Conventional Commits format: type(scope): description
-- Valid types: feat, fix, docs, style, refactor, test, chore, perf, ci, build
-- The scope is optional; omit it if it would be too broad or redundant
-
-Body rules:
-- Write for a developer opening a GitHub/GitLab PR — this text becomes the PR description
-- Use markdown: ## headings and bullet lists
-- Cover: what changed, why, and any notable implementation details
-- Keep it concise: 5-15 lines total
-- No filler phrases like "This commit..." or "In this PR..."
-
-Example:
-feat(auth): add JWT refresh token support
-
-## What Changed
-- Added /auth/refresh endpoint that issues a new access token
-- Refresh tokens are stored hashed in Redis with a 7-day TTL
-
-## Why
-Access tokens expire after 15 minutes; users were being logged out unexpectedly.`
-
-// changelogPrompt is the system prompt used by the changelog subcommand.
-// It instructs the model to produce a user-facing changelog entry in
-// Keep a Changelog markdown format, grouped by change type.
-const changelogPrompt = `You are writing a user-facing changelog entry for a software release.
-Analyse the provided git diff and produce a changelog section in Keep a Changelog format.
-
-Rules:
-- Output ONLY the changelog markdown — no preamble, no explanation, no code fences.
-- Group changes under the appropriate headings (use only the headings that apply):
-  ### Added      — new features visible to end users
-  ### Changed    — changes to existing behaviour
-  ### Deprecated — features that will be removed in a future release
-  ### Removed    — features removed in this release
-  ### Fixed      — bug fixes
-  ### Security   — security-related fixes or improvements
-  ### Breaking Changes — backwards-incompatible changes (API, CLI flags, config keys)
-- Each item is a single bullet (- …) in plain English aimed at end users, not developers.
-- Omit internal refactors, test changes, and formatting-only changes unless they affect behaviour.
-- If nothing fits a heading, omit that heading entirely.
-- Keep each bullet concise (one sentence, under 100 characters).
-
-Example output:
-### Added
-- Users can now export results as CSV from the dashboard.
-
-### Fixed
-- Sorted list no longer loses the selected item after refresh.
-
-### Breaking Changes
-- The --output flag now requires an explicit file extension.`
 
 // resolveSystemPrompt interprets the value of a --system-prompt flag.
 //

@@ -2442,10 +2442,13 @@ func TestNormalizeCommitBody_StripsFencedCodeBlock(t *testing.T) {
 }
 
 func TestNormalizeCommitBody_NonConventionalSubject(t *testing.T) {
+	// No type is injected — the subject is passed through as-is.
+	// The prompt (quickCommitPrompt / commitMsgBodyPrompt) is responsible
+	// for getting the LLM to produce a conventional subject.
 	raw := "add some stuff\n\n## Why\nIt was needed."
 	got := normalizeCommitBody(raw)
-	if !strings.HasPrefix(got, "feat: ") {
-		t.Errorf("expected feat: prefix added to non-conventional subject, got: %q", got)
+	if !strings.HasPrefix(got, "add some stuff") {
+		t.Errorf("expected subject preserved as-is, got: %q", got)
 	}
 	if !strings.Contains(got, "## Why") {
 		t.Errorf("expected body preserved, got: %q", got)
@@ -2596,5 +2599,139 @@ func TestAppendCommitEmoji_PreservesBody(t *testing.T) {
 	want := "feat: add thing ✨\n\n## Why\nBecause."
 	if got != want {
 		t.Errorf("appendCommitEmoji with body:\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
+// --- Embedded prompt template tests ---
+
+// TestEmbeddedPromptsNonEmpty verifies that all //go:embed prompt vars were
+// populated at build time. An empty string means the embed directive failed
+// silently or the file was accidentally emptied.
+func TestEmbeddedPromptsNonEmpty(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+	}{
+		{"commitMsgPrompt", commitMsgPrompt},
+		{"quickCommitPrompt", quickCommitPrompt},
+		{"quickCommitFreePrompt", quickCommitFreePrompt},
+		{"commitMsgBodyPrompt", commitMsgBodyPrompt},
+		{"changelogPrompt", changelogPrompt},
+		{"defaultPromptTemplate", defaultPromptTemplate},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if strings.TrimSpace(tc.content) == "" {
+				t.Errorf("%s is empty — embedded template file may be missing or blank", tc.name)
+			}
+		})
+	}
+}
+
+// TestQuickCommitUsesConventionalPrompt verifies that quick-commit (default)
+// sends quickCommitPrompt to the AI, which instructs type(scope) format.
+func TestQuickCommitUsesConventionalPrompt(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	skipIfDetachedHead(t)
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedPrompt string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		capturedPrompt = prompt
+		return "feat(cli): add flag", nil
+	}
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--dry-run", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil && strings.Contains(err.Error(), "no changes found") {
+		t.Skip("skipping: no diff available")
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// quickCommitPrompt requires type(scope) format and lists valid types.
+	if !strings.Contains(capturedPrompt, "type(scope)") {
+		t.Errorf("expected quickCommitPrompt (type(scope) format), got:\n%s", capturedPrompt)
+	}
+	if !strings.Contains(capturedPrompt, "feat") || !strings.Contains(capturedPrompt, "fix") {
+		t.Errorf("expected quickCommitPrompt to list commit types, got:\n%s", capturedPrompt)
+	}
+}
+
+// TestQuickCommitNoConventionalUsesFreePrompt verifies that --no-conventional
+// sends quickCommitFreePrompt, which does not require a type(scope) prefix.
+func TestQuickCommitNoConventionalUsesFreePrompt(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	skipIfDetachedHead(t)
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedPrompt string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		capturedPrompt = prompt
+		return "update config defaults", nil
+	}
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--no-conventional", "--dry-run", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil && strings.Contains(err.Error(), "no changes found") {
+		t.Skip("skipping: no diff available")
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// quickCommitFreePrompt explicitly says no conventional prefix is required.
+	if !strings.Contains(capturedPrompt, "No conventional commits prefix required") {
+		t.Errorf("expected quickCommitFreePrompt, got:\n%s", capturedPrompt)
+	}
+	// Must NOT use the conventional prompt.
+	if strings.Contains(capturedPrompt, "type(scope)") {
+		t.Errorf("--no-conventional should not send conventional prompt, got:\n%s", capturedPrompt)
+	}
+}
+
+// TestCommitMsgPromptUsedByRootCmd verifies that --commit-msg sends
+// commitMsgPrompt (not the stricter quickCommitPrompt).
+func TestCommitMsgPromptUsedByRootCmd(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedPrompt string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		capturedPrompt = prompt
+		return "fix(auth): handle nil token", nil
+	}
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--commit-msg", "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// commitMsgPrompt mentions Conventional Commits but is shorter/simpler than quickCommitPrompt.
+	if !strings.Contains(capturedPrompt, "Conventional Commits format") {
+		t.Errorf("expected commitMsgPrompt (mentions Conventional Commits format), got:\n%s", capturedPrompt)
+	}
+	// Must NOT be the quickCommitPrompt (which has the detailed type guide).
+	if strings.Contains(capturedPrompt, "type(scope): description\n\nRules:") {
+		t.Errorf("--commit-msg should use commitMsgPrompt, not quickCommitPrompt, got:\n%s", capturedPrompt)
 	}
 }
