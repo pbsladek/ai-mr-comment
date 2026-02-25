@@ -618,7 +618,7 @@ func TestGitCommit_EmptyMessageFails(t *testing.T) {
 	if !isGitRepo() {
 		t.Skip("skipping: not inside a git repository")
 	}
-	err := gitCommit("")
+	err := gitCommit("", "")
 	if err == nil {
 		t.Fatal("expected error for empty commit message, got nil")
 	}

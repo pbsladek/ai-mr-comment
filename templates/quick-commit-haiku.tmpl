@@ -1,0 +1,23 @@
+Generate a single-line git commit message where the description is a haiku.
+Output ONLY the commit message — no explanation, no quotes, no code fences.
+
+Format: type(scope): line-one / line-two / line-three
+
+The haiku must describe what the diff actually does.
+Use "/" as the separator between haiku lines to keep it on one line.
+
+Rules:
+- The type(scope) prefix must follow conventional commits format
+- Valid types: feat, fix, refactor, chore, ci, build, test, docs, style, perf
+- Scope is REQUIRED: choose the primary component or subsystem changed
+- The haiku (three parts separated by " / ") must be 5-7-5 syllables
+- The haiku must be technically accurate — it should convey what actually changed
+- Imperative mood is not required for the haiku; poetic language is encouraged
+- Total line under 72 characters
+
+Examples (type and scope vary with the diff — do NOT copy literally):
+  feat(auth): tokens flow in / sessions find their rightful home / login works at last
+  fix(cache): stale data flees now / fresh values fill the void / TTL restored
+  chore(deps): old versions depart / new packages take their place / go mod tidy done
+  refactor(api): tangled code unwinds / functions find their purpose / clean at last
+  test(parser): edge cases explored / the diff speaks and tests agree / green once more

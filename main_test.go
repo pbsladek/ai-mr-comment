@@ -2735,3 +2735,294 @@ func TestCommitMsgPromptUsedByRootCmd(t *testing.T) {
 		t.Errorf("--commit-msg should use commitMsgPrompt, not quickCommitPrompt, got:\n%s", capturedPrompt)
 	}
 }
+
+// TestQuickCommit_Chaos_DryRun verifies that --chaos sends quickCommitChaosPrompt
+// and overrides the diff content with "chaos mode".
+func TestQuickCommit_Chaos_DryRun(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	skipIfDetachedHead(t)
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedPrompt, capturedDiff string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, diff string) (string, error) {
+		capturedPrompt = prompt
+		capturedDiff = diff
+		return "chore(gremlins): ask nicely that the gremlins stop eating the cache", nil
+	}
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--chaos", "--dry-run", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(capturedPrompt, "pipeline trigger commit") {
+		t.Errorf("expected quickCommitChaosPrompt, got:\n%s", capturedPrompt)
+	}
+	if capturedDiff != "chaos mode" {
+		t.Errorf("expected diff to be 'chaos mode', got: %q", capturedDiff)
+	}
+	if !strings.Contains(buf.String(), "chore(gremlins)") {
+		t.Errorf("expected commit message in output, got: %q", buf.String())
+	}
+}
+
+// TestQuickCommit_Chaos_MutualExclusion verifies that --chaos cannot be combined
+// with --multi-line or --no-conventional.
+func TestQuickCommit_Chaos_MutualExclusion(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	skipIfDetachedHead(t)
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	for _, args := range [][]string{
+		{"quick-commit", "--chaos", "--multi-line", "--dry-run", "--provider=openai"},
+		{"quick-commit", "--chaos", "--no-conventional", "--dry-run", "--provider=openai"},
+		{"quick-commit", "--chaos", "--haiku", "--dry-run", "--provider=openai"},
+		{"quick-commit", "--chaos", "--roast", "--dry-run", "--provider=openai"},
+	} {
+		cmd := newRootCmd(dummyChatFn)
+		cmd.SetArgs(args)
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+
+		err := cmd.Execute()
+		if err == nil {
+			t.Errorf("expected error for args %v, got nil", args)
+		}
+	}
+}
+
+// TestQuickCommit_Haiku_DryRun verifies that --haiku sends quickCommitHaikuPrompt.
+func TestQuickCommit_Haiku_DryRun(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	skipIfDetachedHead(t)
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedPrompt string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		capturedPrompt = prompt
+		return "fix(cache): stale data flees now / fresh values fill the void / TTL restored", nil
+	}
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--haiku", "--dry-run", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil && strings.Contains(err.Error(), "no changes found") {
+		t.Skip("skipping: no diff available")
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(capturedPrompt, "5-7-5") {
+		t.Errorf("expected quickCommitHaikuPrompt, got:\n%s", capturedPrompt)
+	}
+	if !strings.Contains(buf.String(), "fix(cache)") {
+		t.Errorf("expected haiku commit in output, got: %q", buf.String())
+	}
+}
+
+// TestQuickCommit_Roast_DryRun verifies that --roast sends quickCommitRoastPrompt.
+func TestQuickCommit_Roast_DryRun(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	skipIfDetachedHead(t)
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedPrompt string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		capturedPrompt = prompt
+		return "refactor(naming): rename 'x' to something a human might understand", nil
+	}
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--roast", "--dry-run", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil && strings.Contains(err.Error(), "no changes found") {
+		t.Skip("skipping: no diff available")
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(capturedPrompt, "passive-aggressive") {
+		t.Errorf("expected quickCommitRoastPrompt, got:\n%s", capturedPrompt)
+	}
+	if !strings.Contains(buf.String(), "refactor(naming)") {
+		t.Errorf("expected roast commit in output, got: %q", buf.String())
+	}
+}
+
+// TestQuickCommit_Fortune_DryRun verifies that --fortune makes a second AI call
+// and appends the fortune to the output.
+func TestQuickCommit_Fortune_DryRun(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	skipIfDetachedHead(t)
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	callCount := 0
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		callCount++
+		if strings.Contains(prompt, "fortune-cookie") {
+			return "The best code is the code you didn't have to write.", nil
+		}
+		return "feat(api): add rate limiting", nil
+	}
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--fortune", "--dry-run", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil && strings.Contains(err.Error(), "no changes found") {
+		t.Skip("skipping: no diff available")
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if callCount != 2 {
+		t.Errorf("expected 2 AI calls (commit + fortune), got %d", callCount)
+	}
+	output := buf.String()
+	if !strings.Contains(output, "feat(api)") {
+		t.Errorf("expected commit message in output, got: %q", output)
+	}
+	if !strings.Contains(output, "best code") {
+		t.Errorf("expected fortune in output, got: %q", output)
+	}
+}
+
+// TestRootCmd_Chaos_UsesChaosMRPrompt verifies that --chaos on the root command
+// sends mrChaosPrompt as the system prompt.
+func TestRootCmd_Chaos_UsesChaosMRPrompt(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedPrompt string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		capturedPrompt = prompt
+		return "### What Even Is This\n\nChaos reigns.", nil
+	}
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--chaos", "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(capturedPrompt, "chaotic") && !strings.Contains(capturedPrompt, "technically accurate") {
+		t.Errorf("expected mrChaosPrompt, got:\n%s", capturedPrompt)
+	}
+}
+
+// TestRootCmd_Haiku_UsesHaikuMRPrompt verifies that --haiku on the root command
+// sends mrHaikuPrompt as the system prompt.
+func TestRootCmd_Haiku_UsesHaikuMRPrompt(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedPrompt string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		capturedPrompt = prompt
+		return "### Summary Haiku\n\ncode changes arrive\nsilently the diff is merged\nall tests still pass green", nil
+	}
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--haiku", "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(capturedPrompt, "5-7-5") {
+		t.Errorf("expected mrHaikuPrompt, got:\n%s", capturedPrompt)
+	}
+}
+
+// TestRootCmd_Roast_UsesRoastMRPrompt verifies that --roast on the root command
+// sends mrRoastPrompt as the system prompt.
+func TestRootCmd_Roast_UsesRoastMRPrompt(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedPrompt string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		capturedPrompt = prompt
+		return "### Summary\n\nSomebody did something, apparently.", nil
+	}
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--roast", "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(capturedPrompt, "sardonic") && !strings.Contains(capturedPrompt, "senior engineer") {
+		t.Errorf("expected mrRoastPrompt, got:\n%s", capturedPrompt)
+	}
+}
+
+// TestRootCmd_FunFlags_MutualExclusion verifies that funky style flags are
+// mutually exclusive with each other and with --template/--system-prompt/--commit-msg.
+func TestRootCmd_FunFlags_MutualExclusion(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	cases := [][]string{
+		{"--chaos", "--haiku", "--file=testdata/simple.diff", "--provider=openai"},
+		{"--chaos", "--roast", "--file=testdata/simple.diff", "--provider=openai"},
+		{"--haiku", "--roast", "--file=testdata/simple.diff", "--provider=openai"},
+		{"--chaos", "--template=sassy", "--file=testdata/simple.diff", "--provider=openai"},
+		{"--haiku", "--system-prompt=hello", "--file=testdata/simple.diff", "--provider=openai"},
+		{"--roast", "--commit-msg", "--file=testdata/simple.diff", "--provider=openai"},
+	}
+
+	for _, args := range cases {
+		cmd := newRootCmd(dummyChatFn)
+		cmd.SetArgs(args)
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+
+		err := cmd.Execute()
+		if err == nil {
+			t.Errorf("expected error for args %v, got nil", args)
+		}
+	}
+}

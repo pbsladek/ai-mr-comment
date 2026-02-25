@@ -256,6 +256,7 @@ func normalizeCommitBody(raw string) string {
 func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
 	var commit, diffFilePath, outputPath, provider, modelOverride, templateName, format, prURL, clipboardFlag, systemPromptFlag, profileName string
 	var debug, staged, smartChunk, generateTitle, generateCommitMsg, multiLine, verbose, exitCodeFlag, postFlag, estimate, autoYes, versionFlag bool
+	var mrChaos, mrHaiku, mrRoast bool
 	var exclude []string
 
 	rootCmd := &cobra.Command{
@@ -317,6 +318,21 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			}
 			if cmd.Flags().Changed("system-prompt") && cmd.Flags().Changed("template") {
 				return errors.New("--system-prompt and --template are mutually exclusive")
+			}
+			funStyleCount := 0
+			for _, f := range []bool{mrChaos, mrHaiku, mrRoast} {
+				if f {
+					funStyleCount++
+				}
+			}
+			if funStyleCount > 1 {
+				return errors.New("--chaos, --haiku, and --roast are mutually exclusive")
+			}
+			if funStyleCount > 0 && (cmd.Flags().Changed("template") || cmd.Flags().Changed("system-prompt")) {
+				return errors.New("--chaos, --haiku, and --roast cannot be combined with --template or --system-prompt")
+			}
+			if funStyleCount > 0 && generateCommitMsg {
+				return errors.New("--chaos, --haiku, and --roast cannot be combined with --commit-msg")
 			}
 
 			if format != "text" && format != "json" {
@@ -411,6 +427,19 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				}
 				systemPrompt = override
 				debugLog(cfg, "system-prompt: override applied length=%d", len(systemPrompt))
+			}
+
+			// Fun style flags override the system prompt with a personality template.
+			switch {
+			case mrChaos:
+				systemPrompt = mrChaosPrompt
+				debugLog(cfg, "style: chaos mode enabled")
+			case mrHaiku:
+				systemPrompt = mrHaikuPrompt
+				debugLog(cfg, "style: haiku mode enabled")
+			case mrRoast:
+				systemPrompt = mrRoastPrompt
+				debugLog(cfg, "style: roast mode enabled")
 			}
 
 			// When --exit-code is set, prepend a verdict instruction so the AI starts
@@ -755,6 +784,9 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().BoolVarP(&autoYes, "yes", "y", false, "Auto-confirm the cost estimate prompt (use with --estimate)")
 	rootCmd.Flags().BoolVar(&versionFlag, "version", false, "Print version and exit")
 	rootCmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate (defined in ~/.ai-mr-comment.toml under [profile.<name>])")
+	rootCmd.Flags().BoolVar(&mrChaos, "chaos", false, "Generate a chaotic, dramatically over-the-top MR/PR description (still technically accurate)")
+	rootCmd.Flags().BoolVar(&mrHaiku, "haiku", false, "Generate the entire MR/PR description as a sequence of haikus")
+	rootCmd.Flags().BoolVar(&mrRoast, "roast", false, "Generate a technically accurate but sardonically judgmental MR/PR description")
 
 	rootCmd.AddCommand(newInitConfigCmd())
 	rootCmd.AddCommand(newModelsCmd())
@@ -1095,6 +1127,7 @@ func newModelsCmd() *cobra.Command {
 func newQuickCommitCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
 	var provider, modelOverride, format, profileName string
 	var dryRun, noPush, breaking, multiLine, emoji, noConventional bool
+	var chaos, haiku, roast, fortune bool
 
 	cmd := &cobra.Command{
 		Use:   "quick-commit",
@@ -1156,13 +1189,44 @@ remote. Use --dry-run to preview the generated message without committing.`,
 				return fmt.Errorf("no changes found to generate a commit message for")
 			}
 
+			// Validate mutually exclusive fun flags.
+			funFlags := 0
+			for _, f := range []bool{chaos, haiku, roast} {
+				if f {
+					funFlags++
+				}
+			}
+			if funFlags > 1 {
+				return fmt.Errorf("--chaos, --haiku, and --roast are mutually exclusive")
+			}
+			if chaos && (multiLine || noConventional) {
+				return fmt.Errorf("--chaos cannot be combined with --multi-line or --no-conventional")
+			}
+			if haiku && (multiLine || noConventional) {
+				return fmt.Errorf("--haiku cannot be combined with --multi-line or --no-conventional")
+			}
+			if roast && (multiLine || noConventional) {
+				return fmt.Errorf("--roast cannot be combined with --multi-line or --no-conventional")
+			}
+
 			// Prepend branch name so the AI can reference the ticket key.
 			diffContent = "Branch: " + branch + "\n\n" + diffContent
 			diffContent = processDiff(diffContent, 4000)
 
+			// --chaos ignores the real diff; just pass a fixed token.
+			if chaos {
+				diffContent = "chaos mode"
+			}
+
 			// Generate commit message via AI.
 			var prompt string
 			switch {
+			case chaos:
+				prompt = quickCommitChaosPrompt
+			case haiku:
+				prompt = quickCommitHaikuPrompt
+			case roast:
+				prompt = quickCommitRoastPrompt
 			case multiLine:
 				prompt = commitMsgBodyPrompt
 			case noConventional:
@@ -1197,14 +1261,31 @@ remote. Use --dry-run to preview the generated message without committing.`,
 				return fmt.Errorf("AI returned an empty commit message")
 			}
 
+			// Generate a fortune trailer if requested.
+			var fortuneBody string
+			if fortune {
+				rawFortune, fortuneErr := chatFn(cmd.Context(), cfg, cfg.Provider, fortunePrompt, "generate a fortune")
+				if fortuneErr != nil {
+					return fmt.Errorf("generating fortune: %w", fortuneErr)
+				}
+				fortuneBody = strings.TrimSpace(rawFortune)
+			}
+
+			jsonMsg := commitMessage
+			if fortuneBody != "" {
+				jsonMsg += "\n\n" + fortuneBody
+			}
 			if format == "json" {
 				if err := json.NewEncoder(out).Encode(struct {
 					CommitMessage string `json:"commit_message"`
-				}{CommitMessage: commitMessage}); err != nil {
+				}{CommitMessage: jsonMsg}); err != nil {
 					return err
 				}
 			} else {
 				_, _ = fmt.Fprintf(out, "%s\n\n", commitMessage)
+				if fortuneBody != "" {
+					_, _ = fmt.Fprintf(out, "%s\n\n", fortuneBody)
+				}
 			}
 
 			if dryRun {
@@ -1218,7 +1299,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			if format != "json" {
 				_, _ = fmt.Fprintln(out, "Committing...")
 			}
-			if err := gitCommit(commitMessage); err != nil {
+			if err := gitCommit(commitMessage, fortuneBody); err != nil {
 				return err
 			}
 
@@ -1258,6 +1339,10 @@ remote. Use --dry-run to preview the generated message without committing.`,
 	cmd.Flags().BoolVar(&multiLine, "multi-line", false, "Generate a multi-line commit message (subject + body) that pre-fills the PR/MR title and description")
 	cmd.Flags().BoolVar(&emoji, "emoji", false, "Append a type-matched gitmoji to the commit subject (e.g. feat → ✨, fix → 🐛, breaking → 💥)")
 	cmd.Flags().BoolVar(&noConventional, "no-conventional", false, "Disable conventional commits enforcement (use the AI output as-is)")
+	cmd.Flags().BoolVar(&chaos, "chaos", false, "Generate a random funny/absurd conventional commit message (great for pipeline trigger commits)")
+	cmd.Flags().BoolVar(&haiku, "haiku", false, "Generate the commit message description as a 5-7-5 haiku about the diff")
+	cmd.Flags().BoolVar(&roast, "roast", false, "Generate a technically accurate but passive-aggressively judgmental commit message")
+	cmd.Flags().BoolVar(&fortune, "fortune", false, "Append a developer-wisdom fortune-cookie quote as a commit message trailer")
 	cmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate (defined in ~/.ai-mr-comment.toml under [profile.<name>])")
 	return cmd
 }
@@ -1275,9 +1360,16 @@ alias amc-commit-multi='ai-mr-comment --commit-msg --multi-line --staged'  # mul
 alias amc-title='ai-mr-comment --title'                        # include a PR/MR title
 alias amc-json='ai-mr-comment --format=json'                   # JSON output
 alias amc-debug='ai-mr-comment --debug'                        # token/cost estimate
+alias amc-chaos='ai-mr-comment --chaos'                        # chaotic but accurate MR/PR description
+alias amc-haiku='ai-mr-comment --haiku'                        # MR/PR description as haikus
+alias amc-roast='ai-mr-comment --roast'                        # sardonically judgmental MR/PR description
 alias amc-qc='ai-mr-comment quick-commit'                      # stage + AI commit + push
 alias amc-qc-dry='ai-mr-comment quick-commit --dry-run'        # preview commit msg
 alias amc-qc-breaking='ai-mr-comment quick-commit --breaking'  # breaking change commit (feat!)
+alias amc-qc-chaos='ai-mr-comment quick-commit --chaos'        # funny/absurd conventional commit
+alias amc-qc-haiku='ai-mr-comment quick-commit --haiku'        # commit description as a haiku
+alias amc-qc-roast='ai-mr-comment quick-commit --roast'        # passive-aggressive accurate commit
+alias amc-qc-fortune='ai-mr-comment quick-commit --fortune'    # commit + dev-wisdom fortune trailer
 alias amc-cl='ai-mr-comment changelog'                         # generate changelog entry
 alias amc-models='ai-mr-comment models'                        # list available models
 alias amc-init='ai-mr-comment init-config'                     # write default config
@@ -1310,9 +1402,16 @@ Aliases defined:
   amc-title          — generate comment + PR/MR title
   amc-json           — output as JSON
   amc-debug          — show token/cost estimate
+  amc-chaos          — chaotic but accurate MR/PR description
+  amc-haiku          — MR/PR description as haikus
+  amc-roast          — sardonically judgmental MR/PR description
   amc-qc             — quick-commit (stage + AI commit + push)
   amc-qc-dry         — quick-commit dry-run (preview only)
   amc-qc-breaking    — quick-commit with breaking change (feat!)
+  amc-qc-chaos       — quick-commit with funny/absurd conventional commit
+  amc-qc-haiku       — quick-commit with commit description as a haiku
+  amc-qc-roast       — quick-commit with passive-aggressive accurate commit
+  amc-qc-fortune     — quick-commit with dev-wisdom fortune trailer
   amc-cl             — changelog subcommand
   amc-models         — list available models
   amc-init           — write default config file`,
