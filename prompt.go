@@ -29,6 +29,36 @@ var quickCommitHaikuPrompt string
 //go:embed templates/quick-commit-roast.tmpl
 var quickCommitRoastPrompt string
 
+//go:embed templates/quick-commit-monday.tmpl
+var quickCommitMondayPrompt string
+
+//go:embed templates/quick-commit-jira.tmpl
+var quickCommitJiraPrompt string
+
+//go:embed templates/quick-commit-emoji.tmpl
+var quickCommitEmojiPrompt string
+
+//go:embed templates/quick-commit-sassy.tmpl
+var quickCommitSassyPrompt string
+
+//go:embed templates/quick-commit-technical.tmpl
+var quickCommitTechnicalPrompt string
+
+//go:embed templates/quick-commit-intern.tmpl
+var quickCommitInternPrompt string
+
+//go:embed templates/quick-commit-shakespeare.tmpl
+var quickCommitShakespearePrompt string
+
+//go:embed templates/quick-commit-manager.tmpl
+var quickCommitManagerPrompt string
+
+//go:embed templates/quick-commit-yoda.tmpl
+var quickCommitYodaPrompt string
+
+//go:embed templates/quick-commit-excuse.tmpl
+var quickCommitExcusePrompt string
+
 //go:embed templates/commit-msg-body.tmpl
 var commitMsgBodyPrompt string
 
@@ -43,6 +73,21 @@ var mrHaikuPrompt string
 
 //go:embed templates/mr-roast.tmpl
 var mrRoastPrompt string
+
+//go:embed templates/mr-intern.tmpl
+var mrInternPrompt string
+
+//go:embed templates/mr-shakespeare.tmpl
+var mrShakespearePrompt string
+
+//go:embed templates/mr-manager.tmpl
+var mrManagerPrompt string
+
+//go:embed templates/mr-yoda.tmpl
+var mrYodaPrompt string
+
+//go:embed templates/mr-excuse.tmpl
+var mrExcusePrompt string
 
 // fortunePrompt is used to generate a short developer-wisdom fortune to append
 // as a commit message trailer when --fortune is set.

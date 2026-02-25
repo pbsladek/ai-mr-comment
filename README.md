@@ -29,6 +29,16 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 - **Haiku mode** (`--haiku`) — commit description as a 5-7-5 haiku on `quick-commit`; full MR/PR description in haiku form on the root command
 - **Roast mode** (`--roast`) — passive-aggressive commit on `quick-commit`; sardonically judgmental MR/PR description on the root command
 - **Fortune trailer** (`--fortune` on `quick-commit`) — appends a dev-wisdom fortune-cookie quote as a commit body
+- **Monday mode** (`--monday` on `quick-commit`) — casual, low-energy "pre-coffee" commit message
+- **Jira commit mode** (`--jira` on `quick-commit`) — prefixes the commit message with the Jira ticket key extracted from the branch name
+- **Emoji commit mode** (`--emoji-commit` on `quick-commit`) — appends a type-matched gitmoji to the commit description
+- **Sassy mode** (`--sassy` on `quick-commit`) — sassy but technically accurate commit message
+- **Technical mode** (`--technical` on `quick-commit`) — maximum technical precision; references exact function/struct names from the diff
+- **Intern mode** (`--intern`) — written by an overly enthusiastic junior developer who is SO excited about everything; works on both root cmd and `quick-commit`
+- **Shakespeare mode** (`--shakespeare`) — Early Modern English, iambic cadence, dramatic flair; works on both root cmd and `quick-commit`
+- **Manager mode** (`--manager`) — passive-aggressive corporate non-speak, "per our earlier discussion"; works on both root cmd and `quick-commit`
+- **Yoda mode** (`--yoda`) — inverted syntax, object before subject, strong with this one the force is; works on both root cmd and `quick-commit`
+- **Excuse mode** (`--excuse`) — technically accurate but every section has a built-in justification for why it had to be this way; works on both root cmd and `quick-commit`
 - **CI/CD gate** (`--exit-code`) — exits with code 2 when the AI flags critical issues, enabling pipeline enforcement
 - **Auto-post comments** (`--post`) — publishes the generated comment directly to the GitHub PR or GitLab MR via API
 - **Named config profiles** (`--profile`) — switch between providers/models/templates with a single flag; define profiles in `~/.ai-mr-comment.toml` under `[profile.<name>]`
@@ -600,6 +610,46 @@ ai-mr-comment quick-commit --fortune
 # Combine chaos + fortune for maximum vibes
 ai-mr-comment quick-commit --chaos --fortune
 
+# Monday mode — casual, low-energy "pre-coffee" commit
+ai-mr-comment quick-commit --monday
+# e.g. chore(deps): update the packages, it is what it is
+
+# Jira mode — prefix with ticket key extracted from branch name
+ai-mr-comment quick-commit --jira
+# e.g. feat(auth): ABC-123 add JWT refresh token support
+
+# Emoji-commit mode — append a type-matched gitmoji to the description
+ai-mr-comment quick-commit --emoji-commit
+# e.g. feat(auth): add refresh token rotation ✨
+
+# Sassy mode — accurate but with attitude
+ai-mr-comment quick-commit --sassy
+# e.g. fix(auth): handle the edge case that definitely should have been handled
+
+# Technical mode — maximum precision, references exact names from the diff
+ai-mr-comment quick-commit --technical
+# e.g. refactor(api): replace O(n²) scan with hash-map lookup in resolveUser
+
+# Intern mode — SO excited about this commit!!
+ai-mr-comment quick-commit --intern
+# e.g. feat(auth): add the login thing everyone was asking about!!
+
+# Shakespeare mode — hark, the diff doth speak
+ai-mr-comment quick-commit --shakespeare
+# e.g. fix(parser): hark, the null doth crash our noble code no more
+
+# Manager mode — per our earlier alignment session
+ai-mr-comment quick-commit --manager
+# e.g. feat(auth): action item from last sprint re: token refresh, going forward
+
+# Yoda mode — inverted syntax, strong with this commit it is
+ai-mr-comment quick-commit --yoda
+# e.g. fix(cache): stale data, purge we must
+
+# Excuse mode — it happened for reasons, there were constraints
+ai-mr-comment quick-commit --excuse
+# e.g. fix(parser): handle empty input, which apparently nobody tested before
+
 # JSON output — only commit_message is printed, all status lines suppressed
 ai-mr-comment quick-commit --format json
 # {"commit_message":"feat(cli): add login endpoint"}
@@ -624,6 +674,16 @@ Steps performed:
 | `--haiku` | Write the commit description as a 5-7-5 haiku about the actual diff |
 | `--roast` | Technically accurate but passive-aggressively judgmental commit message |
 | `--fortune` | Append a dev-wisdom fortune-cookie quote as a commit body (`git log` shows it as a trailer) |
+| `--monday` | Casual, low-energy "pre-coffee" tone; accurate but undemanding |
+| `--jira` | Prefix the message with the Jira ticket key extracted from the branch name |
+| `--emoji-commit` | Append a type-matched gitmoji to the commit description |
+| `--sassy` | Sassy but technically accurate commit message |
+| `--technical` | Maximum technical precision; references exact function/struct names from the diff |
+| `--intern` | Overly enthusiastic junior-developer commit message |
+| `--shakespeare` | Commit description in Shakespearean Early Modern English |
+| `--manager` | Passive-aggressive corporate non-speak commit message |
+| `--yoda` | Commit description in Yoda's inverted syntax |
+| `--excuse` | Technically accurate commit message with a built-in excuse |
 | `--format json` | Output `{"commit_message":"..."}` only; suppress status lines |
 | `--provider` | Override the AI provider |
 | `--model` | Override the model |
@@ -697,6 +757,18 @@ Aliases defined:
 | `amc-chaos` | `ai-mr-comment --chaos` |
 | `amc-haiku` | `ai-mr-comment --haiku` |
 | `amc-roast` | `ai-mr-comment --roast` |
+| `amc-intern` | `ai-mr-comment --intern` |
+| `amc-shakespeare` | `ai-mr-comment --shakespeare` |
+| `amc-manager` | `ai-mr-comment --manager` |
+| `amc-yoda` | `ai-mr-comment --yoda` |
+| `amc-excuse` | `ai-mr-comment --excuse` |
+| `amc-conventional` | `ai-mr-comment --template=conventional` |
+| `amc-emoji` | `ai-mr-comment --template=emoji` |
+| `amc-jira` | `ai-mr-comment --template=jira` |
+| `amc-monday` | `ai-mr-comment --template=monday` |
+| `amc-sassy` | `ai-mr-comment --template=sassy` |
+| `amc-technical` | `ai-mr-comment --template=technical` |
+| `amc-user` | `ai-mr-comment --template=user-focused` |
 | `amc-qc` | `ai-mr-comment quick-commit` |
 | `amc-qc-dry` | `ai-mr-comment quick-commit --dry-run` |
 | `amc-qc-breaking` | `ai-mr-comment quick-commit --breaking` |
@@ -704,6 +776,16 @@ Aliases defined:
 | `amc-qc-haiku` | `ai-mr-comment quick-commit --haiku` |
 | `amc-qc-roast` | `ai-mr-comment quick-commit --roast` |
 | `amc-qc-fortune` | `ai-mr-comment quick-commit --fortune` |
+| `amc-qc-monday` | `ai-mr-comment quick-commit --monday` |
+| `amc-qc-jira` | `ai-mr-comment quick-commit --jira` |
+| `amc-qc-emoji` | `ai-mr-comment quick-commit --emoji-commit` |
+| `amc-qc-sassy` | `ai-mr-comment quick-commit --sassy` |
+| `amc-qc-technical` | `ai-mr-comment quick-commit --technical` |
+| `amc-qc-intern` | `ai-mr-comment quick-commit --intern` |
+| `amc-qc-shakespeare` | `ai-mr-comment quick-commit --shakespeare` |
+| `amc-qc-manager` | `ai-mr-comment quick-commit --manager` |
+| `amc-qc-yoda` | `ai-mr-comment quick-commit --yoda` |
+| `amc-qc-excuse` | `ai-mr-comment quick-commit --excuse` |
 | `amc-cl` | `ai-mr-comment changelog` |
 | `amc-models` | `ai-mr-comment models` |
 | `amc-init` | `ai-mr-comment init-config` |

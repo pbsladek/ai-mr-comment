@@ -257,6 +257,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	var commit, diffFilePath, outputPath, provider, modelOverride, templateName, format, prURL, clipboardFlag, systemPromptFlag, profileName string
 	var debug, staged, smartChunk, generateTitle, generateCommitMsg, multiLine, verbose, exitCodeFlag, postFlag, estimate, autoYes, versionFlag bool
 	var mrChaos, mrHaiku, mrRoast bool
+	var mrIntern, mrShakespeare, mrManager, mrYoda, mrExcuse bool
 	var exclude []string
 
 	rootCmd := &cobra.Command{
@@ -319,20 +320,21 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			if cmd.Flags().Changed("system-prompt") && cmd.Flags().Changed("template") {
 				return errors.New("--system-prompt and --template are mutually exclusive")
 			}
+			mrStyleFlags := []bool{mrChaos, mrHaiku, mrRoast, mrIntern, mrShakespeare, mrManager, mrYoda, mrExcuse}
 			funStyleCount := 0
-			for _, f := range []bool{mrChaos, mrHaiku, mrRoast} {
+			for _, f := range mrStyleFlags {
 				if f {
 					funStyleCount++
 				}
 			}
 			if funStyleCount > 1 {
-				return errors.New("--chaos, --haiku, and --roast are mutually exclusive")
+				return errors.New("--chaos, --haiku, --roast, --intern, --shakespeare, --manager, --yoda, and --excuse are mutually exclusive")
 			}
 			if funStyleCount > 0 && (cmd.Flags().Changed("template") || cmd.Flags().Changed("system-prompt")) {
-				return errors.New("--chaos, --haiku, and --roast cannot be combined with --template or --system-prompt")
+				return errors.New("style flags cannot be combined with --template or --system-prompt")
 			}
 			if funStyleCount > 0 && generateCommitMsg {
-				return errors.New("--chaos, --haiku, and --roast cannot be combined with --commit-msg")
+				return errors.New("style flags cannot be combined with --commit-msg")
 			}
 
 			if format != "text" && format != "json" {
@@ -440,6 +442,21 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			case mrRoast:
 				systemPrompt = mrRoastPrompt
 				debugLog(cfg, "style: roast mode enabled")
+			case mrIntern:
+				systemPrompt = mrInternPrompt
+				debugLog(cfg, "style: intern mode enabled")
+			case mrShakespeare:
+				systemPrompt = mrShakespearePrompt
+				debugLog(cfg, "style: shakespeare mode enabled")
+			case mrManager:
+				systemPrompt = mrManagerPrompt
+				debugLog(cfg, "style: manager mode enabled")
+			case mrYoda:
+				systemPrompt = mrYodaPrompt
+				debugLog(cfg, "style: yoda mode enabled")
+			case mrExcuse:
+				systemPrompt = mrExcusePrompt
+				debugLog(cfg, "style: excuse mode enabled")
 			}
 
 			// When --exit-code is set, prepend a verdict instruction so the AI starts
@@ -787,6 +804,11 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().BoolVar(&mrChaos, "chaos", false, "Generate a chaotic, dramatically over-the-top MR/PR description (still technically accurate)")
 	rootCmd.Flags().BoolVar(&mrHaiku, "haiku", false, "Generate the entire MR/PR description as a sequence of haikus")
 	rootCmd.Flags().BoolVar(&mrRoast, "roast", false, "Generate a technically accurate but sardonically judgmental MR/PR description")
+	rootCmd.Flags().BoolVar(&mrIntern, "intern", false, "Generate an overly enthusiastic junior-developer MR/PR description")
+	rootCmd.Flags().BoolVar(&mrShakespeare, "shakespeare", false, "Generate the MR/PR description in Shakespearean Early Modern English")
+	rootCmd.Flags().BoolVar(&mrManager, "manager", false, "Generate the MR/PR description in passive-aggressive corporate non-speak")
+	rootCmd.Flags().BoolVar(&mrYoda, "yoda", false, "Generate the MR/PR description in Yoda's inverted syntax")
+	rootCmd.Flags().BoolVar(&mrExcuse, "excuse", false, "Generate a technically accurate MR/PR description with built-in excuses")
 
 	rootCmd.AddCommand(newInitConfigCmd())
 	rootCmd.AddCommand(newModelsCmd())
@@ -1128,6 +1150,8 @@ func newQuickCommitCmd(chatFn func(context.Context, *Config, ApiProvider, string
 	var provider, modelOverride, format, profileName string
 	var dryRun, noPush, breaking, multiLine, emoji, noConventional bool
 	var chaos, haiku, roast, fortune bool
+	var qcMonday, qcJira, qcEmoji, qcSassy, qcTechnical bool
+	var qcIntern, qcShakespeare, qcManager, qcYoda, qcExcuse bool
 
 	cmd := &cobra.Command{
 		Use:   "quick-commit",
@@ -1189,15 +1213,17 @@ remote. Use --dry-run to preview the generated message without committing.`,
 				return fmt.Errorf("no changes found to generate a commit message for")
 			}
 
-			// Validate mutually exclusive fun flags.
-			funFlags := 0
-			for _, f := range []bool{chaos, haiku, roast} {
+			// Validate mutually exclusive style flags.
+			styleFlagNames := []string{"--chaos", "--haiku", "--roast", "--monday", "--jira", "--emoji-commit", "--sassy", "--technical", "--intern", "--shakespeare", "--manager", "--yoda", "--excuse"}
+			styleFlags := []bool{chaos, haiku, roast, qcMonday, qcJira, qcEmoji, qcSassy, qcTechnical, qcIntern, qcShakespeare, qcManager, qcYoda, qcExcuse}
+			styleCount := 0
+			for _, f := range styleFlags {
 				if f {
-					funFlags++
+					styleCount++
 				}
 			}
-			if funFlags > 1 {
-				return fmt.Errorf("--chaos, --haiku, and --roast are mutually exclusive")
+			if styleCount > 1 {
+				return fmt.Errorf("%s are mutually exclusive", strings.Join(styleFlagNames, ", "))
 			}
 			if chaos && (multiLine || noConventional) {
 				return fmt.Errorf("--chaos cannot be combined with --multi-line or --no-conventional")
@@ -1227,6 +1253,26 @@ remote. Use --dry-run to preview the generated message without committing.`,
 				prompt = quickCommitHaikuPrompt
 			case roast:
 				prompt = quickCommitRoastPrompt
+			case qcMonday:
+				prompt = quickCommitMondayPrompt
+			case qcJira:
+				prompt = quickCommitJiraPrompt
+			case qcEmoji:
+				prompt = quickCommitEmojiPrompt
+			case qcSassy:
+				prompt = quickCommitSassyPrompt
+			case qcTechnical:
+				prompt = quickCommitTechnicalPrompt
+			case qcIntern:
+				prompt = quickCommitInternPrompt
+			case qcShakespeare:
+				prompt = quickCommitShakespearePrompt
+			case qcManager:
+				prompt = quickCommitManagerPrompt
+			case qcYoda:
+				prompt = quickCommitYodaPrompt
+			case qcExcuse:
+				prompt = quickCommitExcusePrompt
 			case multiLine:
 				prompt = commitMsgBodyPrompt
 			case noConventional:
@@ -1343,6 +1389,16 @@ remote. Use --dry-run to preview the generated message without committing.`,
 	cmd.Flags().BoolVar(&haiku, "haiku", false, "Generate the commit message description as a 5-7-5 haiku about the diff")
 	cmd.Flags().BoolVar(&roast, "roast", false, "Generate a technically accurate but passive-aggressively judgmental commit message")
 	cmd.Flags().BoolVar(&fortune, "fortune", false, "Append a developer-wisdom fortune-cookie quote as a commit message trailer")
+	cmd.Flags().BoolVar(&qcMonday, "monday", false, "Generate a casual, low-energy Monday-morning style commit message")
+	cmd.Flags().BoolVar(&qcJira, "jira", false, "Prefix commit message with Jira ticket key extracted from the branch name")
+	cmd.Flags().BoolVar(&qcEmoji, "emoji-commit", false, "Append a type-matched gitmoji to the commit description")
+	cmd.Flags().BoolVar(&qcSassy, "sassy", false, "Generate a sassy but technically accurate commit message")
+	cmd.Flags().BoolVar(&qcTechnical, "technical", false, "Generate a commit message with maximum technical precision")
+	cmd.Flags().BoolVar(&qcIntern, "intern", false, "Generate an overly enthusiastic junior-developer commit message")
+	cmd.Flags().BoolVar(&qcShakespeare, "shakespeare", false, "Generate the commit description in Shakespearean Early Modern English")
+	cmd.Flags().BoolVar(&qcManager, "manager", false, "Generate the commit description in passive-aggressive corporate non-speak")
+	cmd.Flags().BoolVar(&qcYoda, "yoda", false, "Generate the commit description in Yoda's inverted syntax")
+	cmd.Flags().BoolVar(&qcExcuse, "excuse", false, "Generate a technically accurate commit message with a built-in excuse")
 	cmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate (defined in ~/.ai-mr-comment.toml under [profile.<name>])")
 	return cmd
 }
@@ -1363,13 +1419,35 @@ alias amc-debug='ai-mr-comment --debug'                        # token/cost esti
 alias amc-chaos='ai-mr-comment --chaos'                        # chaotic but accurate MR/PR description
 alias amc-haiku='ai-mr-comment --haiku'                        # MR/PR description as haikus
 alias amc-roast='ai-mr-comment --roast'                        # sardonically judgmental MR/PR description
+alias amc-intern='ai-mr-comment --intern'                      # overly enthusiastic junior-dev MR/PR description
+alias amc-shakespeare='ai-mr-comment --shakespeare'            # MR/PR description in Shakespearean English
+alias amc-manager='ai-mr-comment --manager'                    # passive-aggressive corporate MR/PR description
+alias amc-yoda='ai-mr-comment --yoda'                          # MR/PR description in Yoda syntax
+alias amc-excuse='ai-mr-comment --excuse'                      # technically accurate MR/PR description with excuses
+alias amc-conventional='ai-mr-comment --template=conventional' # conventional commits style MR/PR description
+alias amc-emoji='ai-mr-comment --template=emoji'               # emoji-rich MR/PR description
+alias amc-jira='ai-mr-comment --template=jira'                 # Jira-friendly MR/PR description
+alias amc-monday='ai-mr-comment --template=monday'             # Monday.com task-style MR/PR description
+alias amc-sassy='ai-mr-comment --template=sassy'               # sassy MR/PR description
+alias amc-technical='ai-mr-comment --template=technical'       # deeply technical MR/PR description
+alias amc-user='ai-mr-comment --template=user-focused'         # user-impact focused MR/PR description
 alias amc-qc='ai-mr-comment quick-commit'                      # stage + AI commit + push
 alias amc-qc-dry='ai-mr-comment quick-commit --dry-run'        # preview commit msg
 alias amc-qc-breaking='ai-mr-comment quick-commit --breaking'  # breaking change commit (feat!)
-alias amc-qc-chaos='ai-mr-comment quick-commit --chaos'        # funny/absurd conventional commit
-alias amc-qc-haiku='ai-mr-comment quick-commit --haiku'        # commit description as a haiku
-alias amc-qc-roast='ai-mr-comment quick-commit --roast'        # passive-aggressive accurate commit
-alias amc-qc-fortune='ai-mr-comment quick-commit --fortune'    # commit + dev-wisdom fortune trailer
+alias amc-qc-chaos='ai-mr-comment quick-commit --chaos'              # funny/absurd conventional commit
+alias amc-qc-haiku='ai-mr-comment quick-commit --haiku'              # commit description as a haiku
+alias amc-qc-roast='ai-mr-comment quick-commit --roast'              # passive-aggressive accurate commit
+alias amc-qc-fortune='ai-mr-comment quick-commit --fortune'          # commit + dev-wisdom fortune trailer
+alias amc-qc-monday='ai-mr-comment quick-commit --monday'            # low-energy Monday-morning commit
+alias amc-qc-jira='ai-mr-comment quick-commit --jira'                # commit prefixed with Jira ticket key
+alias amc-qc-emoji='ai-mr-comment quick-commit --emoji-commit'       # commit with type-matched gitmoji
+alias amc-qc-sassy='ai-mr-comment quick-commit --sassy'              # sassy but accurate commit
+alias amc-qc-technical='ai-mr-comment quick-commit --technical'      # maximum technical precision commit
+alias amc-qc-intern='ai-mr-comment quick-commit --intern'            # overly enthusiastic junior-dev commit
+alias amc-qc-shakespeare='ai-mr-comment quick-commit --shakespeare'  # commit description in Shakespearean English
+alias amc-qc-manager='ai-mr-comment quick-commit --manager'          # passive-aggressive corporate commit
+alias amc-qc-yoda='ai-mr-comment quick-commit --yoda'                # commit description in Yoda syntax
+alias amc-qc-excuse='ai-mr-comment quick-commit --excuse'            # accurate commit with built-in excuse
 alias amc-cl='ai-mr-comment changelog'                         # generate changelog entry
 alias amc-models='ai-mr-comment models'                        # list available models
 alias amc-init='ai-mr-comment init-config'                     # write default config
@@ -1405,6 +1483,18 @@ Aliases defined:
   amc-chaos          — chaotic but accurate MR/PR description
   amc-haiku          — MR/PR description as haikus
   amc-roast          — sardonically judgmental MR/PR description
+  amc-intern         — overly enthusiastic junior-dev MR/PR description
+  amc-shakespeare    — MR/PR description in Shakespearean English
+  amc-manager        — passive-aggressive corporate MR/PR description
+  amc-yoda           — MR/PR description in Yoda syntax
+  amc-excuse         — technically accurate MR/PR description with excuses
+  amc-conventional   — conventional commits style MR/PR description
+  amc-emoji          — emoji-rich MR/PR description
+  amc-jira           — Jira-friendly MR/PR description
+  amc-monday         — Monday.com task-style MR/PR description
+  amc-sassy          — sassy MR/PR description
+  amc-technical      — deeply technical MR/PR description
+  amc-user           — user-impact focused MR/PR description
   amc-qc             — quick-commit (stage + AI commit + push)
   amc-qc-dry         — quick-commit dry-run (preview only)
   amc-qc-breaking    — quick-commit with breaking change (feat!)
@@ -1412,6 +1502,16 @@ Aliases defined:
   amc-qc-haiku       — quick-commit with commit description as a haiku
   amc-qc-roast       — quick-commit with passive-aggressive accurate commit
   amc-qc-fortune     — quick-commit with dev-wisdom fortune trailer
+  amc-qc-monday      — quick-commit with casual Monday-morning tone
+  amc-qc-jira        — quick-commit prefixed with Jira ticket key from branch
+  amc-qc-emoji       — quick-commit with type-matched gitmoji appended
+  amc-qc-sassy       — quick-commit with sassy but accurate message
+  amc-qc-technical   — quick-commit with maximum technical precision
+  amc-qc-intern      — quick-commit as an overly enthusiastic junior dev
+  amc-qc-shakespeare — quick-commit description in Shakespearean English
+  amc-qc-manager     — quick-commit in passive-aggressive corporate speak
+  amc-qc-yoda        — quick-commit description in Yoda syntax
+  amc-qc-excuse      — quick-commit with a built-in excuse
   amc-cl             — changelog subcommand
   amc-models         — list available models
   amc-init           — write default config file`,

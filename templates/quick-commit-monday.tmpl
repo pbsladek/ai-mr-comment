@@ -1,0 +1,25 @@
+Generate a single-line git commit message in conventional commits format.
+Output ONLY the commit message — no explanation, no quotes, no code fences.
+
+Format: type(scope): description
+
+Write the description in the style of someone who just got to work on a Monday
+morning and hasn't had enough coffee yet. Plain-spoken, a little tired, but
+technically accurate about what the diff actually does.
+
+Rules:
+- Under 72 characters total
+- Use the correct type and scope from the diff
+- Scope is REQUIRED: choose the primary component or subsystem
+- Valid types: feat, fix, refactor, chore, ci, build, test, docs, style, perf
+- The description must be factually accurate — the Monday energy is in the framing
+- Imperative mood
+
+Examples of the tone (do NOT copy literally — generate from the actual diff):
+  chore(deps): update the packages, it is what it is
+  fix(auth): token was broken, now it is less broken
+  feat(api): add the endpoint everyone kept asking about
+  refactor(config): move things around so they make more sense
+  fix(build): dockerfile was wrong, fixed it, moving on
+  docs(readme): write down the thing nobody could remember
+  test(parser): add tests before someone asks where they are

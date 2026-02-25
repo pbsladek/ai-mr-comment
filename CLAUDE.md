@@ -50,6 +50,8 @@ A command-line tool written in Go that generates professional MR/PR comments bas
 - `--system-prompt`: inline or `@file` override of the system prompt; mutually exclusive with `--template`.
 - `--multi-line`: with `--commit-msg` or `quick-commit`, generates a subject + blank line + markdown body; GitHub/GitLab use this to pre-fill the PR/MR title and description. Uses `commitMsgBodyPrompt` and `normalizeCommitBody`.
 - `--profile <name>`: activates a named config profile from `[profile.<name>]` in `~/.ai-mr-comment.toml`; available on root cmd, `changelog`, and `quick-commit`.
+- **Fun/style flags on root cmd** (`--chaos`, `--haiku`, `--roast`, `--intern`, `--shakespeare`, `--manager`, `--yoda`, `--excuse`): override system prompt with the corresponding `mr*Prompt` var; mutually exclusive with each other and with `--template`, `--system-prompt`, `--commit-msg`.
+- **Fun/style flags on `quick-commit`** (`--chaos`, `--haiku`, `--roast`, `--fortune`, `--monday`, `--jira`, `--emoji-commit`, `--sassy`, `--technical`, `--intern`, `--shakespeare`, `--manager`, `--yoda`, `--excuse`): select among embedded quick-commit prompt variants; all style flags are mutually exclusive with each other.
 
 ## Config Profiles
 
