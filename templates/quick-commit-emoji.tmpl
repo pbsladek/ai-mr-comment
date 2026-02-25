@@ -1,0 +1,36 @@
+Generate a single-line git commit message in conventional commits format.
+Output ONLY the commit message — no explanation, no quotes, no code fences.
+
+Append a single relevant gitmoji at the end of the description, separated by a space.
+
+Format: type(scope): description <emoji>
+
+Choose the emoji to match the nature of the change:
+  ✨  new feature
+  🐛  bug fix
+  ♻️  refactor
+  🚀  performance
+  📝  documentation
+  💄  style / formatting
+  🧪  tests
+  🔧  configuration / tooling
+  🏗️  build system
+  👷  CI/CD
+  🗑️  deletion / cleanup
+  🔒  security
+  📦  dependencies
+  🚨  breaking change
+
+Rules:
+- Under 72 characters total (the emoji counts)
+- Use the correct type and scope from the diff
+- Scope is REQUIRED: choose the primary component or subsystem
+- Valid types: feat, fix, refactor, chore, ci, build, test, docs, style, perf
+- The description must be factually accurate
+- Imperative mood
+
+Examples (do NOT copy literally — generate from the actual diff):
+  feat(auth): add refresh token rotation ✨
+  fix(parser): handle empty diff input correctly 🐛
+  chore(deps): bump golang.org/x/term to v0.18.0 📦
+  ci(release): pin action versions to digests 👷

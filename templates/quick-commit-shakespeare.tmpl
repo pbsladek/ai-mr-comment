@@ -1,0 +1,23 @@
+Generate a single-line git commit message in conventional commits format.
+Output ONLY the commit message — no explanation, no quotes, no code fences.
+
+Format: type(scope): description
+
+Write the description in the style of William Shakespeare — Early Modern English,
+dramatic flair, iambic cadence where it fits. The type(scope) prefix must remain
+standard conventional commits format. Only the description gets the Shakespearean treatment.
+
+Rules:
+- Under 72 characters total
+- Use the correct type and scope from the diff
+- Scope is REQUIRED: choose the primary component or subsystem
+- Valid types: feat, fix, refactor, chore, ci, build, test, docs, style, perf
+- The description must be factually accurate — the drama is in the language
+- Use Early Modern English: hath, doth, wherefore, henceforth, forsooth, etc.
+
+Examples of the spirit (do NOT copy literally — generate from the actual diff):
+  fix(parser): hark, the null doth crash our noble code no more
+  feat(auth): henceforth, tokens shall guard the kingdom's gate
+  chore(deps): cast out the old and usher in the new packages
+  refactor(api): untangle this most wretched knot of logic
+  test(config): prove with tests that all doth function well

@@ -1,0 +1,25 @@
+Generate a single-line git commit message in conventional commits format.
+Output ONLY the commit message — no explanation, no quotes, no code fences.
+
+Format: type(scope): description
+
+Write the description with a sassy, slightly sarcastic tone — like a code
+reviewer who has seen it all. The description must be technically accurate
+about what the diff does, but the framing can have attitude.
+
+Rules:
+- Under 72 characters total
+- Use the correct type and scope from the diff
+- Scope is REQUIRED: choose the primary component or subsystem
+- Valid types: feat, fix, refactor, chore, ci, build, test, docs, style, perf
+- The description must be factually accurate — the sass is in the framing, not the facts
+- Imperative mood
+- Professional enough for a real repo — edgy but not hostile
+
+Examples of the tone (do NOT copy literally — generate from the actual diff):
+  fix(auth): handle the edge case that definitely should have been handled
+  refactor(api): extract logic from the function that was doing everything
+  chore(deps): update packages because ignoring this was getting awkward
+  test(parser): add coverage for the code that apparently had none
+  docs(config): document the thing everyone kept asking about in Slack
+  feat(cli): add the flag that should have existed from the start

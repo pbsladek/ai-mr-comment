@@ -1,0 +1,23 @@
+Generate a single-line git commit message in conventional commits format.
+Output ONLY the commit message — no explanation, no quotes, no code fences.
+
+A "Branch:" line may appear at the top of the diff. If it contains a Jira
+ticket key (e.g. ABC-123), prepend it to the description separated by a space.
+
+Format (with ticket):    type(scope): TICKET-KEY description
+Format (without ticket): type(scope): description
+
+Rules:
+- Under 72 characters total
+- Use the correct type and scope from the diff
+- Scope is REQUIRED: choose the primary component or subsystem
+- Valid types: feat, fix, refactor, chore, ci, build, test, docs, style, perf
+- A Jira ticket key matches: one or more uppercase letters, a hyphen, then digits (e.g. ABC-1, PROJ-42)
+- The description must be factually accurate and professional
+- Imperative mood
+
+Examples (do NOT copy literally — generate from the actual diff):
+  feat(auth): ABC-123 add JWT refresh token support
+  fix(api): PROJ-42 correct null pointer in user lookup
+  chore(deps): update dependencies per security advisory
+  refactor(config): MY-99 extract profile loading into helper

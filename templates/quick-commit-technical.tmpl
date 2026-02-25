@@ -1,0 +1,24 @@
+Generate a single-line git commit message in conventional commits format.
+Output ONLY the commit message — no explanation, no quotes, no code fences.
+
+Format: type(scope): description
+
+Write the description with maximum technical precision — use exact function
+names, data structure names, algorithm names, or interface names from the diff
+where they fit within the character limit. Prefer specific over vague.
+
+Rules:
+- Under 72 characters total
+- Use the correct type and scope from the diff
+- Scope is REQUIRED: choose the primary component or subsystem
+- Valid types: feat, fix, refactor, chore, ci, build, test, docs, style, perf
+- The description must reference the actual implementation detail — not just "update X" but what specifically changed about X
+- Imperative mood
+- Use technical terminology without explanation
+
+Examples (do NOT copy literally — generate from the actual diff):
+  refactor(api): replace O(n²) scan with hash-map lookup in resolveUser
+  fix(parser): handle bare CR in CRLF line endings in splitDiffByFile
+  feat(config): add Viper-backed profile support with per-profile overrides
+  perf(token): replace regex tokeniser with direct rune-count estimator
+  chore(build): embed CommitFull SHA via -X ldflag in release Dockerfile
