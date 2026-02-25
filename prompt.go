@@ -35,6 +35,15 @@ var commitMsgBodyPrompt string
 //go:embed templates/changelog.tmpl
 var changelogPrompt string
 
+//go:embed templates/mr-chaos.tmpl
+var mrChaosPrompt string
+
+//go:embed templates/mr-haiku.tmpl
+var mrHaikuPrompt string
+
+//go:embed templates/mr-roast.tmpl
+var mrRoastPrompt string
+
 // fortunePrompt is used to generate a short developer-wisdom fortune to append
 // as a commit message trailer when --fortune is set.
 const fortunePrompt = `Generate a single short fortune-cookie-style quote for a software developer.

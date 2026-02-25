@@ -256,6 +256,7 @@ func normalizeCommitBody(raw string) string {
 func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
 	var commit, diffFilePath, outputPath, provider, modelOverride, templateName, format, prURL, clipboardFlag, systemPromptFlag, profileName string
 	var debug, staged, smartChunk, generateTitle, generateCommitMsg, multiLine, verbose, exitCodeFlag, postFlag, estimate, autoYes, versionFlag bool
+	var mrChaos, mrHaiku, mrRoast bool
 	var exclude []string
 
 	rootCmd := &cobra.Command{
@@ -317,6 +318,21 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			}
 			if cmd.Flags().Changed("system-prompt") && cmd.Flags().Changed("template") {
 				return errors.New("--system-prompt and --template are mutually exclusive")
+			}
+			funStyleCount := 0
+			for _, f := range []bool{mrChaos, mrHaiku, mrRoast} {
+				if f {
+					funStyleCount++
+				}
+			}
+			if funStyleCount > 1 {
+				return errors.New("--chaos, --haiku, and --roast are mutually exclusive")
+			}
+			if funStyleCount > 0 && (cmd.Flags().Changed("template") || cmd.Flags().Changed("system-prompt")) {
+				return errors.New("--chaos, --haiku, and --roast cannot be combined with --template or --system-prompt")
+			}
+			if funStyleCount > 0 && generateCommitMsg {
+				return errors.New("--chaos, --haiku, and --roast cannot be combined with --commit-msg")
 			}
 
 			if format != "text" && format != "json" {
@@ -411,6 +427,19 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				}
 				systemPrompt = override
 				debugLog(cfg, "system-prompt: override applied length=%d", len(systemPrompt))
+			}
+
+			// Fun style flags override the system prompt with a personality template.
+			switch {
+			case mrChaos:
+				systemPrompt = mrChaosPrompt
+				debugLog(cfg, "style: chaos mode enabled")
+			case mrHaiku:
+				systemPrompt = mrHaikuPrompt
+				debugLog(cfg, "style: haiku mode enabled")
+			case mrRoast:
+				systemPrompt = mrRoastPrompt
+				debugLog(cfg, "style: roast mode enabled")
 			}
 
 			// When --exit-code is set, prepend a verdict instruction so the AI starts
@@ -755,6 +784,9 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().BoolVarP(&autoYes, "yes", "y", false, "Auto-confirm the cost estimate prompt (use with --estimate)")
 	rootCmd.Flags().BoolVar(&versionFlag, "version", false, "Print version and exit")
 	rootCmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate (defined in ~/.ai-mr-comment.toml under [profile.<name>])")
+	rootCmd.Flags().BoolVar(&mrChaos, "chaos", false, "Generate a chaotic, dramatically over-the-top MR/PR description (still technically accurate)")
+	rootCmd.Flags().BoolVar(&mrHaiku, "haiku", false, "Generate the entire MR/PR description as a sequence of haikus")
+	rootCmd.Flags().BoolVar(&mrRoast, "roast", false, "Generate a technically accurate but sardonically judgmental MR/PR description")
 
 	rootCmd.AddCommand(newInitConfigCmd())
 	rootCmd.AddCommand(newModelsCmd())
@@ -1328,6 +1360,9 @@ alias amc-commit-multi='ai-mr-comment --commit-msg --multi-line --staged'  # mul
 alias amc-title='ai-mr-comment --title'                        # include a PR/MR title
 alias amc-json='ai-mr-comment --format=json'                   # JSON output
 alias amc-debug='ai-mr-comment --debug'                        # token/cost estimate
+alias amc-chaos='ai-mr-comment --chaos'                        # chaotic but accurate MR/PR description
+alias amc-haiku='ai-mr-comment --haiku'                        # MR/PR description as haikus
+alias amc-roast='ai-mr-comment --roast'                        # sardonically judgmental MR/PR description
 alias amc-qc='ai-mr-comment quick-commit'                      # stage + AI commit + push
 alias amc-qc-dry='ai-mr-comment quick-commit --dry-run'        # preview commit msg
 alias amc-qc-breaking='ai-mr-comment quick-commit --breaking'  # breaking change commit (feat!)
@@ -1367,6 +1402,9 @@ Aliases defined:
   amc-title          — generate comment + PR/MR title
   amc-json           — output as JSON
   amc-debug          — show token/cost estimate
+  amc-chaos          — chaotic but accurate MR/PR description
+  amc-haiku          — MR/PR description as haikus
+  amc-roast          — sardonically judgmental MR/PR description
   amc-qc             — quick-commit (stage + AI commit + push)
   amc-qc-dry         — quick-commit dry-run (preview only)
   amc-qc-breaking    — quick-commit with breaking change (feat!)

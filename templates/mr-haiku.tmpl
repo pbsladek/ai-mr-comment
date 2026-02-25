@@ -1,0 +1,29 @@
+You are reviewing a git diff and generating a MR/PR description entirely in haiku form.
+
+Every section must be written as a sequence of haikus (5-7-5 syllables each). The description must be technically accurate — the haikus must convey what the diff actually does. A reviewer should understand the change from reading your haikus alone.
+
+Format:
+
+### Summary Haiku
+
+[One haiku capturing the essence of the change]
+
+### What Changed
+
+[One haiku per significant change in the diff. Each haiku should describe one specific thing that changed.]
+
+### Why
+
+[One or two haikus explaining the reason for the change]
+
+### Testing
+
+[One haiku about how this was or should be tested. Omit if no tests are visible in the diff and nothing meaningful can be said.]
+
+Rules:
+- Every line of prose must be a haiku: 5 syllables / 7 syllables / 5 syllables
+- Use a blank line between haikus
+- Derive all content from the actual diff — never invent changes
+- Omit any section that genuinely has nothing to say
+- No placeholder text, no "N/A", no "[Description]"
+- The haikus must be genuinely technically informative, not just pretty words

@@ -2922,3 +2922,107 @@ func TestQuickCommit_Fortune_DryRun(t *testing.T) {
 		t.Errorf("expected fortune in output, got: %q", output)
 	}
 }
+
+// TestRootCmd_Chaos_UsesChaosMRPrompt verifies that --chaos on the root command
+// sends mrChaosPrompt as the system prompt.
+func TestRootCmd_Chaos_UsesChaosMRPrompt(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedPrompt string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		capturedPrompt = prompt
+		return "### What Even Is This\n\nChaos reigns.", nil
+	}
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--chaos", "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(capturedPrompt, "chaotic") && !strings.Contains(capturedPrompt, "technically accurate") {
+		t.Errorf("expected mrChaosPrompt, got:\n%s", capturedPrompt)
+	}
+}
+
+// TestRootCmd_Haiku_UsesHaikuMRPrompt verifies that --haiku on the root command
+// sends mrHaikuPrompt as the system prompt.
+func TestRootCmd_Haiku_UsesHaikuMRPrompt(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedPrompt string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		capturedPrompt = prompt
+		return "### Summary Haiku\n\ncode changes arrive\nsilently the diff is merged\nall tests still pass green", nil
+	}
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--haiku", "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(capturedPrompt, "5-7-5") {
+		t.Errorf("expected mrHaikuPrompt, got:\n%s", capturedPrompt)
+	}
+}
+
+// TestRootCmd_Roast_UsesRoastMRPrompt verifies that --roast on the root command
+// sends mrRoastPrompt as the system prompt.
+func TestRootCmd_Roast_UsesRoastMRPrompt(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedPrompt string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		capturedPrompt = prompt
+		return "### Summary\n\nSomebody did something, apparently.", nil
+	}
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--roast", "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(capturedPrompt, "sardonic") && !strings.Contains(capturedPrompt, "senior engineer") {
+		t.Errorf("expected mrRoastPrompt, got:\n%s", capturedPrompt)
+	}
+}
+
+// TestRootCmd_FunFlags_MutualExclusion verifies that funky style flags are
+// mutually exclusive with each other and with --template/--system-prompt/--commit-msg.
+func TestRootCmd_FunFlags_MutualExclusion(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	cases := [][]string{
+		{"--chaos", "--haiku", "--file=testdata/simple.diff", "--provider=openai"},
+		{"--chaos", "--roast", "--file=testdata/simple.diff", "--provider=openai"},
+		{"--haiku", "--roast", "--file=testdata/simple.diff", "--provider=openai"},
+		{"--chaos", "--template=sassy", "--file=testdata/simple.diff", "--provider=openai"},
+		{"--haiku", "--system-prompt=hello", "--file=testdata/simple.diff", "--provider=openai"},
+		{"--roast", "--commit-msg", "--file=testdata/simple.diff", "--provider=openai"},
+	}
+
+	for _, args := range cases {
+		cmd := newRootCmd(dummyChatFn)
+		cmd.SetArgs(args)
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+
+		err := cmd.Execute()
+		if err == nil {
+			t.Errorf("expected error for args %v, got nil", args)
+		}
+	}
+}

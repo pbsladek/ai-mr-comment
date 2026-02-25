@@ -25,9 +25,9 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 - **`quick-commit` subcommand** — stages all changes, generates a conventional commit message (type and scope derived from the diff), commits, and pushes in one step
 - **Gitmoji support** (`--emoji` on `quick-commit`) — appends a type-matched emoji to the commit subject (✨ feat, 🐛 fix, ♻️ refactor, etc.)
 - **Opt-out conventional commits** (`--no-conventional` on `quick-commit`) — skips conventional format enforcement for free-form messages
-- **Chaos mode** (`--chaos` on `quick-commit`) — generates a random funny/absurd conventional commit (great for pipeline trigger commits)
-- **Haiku mode** (`--haiku` on `quick-commit`) — commit description written as a 5-7-5 haiku about the actual diff
-- **Roast mode** (`--roast` on `quick-commit`) — technically accurate but passive-aggressively judgmental commit message
+- **Chaos mode** (`--chaos`) — chaotic/absurd conventional commit on `quick-commit`; unhinged-but-accurate MR/PR description on the root command
+- **Haiku mode** (`--haiku`) — commit description as a 5-7-5 haiku on `quick-commit`; full MR/PR description in haiku form on the root command
+- **Roast mode** (`--roast`) — passive-aggressive commit on `quick-commit`; sardonically judgmental MR/PR description on the root command
 - **Fortune trailer** (`--fortune` on `quick-commit`) — appends a dev-wisdom fortune-cookie quote as a commit body
 - **CI/CD gate** (`--exit-code`) — exits with code 2 when the AI flags critical issues, enabling pipeline enforcement
 - **Auto-post comments** (`--post`) — publishes the generated comment directly to the GitHub PR or GitLab MR via API
@@ -357,6 +357,15 @@ ai-mr-comment --system-prompt="Focus only on security vulnerabilities."
 # Override the system prompt from a file
 ai-mr-comment --system-prompt=@~/prompts/security-review.txt
 
+# Chaos mode — unhinged but accurate MR/PR description
+ai-mr-comment --chaos
+
+# Haiku mode — entire description as 5-7-5 haikus
+ai-mr-comment --haiku
+
+# Roast mode — sardonically judgmental but correct
+ai-mr-comment --roast
+
 # Generate a user-facing changelog entry from the last 10 commits
 ai-mr-comment changelog --commit="HEAD~10..HEAD"
 
@@ -401,6 +410,9 @@ ai-mr-comment --profile anthropic --title
 - `--model <NAME>`: Override the model for this run (e.g. `gpt-4o`, `claude-opus-4-6`, `gemini-2.5-flash`)
 - `-t, --template <NAME>`: Template style — `default`, `conventional`, `technical`, `user-focused`, `emoji`, `sassy`, `monday`, `jira`, `commit`, `commit-emoji`
 - `--system-prompt <TEXT|@FILE>`: Override the system prompt for this run. Pass the prompt inline (`--system-prompt="Focus on security"`) or read it from a file with an `@` prefix (`--system-prompt=@review.txt`). Mutually exclusive with `--template`.
+- `--chaos`: Generate a chaotic, dramatically over-the-top MR/PR description (still technically accurate). Mutually exclusive with `--template`, `--system-prompt`, `--commit-msg`.
+- `--haiku`: Generate the entire MR/PR description as a sequence of haikus (5-7-5). Mutually exclusive with `--template`, `--system-prompt`, `--commit-msg`.
+- `--roast`: Generate a technically accurate but sardonically judgmental MR/PR description. Mutually exclusive with `--template`, `--system-prompt`, `--commit-msg`.
 - `--profile <NAME>`: Activate a named config profile defined under `[profile.<name>]` in `~/.ai-mr-comment.toml`. Overrides top-level provider, model, template, and other settings for this run only.
 - `--debug`: Show precise token usage and cost estimation without calling the generation API
 - `--verbose`: Print detailed debug lines to stderr — config file path, diff stats, template source, streaming decision, and per-API-call timing and response size
@@ -682,6 +694,9 @@ Aliases defined:
 | `amc-title` | `ai-mr-comment --title` |
 | `amc-json` | `ai-mr-comment --format=json` |
 | `amc-debug` | `ai-mr-comment --debug` |
+| `amc-chaos` | `ai-mr-comment --chaos` |
+| `amc-haiku` | `ai-mr-comment --haiku` |
+| `amc-roast` | `ai-mr-comment --roast` |
 | `amc-qc` | `ai-mr-comment quick-commit` |
 | `amc-qc-dry` | `ai-mr-comment quick-commit --dry-run` |
 | `amc-qc-breaking` | `ai-mr-comment quick-commit --breaking` |
