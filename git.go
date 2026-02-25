@@ -175,9 +175,15 @@ func gitAdd() error {
 	return nil
 }
 
-// gitCommit creates a commit with the given message.
-func gitCommit(message string) error {
-	out, err := exec.Command("git", "commit", "-m", message).CombinedOutput() //nolint:gosec // G204: git is a fixed binary, message is user-provided commit text
+// gitCommit creates a commit with the given message. When body is non-empty it
+// is passed as a second -m argument, producing a commit with a subject and body
+// separated by a blank line (as git does with multiple -m flags).
+func gitCommit(message, body string) error {
+	args := []string{"commit", "-m", message}
+	if body != "" {
+		args = append(args, "-m", body)
+	}
+	out, err := exec.Command("git", args...).CombinedOutput() //nolint:gosec // G204: git is a fixed binary, message/body are user-provided commit text
 	if err != nil {
 		return fmt.Errorf("git commit: %w\n%s", err, strings.TrimSpace(string(out)))
 	}

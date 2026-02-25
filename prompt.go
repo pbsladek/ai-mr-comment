@@ -20,11 +20,35 @@ var quickCommitPrompt string
 //go:embed templates/quick-commit-free.tmpl
 var quickCommitFreePrompt string
 
+//go:embed templates/quick-commit-chaos.tmpl
+var quickCommitChaosPrompt string
+
+//go:embed templates/quick-commit-haiku.tmpl
+var quickCommitHaikuPrompt string
+
+//go:embed templates/quick-commit-roast.tmpl
+var quickCommitRoastPrompt string
+
 //go:embed templates/commit-msg-body.tmpl
 var commitMsgBodyPrompt string
 
 //go:embed templates/changelog.tmpl
 var changelogPrompt string
+
+// fortunePrompt is used to generate a short developer-wisdom fortune to append
+// as a commit message trailer when --fortune is set.
+const fortunePrompt = `Generate a single short fortune-cookie-style quote for a software developer.
+Output ONLY the quote — no attribution, no explanation, no quotes around it, no code fences.
+Keep it under 80 characters. It should be witty, wise, or gently humorous.
+Draw from themes like debugging, shipping, complexity, naming things, or the nature of code.
+Generate something original every time.
+
+Examples of the spirit (do NOT copy literally):
+  The best code is the code you didn't have to write.
+  It works on my machine is not a deployment strategy.
+  Naming things is hard. Naming things well is an art.
+  Every comment is an apology for unclear code.
+  Ship it. The bugs will tell you what to fix next.`
 
 // titlePrompt is the system prompt used when --title is set. It instructs the
 // model to produce only a single concise title line with no extra text.
