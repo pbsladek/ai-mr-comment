@@ -11,6 +11,27 @@ import (
 //go:embed templates/default.tmpl
 var defaultPromptTemplate string
 
+//go:embed templates/technical.tmpl
+var mrTechnicalPrompt string
+
+//go:embed templates/emoji.tmpl
+var mrEmojiPrompt string
+
+//go:embed templates/jira.tmpl
+var mrJiraPrompt string
+
+//go:embed templates/monday.tmpl
+var mrMondayPrompt string
+
+//go:embed templates/sassy.tmpl
+var mrSassyPrompt string
+
+//go:embed templates/user-focused.tmpl
+var mrUserFocusedPrompt string
+
+//go:embed templates/commit.tmpl
+var mrCommitPrompt string
+
 //go:embed templates/commit-msg.tmpl
 var commitMsgPrompt string
 
@@ -135,14 +156,30 @@ func resolveSystemPrompt(raw string) (string, error) {
 	return raw, nil
 }
 
+// builtinTemplates maps named embedded MR prompt templates by their --template flag value.
+var builtinTemplates = map[string]string{
+	"technical":    mrTechnicalPrompt,
+	"emoji":        mrEmojiPrompt,
+	"jira":         mrJiraPrompt,
+	"monday":       mrMondayPrompt,
+	"sassy":        mrSassyPrompt,
+	"user-focused": mrUserFocusedPrompt,
+	"commit":       mrCommitPrompt,
+}
+
 // NewPromptTemplate returns the system prompt for the given template name.
-// For "default" it returns the embedded template. For any other name it
+// For "default" it returns the embedded default template. For known built-in
+// names it returns the corresponding embedded template. For any other name it
 // searches ./templates/<name>.tmpl, ./<name>.tmpl, and
 // ~/.config/ai-mr-comment/templates/<name>.tmpl, falling back to the default
 // if none are found.
 func NewPromptTemplate(templateName string) (string, error) {
 	if templateName == "default" {
 		return defaultPromptTemplate, nil
+	}
+
+	if t, ok := builtinTemplates[templateName]; ok {
+		return t, nil
 	}
 
 	templateFileName := templateName + ".tmpl"

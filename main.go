@@ -1209,7 +1209,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			if err != nil {
 				return fmt.Errorf("reading diff: %w", err)
 			}
-			if strings.TrimSpace(diffContent) == "" {
+			if strings.TrimSpace(diffContent) == "" && !chaos {
 				return fmt.Errorf("no changes found to generate a commit message for")
 			}
 
