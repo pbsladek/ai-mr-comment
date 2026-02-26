@@ -19,7 +19,7 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 - Supports public **github.com**, **GitHub Enterprise**, public **gitlab.com**, and **self-hosted GitLab** instances
 - Supports OpenAI, Anthropic (Claude), Google Gemini, and Ollama APIs
 - Customizable API endpoints and models via `--model` flag or config
-- Multiple prompt styles — `default`, `conventional`, `technical`, `user-focused`, `emoji`, `sassy`, `monday`, `jira`, `commit`, `commit-emoji`
+- Multiple prompt styles — `default`, `conventional`, `technical`, `user-focused`, `emoji`, `sassy`, `monday`, `jira`, `commit`, `commit-emoji`, `commit-conventional`, `chaos`, `haiku`, `roast`, `intern`, `shakespeare`, `manager`, `yoda`, `excuse`
 - **Jira-aware template** (`--template=jira`) — extracts ticket key from branch name and places it first so Jira auto-links
 - **Commit message generation** (`--commit-msg`) — outputs a single conventional-style line ready for `git commit -m`
 - **`quick-commit` subcommand** — stages all changes, generates a conventional commit message (type and scope derived from the diff), commits, and pushes in one step
@@ -215,7 +215,8 @@ gitlab_token = "xxxx"       # or set GITLAB_TOKEN env var (required for private 
 
 # === Template Settings ===
 # Options: default, conventional, technical, user-focused, emoji, sassy, monday,
-#          jira, commit, commit-emoji
+#          jira, commit, commit-emoji, commit-conventional,
+#          chaos, haiku, roast, intern, shakespeare, manager, yoda, excuse
 template = "default"
 
 # === Named Profiles ===
@@ -418,7 +419,7 @@ ai-mr-comment --profile anthropic --title
 - `--format <FORMAT>`: Output format — `text` (default) or `json`
 - `--provider <PROVIDER>`: Provider (openai, anthropic, gemini, ollama)
 - `--model <NAME>`: Override the model for this run (e.g. `gpt-4o`, `claude-opus-4-6`, `gemini-2.5-flash`)
-- `-t, --template <NAME>`: Template style — `default`, `conventional`, `technical`, `user-focused`, `emoji`, `sassy`, `monday`, `jira`, `commit`, `commit-emoji`
+- `-t, --template <NAME>`: Template style — `default`, `conventional`, `technical`, `user-focused`, `emoji`, `sassy`, `monday`, `jira`, `commit`, `commit-emoji`, `commit-conventional`, `chaos`, `haiku`, `roast`, `intern`, `shakespeare`, `manager`, `yoda`, `excuse` (`commit`, `commit-emoji`, and `commit-conventional` require `--commit-msg`; style templates cannot be combined with `--commit-msg`)
 - `--system-prompt <TEXT|@FILE>`: Override the system prompt for this run. Pass the prompt inline (`--system-prompt="Focus on security"`) or read it from a file with an `@` prefix (`--system-prompt=@review.txt`). Mutually exclusive with `--template`.
 - `--chaos`: Generate a chaotic, dramatically over-the-top MR/PR description (still technically accurate). Mutually exclusive with `--template`, `--system-prompt`, `--commit-msg`.
 - `--haiku`: Generate the entire MR/PR description as a sequence of haikus (5-7-5). Mutually exclusive with `--template`, `--system-prompt`, `--commit-msg`.
@@ -496,8 +497,17 @@ All built-in templates live in `templates/` in the repository and are embedded i
 | `sassy` | Dry-wit tone, technically accurate |
 | `monday` | Casual "pre-coffee" tone |
 | `jira` | Puts the Jira ticket key from the branch name first so Jira auto-links; includes Summary section |
-| `commit` | Single-line conventional commit message (useful with `--commit-msg`) |
-| `commit-emoji` | Single-line gitmoji-style commit message (useful with `--commit-msg`) |
+| `commit` | Single-line conventional commit message (requires `--commit-msg`) |
+| `commit-emoji` | Single-line gitmoji-style commit message (requires `--commit-msg`) |
+| `commit-conventional` | Full Conventional Commits message with optional body, BREAKING CHANGE footer, and Refs (requires `--commit-msg`) |
+| `chaos` | Chaotic, dramatically over-the-top description (still technically accurate) |
+| `haiku` | Entire description as a sequence of haikus |
+| `roast` | Sardonically judgmental, dry-wit tone |
+| `intern` | Overly enthusiastic junior-developer energy |
+| `shakespeare` | Shakespearean Early Modern English |
+| `manager` | Passive-aggressive corporate non-speak |
+| `yoda` | Inverted Yoda syntax |
+| `excuse` | Technically accurate with built-in excuses for every decision |
 
 ### Jira Integration
 

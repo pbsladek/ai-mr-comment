@@ -45,6 +45,43 @@ func TestNewPromptTemplate_CustomFile(t *testing.T) {
 	}
 }
 
+func TestNewPromptTemplate_BuiltinTemplates(t *testing.T) {
+	cases := []struct {
+		name    string
+		contain string
+	}{
+		{"technical", "Implementation Details"},
+		{"emoji", "✨"},
+		{"jira", "Jira ticket key"},
+		{"monday", "Monday"},
+		{"sassy", "sassy"},
+		{"user-focused", "non-technical"},
+		{"conventional", "Conventional Commits"},
+		{"commit", "Conventional Commits format"},
+		{"commit-emoji", "gitmoji"},
+		{"commit-conventional", "Conventional Commits specification"},
+		{"chaos", "technically accurate"},
+		{"haiku", "haiku"},
+		{"roast", "dry wit"},
+		{"intern", "enthusiastic"},
+		{"shakespeare", "Shakespeare"},
+		{"manager", "passive-aggressive"},
+		{"yoda", "Yoda"},
+		{"excuse", "excuse"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			prompt, err := NewPromptTemplate(tc.name)
+			if err != nil {
+				t.Fatalf("unexpected error for builtin template %q: %v", tc.name, err)
+			}
+			if !strings.Contains(strings.ToLower(prompt), strings.ToLower(tc.contain)) {
+				t.Errorf("template %q: expected to contain %q", tc.name, tc.contain)
+			}
+		})
+	}
+}
+
 func TestNewPromptTemplate_NotFound(t *testing.T) {
 	_, err := NewPromptTemplate("nonexistent")
 	if err == nil {
