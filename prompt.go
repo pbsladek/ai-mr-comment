@@ -8,85 +8,117 @@ import (
 	"strings"
 )
 
+// User-facing --template prompts
 //go:embed templates/default.tmpl
 var defaultPromptTemplate string
 
-//go:embed templates/commit-msg.tmpl
+//go:embed templates/technical.tmpl
+var mrTechnicalPrompt string
+
+//go:embed templates/emoji.tmpl
+var mrEmojiPrompt string
+
+//go:embed templates/jira.tmpl
+var mrJiraPrompt string
+
+//go:embed templates/monday.tmpl
+var mrMondayPrompt string
+
+//go:embed templates/sassy.tmpl
+var mrSassyPrompt string
+
+//go:embed templates/user-focused.tmpl
+var mrUserFocusedPrompt string
+
+//go:embed templates/conventional.tmpl
+var mrConventionalPrompt string
+
+//go:embed templates/commit.tmpl
+var mrCommitPrompt string
+
+//go:embed templates/commit-conventional.tmpl
+var mrConventionalCommitPrompt string
+
+//go:embed templates/commit-emoji.tmpl
+var mrCommitEmojiPrompt string
+
+// Internal prompts — used programmatically, not via --template
+//go:embed templates/internal-commit-msg.tmpl
 var commitMsgPrompt string
 
-//go:embed templates/quick-commit.tmpl
+//go:embed templates/internal-quick-commit.tmpl
 var quickCommitPrompt string
 
-//go:embed templates/quick-commit-free.tmpl
+//go:embed templates/internal-quick-commit-free.tmpl
 var quickCommitFreePrompt string
 
-//go:embed templates/quick-commit-chaos.tmpl
+//go:embed templates/internal-quick-commit-chaos.tmpl
 var quickCommitChaosPrompt string
 
-//go:embed templates/quick-commit-haiku.tmpl
+//go:embed templates/internal-quick-commit-haiku.tmpl
 var quickCommitHaikuPrompt string
 
-//go:embed templates/quick-commit-roast.tmpl
+//go:embed templates/internal-quick-commit-roast.tmpl
 var quickCommitRoastPrompt string
 
-//go:embed templates/quick-commit-monday.tmpl
+//go:embed templates/internal-quick-commit-monday.tmpl
 var quickCommitMondayPrompt string
 
-//go:embed templates/quick-commit-jira.tmpl
+//go:embed templates/internal-quick-commit-jira.tmpl
 var quickCommitJiraPrompt string
 
-//go:embed templates/quick-commit-emoji.tmpl
+//go:embed templates/internal-quick-commit-emoji.tmpl
 var quickCommitEmojiPrompt string
 
-//go:embed templates/quick-commit-sassy.tmpl
+//go:embed templates/internal-quick-commit-sassy.tmpl
 var quickCommitSassyPrompt string
 
-//go:embed templates/quick-commit-technical.tmpl
+//go:embed templates/internal-quick-commit-technical.tmpl
 var quickCommitTechnicalPrompt string
 
-//go:embed templates/quick-commit-intern.tmpl
+//go:embed templates/internal-quick-commit-intern.tmpl
 var quickCommitInternPrompt string
 
-//go:embed templates/quick-commit-shakespeare.tmpl
+//go:embed templates/internal-quick-commit-shakespeare.tmpl
 var quickCommitShakespearePrompt string
 
-//go:embed templates/quick-commit-manager.tmpl
+//go:embed templates/internal-quick-commit-manager.tmpl
 var quickCommitManagerPrompt string
 
-//go:embed templates/quick-commit-yoda.tmpl
+//go:embed templates/internal-quick-commit-yoda.tmpl
 var quickCommitYodaPrompt string
 
-//go:embed templates/quick-commit-excuse.tmpl
+//go:embed templates/internal-quick-commit-excuse.tmpl
 var quickCommitExcusePrompt string
 
-//go:embed templates/commit-msg-body.tmpl
+//go:embed templates/internal-commit-msg-body.tmpl
 var commitMsgBodyPrompt string
 
-//go:embed templates/changelog.tmpl
+//go:embed templates/internal-changelog.tmpl
 var changelogPrompt string
 
-//go:embed templates/mr-chaos.tmpl
+//go:embed templates/chaos.tmpl
 var mrChaosPrompt string
 
-//go:embed templates/mr-haiku.tmpl
+//go:embed templates/haiku.tmpl
 var mrHaikuPrompt string
 
-//go:embed templates/mr-roast.tmpl
+//go:embed templates/roast.tmpl
 var mrRoastPrompt string
 
-//go:embed templates/mr-intern.tmpl
+//go:embed templates/intern.tmpl
 var mrInternPrompt string
 
-//go:embed templates/mr-shakespeare.tmpl
+//go:embed templates/shakespeare.tmpl
 var mrShakespearePrompt string
 
-//go:embed templates/mr-manager.tmpl
+//go:embed templates/manager.tmpl
 var mrManagerPrompt string
 
-//go:embed templates/mr-yoda.tmpl
+//go:embed templates/yoda.tmpl
 var mrYodaPrompt string
 
-//go:embed templates/mr-excuse.tmpl
+//go:embed templates/excuse.tmpl
 var mrExcusePrompt string
 
 // fortunePrompt is used to generate a short developer-wisdom fortune to append
@@ -135,14 +167,42 @@ func resolveSystemPrompt(raw string) (string, error) {
 	return raw, nil
 }
 
+// builtinTemplates maps named embedded MR prompt templates by their --template flag value.
+// Only user-facing templates are listed here; internal prompts are not included.
+var builtinTemplates = map[string]string{
+	"technical":           mrTechnicalPrompt,
+	"emoji":               mrEmojiPrompt,
+	"jira":                mrJiraPrompt,
+	"monday":              mrMondayPrompt,
+	"sassy":               mrSassyPrompt,
+	"user-focused":        mrUserFocusedPrompt,
+	"conventional":        mrConventionalPrompt,
+	"commit":              mrCommitPrompt,
+	"commit-conventional": mrConventionalCommitPrompt,
+	"commit-emoji":        mrCommitEmojiPrompt,
+	"chaos":               mrChaosPrompt,
+	"haiku":               mrHaikuPrompt,
+	"roast":               mrRoastPrompt,
+	"intern":              mrInternPrompt,
+	"shakespeare":         mrShakespearePrompt,
+	"manager":             mrManagerPrompt,
+	"yoda":                mrYodaPrompt,
+	"excuse":              mrExcusePrompt,
+}
+
 // NewPromptTemplate returns the system prompt for the given template name.
-// For "default" it returns the embedded template. For any other name it
+// For "default" it returns the embedded default template. For known built-in
+// names it returns the corresponding embedded template. For any other name it
 // searches ./templates/<name>.tmpl, ./<name>.tmpl, and
 // ~/.config/ai-mr-comment/templates/<name>.tmpl, falling back to the default
 // if none are found.
 func NewPromptTemplate(templateName string) (string, error) {
 	if templateName == "default" {
 		return defaultPromptTemplate, nil
+	}
+
+	if t, ok := builtinTemplates[templateName]; ok {
+		return t, nil
 	}
 
 	templateFileName := templateName + ".tmpl"

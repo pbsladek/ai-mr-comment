@@ -351,8 +351,11 @@ func TestNewRootCmd_TemplateFlag(t *testing.T) {
 	cmd.SetErr(io.Discard)
 
 	err := cmd.Execute()
-	if err != nil {
-		t.Fatalf("expected no error (template falls back to default), got %v", err)
+	if err == nil {
+		t.Fatal("expected error for unknown template, got nil")
+	}
+	if !strings.Contains(err.Error(), "unknown template") {
+		t.Errorf("expected unknown template error, got: %v", err)
 	}
 }
 
@@ -2521,6 +2524,55 @@ func TestCommitMsg_Body_RequiresCommitMsg(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--multi-line requires --commit-msg") {
 		t.Errorf("expected --multi-line requires --commit-msg error, got: %v", err)
+	}
+}
+
+func TestMrStyleTemplates_CannotCombineWithCommitMsg(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	for _, tmpl := range []string{
+		"technical", "user-focused", "emoji", "sassy", "monday", "jira", "conventional",
+		"chaos", "haiku", "roast", "intern", "shakespeare", "manager", "yoda", "excuse",
+	} {
+		t.Run(tmpl, func(t *testing.T) {
+			cmd := newRootCmd(dummyChatFn)
+			cmd.SetArgs([]string{"--template=" + tmpl, "--commit-msg", "--file=testdata/simple.diff", "--provider=openai"})
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatalf("expected error when --template=%s used with --commit-msg, got nil", tmpl)
+			}
+			if !strings.Contains(err.Error(), "cannot be combined with --commit-msg") {
+				t.Errorf("expected cannot be combined error, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestCommitOnlyTemplates_RequireCommitMsg(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	for _, tmpl := range []string{"commit", "commit-emoji", "commit-conventional"} {
+		t.Run(tmpl, func(t *testing.T) {
+			cmd := newRootCmd(dummyChatFn)
+			cmd.SetArgs([]string{"--template=" + tmpl, "--file=testdata/simple.diff", "--provider=openai"})
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatalf("expected error when --template=%s used without --commit-msg, got nil", tmpl)
+			}
+			if !strings.Contains(err.Error(), "--template "+tmpl+" requires --commit-msg") {
+				t.Errorf("expected requires --commit-msg error, got: %v", err)
+			}
+		})
 	}
 }
 

@@ -308,6 +308,46 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			if multiLine && !generateCommitMsg {
 				return errors.New("--multi-line requires --commit-msg")
 			}
+			// validTemplates is the explicit allowlist of user-facing --template values.
+			// Internal prompts (internal-commit-msg, internal-quick-commit-*, etc.) are
+			// not listed here and cannot be selected via --template.
+			validTemplates := map[string]bool{
+				"default":             true,
+				"conventional":        true,
+				"technical":           true,
+				"user-focused":        true,
+				"emoji":               true,
+				"sassy":               true,
+				"monday":              true,
+				"jira":                true,
+				"commit":              true,
+				"commit-emoji":        true,
+				"commit-conventional": true,
+				"chaos":               true,
+				"haiku":               true,
+				"roast":               true,
+				"intern":              true,
+				"shakespeare":         true,
+				"manager":             true,
+				"yoda":                true,
+				"excuse":              true,
+			}
+			if !validTemplates[templateName] {
+				return fmt.Errorf("unknown template %q — valid templates: default, conventional, technical, user-focused, emoji, sassy, monday, jira, commit, commit-emoji, commit-conventional, chaos, haiku, roast, intern, shakespeare, manager, yoda, excuse", templateName)
+			}
+			commitOnlyTemplates := map[string]bool{"commit": true, "commit-emoji": true, "commit-conventional": true}
+			if commitOnlyTemplates[templateName] && !generateCommitMsg {
+				return fmt.Errorf("--template %s requires --commit-msg", templateName)
+			}
+			mrOnlyTemplates := map[string]bool{
+				"technical": true, "user-focused": true, "emoji": true, "sassy": true,
+				"monday": true, "jira": true, "conventional": true,
+				"chaos": true, "haiku": true, "roast": true, "intern": true,
+				"shakespeare": true, "manager": true, "yoda": true, "excuse": true,
+			}
+			if mrOnlyTemplates[templateName] && generateCommitMsg {
+				return fmt.Errorf("--template %s cannot be combined with --commit-msg", templateName)
+			}
 			if generateCommitMsg && generateTitle {
 				return errors.New("--commit-msg and --title cannot be used together")
 			}
@@ -502,6 +542,8 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				prompt := commitMsgPrompt
 				if multiLine {
 					prompt = commitMsgBodyPrompt
+				} else if commitOnlyTemplates[templateName] {
+					prompt = systemPrompt
 				}
 				commitMessage, err = timedCall(cfg, "commit-msg", func() (string, error) {
 					return chatFn(cmd.Context(), cfg, cfg.Provider, prompt, diffContent)
@@ -1209,7 +1251,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			if err != nil {
 				return fmt.Errorf("reading diff: %w", err)
 			}
-			if strings.TrimSpace(diffContent) == "" {
+			if strings.TrimSpace(diffContent) == "" && !chaos {
 				return fmt.Errorf("no changes found to generate a commit message for")
 			}
 

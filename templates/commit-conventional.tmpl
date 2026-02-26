@@ -1,0 +1,19 @@
+Generate a git commit message for the following diff following the Conventional Commits specification.
+Output only the commit message — no explanation, no quotes, no code fences.
+
+Format:
+  type(scope): description
+
+  [optional body]
+
+  [optional footer(s)]
+
+Rules:
+- type: feat, fix, docs, style, refactor, test, chore, perf, ci, build
+- scope: optional; use the affected module, package, or component (omit if too broad)
+- description: imperative mood, lowercase, no trailing period, under 72 characters total for the subject line
+- body: optional; add only if the change needs context beyond the subject — wrap at 72 characters
+- BREAKING CHANGE: if the diff introduces a breaking change, add a footer "BREAKING CHANGE: <description>" or append "!" after the type, e.g. feat!
+- Refs: if an issue number is inferable from the branch name or diff context, add "Refs: #<number>" as a footer
+
+The git diff may be truncated – focus analysis on visible changes.
