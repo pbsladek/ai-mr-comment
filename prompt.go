@@ -29,8 +29,14 @@ var mrSassyPrompt string
 //go:embed templates/user-focused.tmpl
 var mrUserFocusedPrompt string
 
+//go:embed templates/conventional.tmpl
+var mrConventionalPrompt string
+
 //go:embed templates/commit.tmpl
 var mrCommitPrompt string
+
+//go:embed templates/commit-emoji.tmpl
+var mrCommitEmojiPrompt string
 
 //go:embed templates/commit-msg.tmpl
 var commitMsgPrompt string
@@ -164,7 +170,9 @@ var builtinTemplates = map[string]string{
 	"monday":       mrMondayPrompt,
 	"sassy":        mrSassyPrompt,
 	"user-focused": mrUserFocusedPrompt,
+	"conventional": mrConventionalPrompt,
 	"commit":       mrCommitPrompt,
+	"commit-emoji": mrCommitEmojiPrompt,
 }
 
 // NewPromptTemplate returns the system prompt for the given template name.

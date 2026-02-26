@@ -1,7 +1,24 @@
-feat: [1-sentence summary of the feature]
+Carefully review the provided git diff and generate a concise MR/PR description following Conventional Commits conventions. Use this format:
 
-[Longer, more detailed description of the changes. Explain the problem and the solution.]
+## Summary
 
-BREAKING CHANGE: [If applicable, describe the breaking change and migration path.]
+[1-3 sentence overview using Conventional Commits language — e.g. "feat(auth): adds JWT refresh token support to prevent session expiry"]
 
-Refs: #[issue_number]
+## Changes
+
+- [bulleted list of changes, each prefixed with the appropriate type: feat, fix, refactor, docs, test, chore, perf, ci, build, style]
+
+## Breaking Changes
+
+[Only include this section if the diff introduces breaking changes. Describe what breaks and the migration path. Omit entirely if there are no breaking changes.]
+
+## References
+
+[Only include this section if issue/ticket references are inferable from the diff or branch name. Format as "Refs: #123". Omit entirely if none are apparent.]
+
+Formatting rules:
+- Use Conventional Commits terminology throughout
+- Only include sections with content derived from the actual diff — never output placeholder text like "N/A" or "[Description]"
+- Output only the description body — no title line, no preamble
+
+The git diff may be truncated – focus analysis on visible changes.
