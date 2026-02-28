@@ -612,6 +612,116 @@ func TestGetCurrentBranch_DetachedHead(t *testing.T) {
 	}
 }
 
+// initEmptyRepo creates a temp directory, runs git init inside it, configures
+// a minimal git identity, and changes the test's working directory to it.
+// The caller receives the repo path; t.Cleanup restores the working directory.
+func initEmptyRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init", dir},
+		{"-C", dir, "config", "user.email", "test@example.com"},
+		{"-C", dir, "config", "user.name", "Test"},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	t.Chdir(dir)
+	return dir
+}
+
+// TestGetCurrentBranch_NoCommits verifies that getCurrentBranch succeeds on a
+// repo that has been initialised but has no commits yet.
+func TestGetCurrentBranch_NoCommits(t *testing.T) {
+	initEmptyRepo(t)
+
+	branch, err := getCurrentBranch()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if branch == "" {
+		t.Fatal("expected a non-empty branch name on a fresh repo, got empty string")
+	}
+	if branch != strings.TrimSpace(branch) {
+		t.Errorf("branch name has surrounding whitespace: %q", branch)
+	}
+}
+
+// TestHasCommits_NoCommits verifies hasCommits returns false on a fresh repo.
+func TestHasCommits_NoCommits(t *testing.T) {
+	initEmptyRepo(t)
+
+	if hasCommits() {
+		t.Error("expected hasCommits() == false on a repo with no commits")
+	}
+}
+
+// TestHasCommits_WithCommit verifies hasCommits returns true after the first commit.
+func TestHasCommits_WithCommit(t *testing.T) {
+	dir := initEmptyRepo(t)
+
+	// Create and commit a file.
+	if err := os.WriteFile(dir+"/hello.txt", []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"-C", dir, "add", "."},
+		{"-C", dir, "commit", "-m", "initial"},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	if !hasCommits() {
+		t.Error("expected hasCommits() == true after first commit")
+	}
+}
+
+// TestGetGitDiff_NoCommits verifies that getGitDiff returns staged changes on
+// a repo with no commits (the git diff HEAD fallback must not be used).
+func TestGetGitDiff_NoCommits(t *testing.T) {
+	dir := initEmptyRepo(t)
+
+	if err := os.WriteFile(dir+"/hello.txt", []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", dir, "add", ".").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+
+	// staged=false, no commit — should fall back to --cached because there are no commits.
+	diff, err := getGitDiff("", false, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(diff, "hello.txt") {
+		t.Errorf("expected staged file in diff output, got:\n%s", diff)
+	}
+}
+
+// TestGetGitDiff_NoCommits_Staged verifies that getGitDiff with staged=true also
+// works correctly on a repo with no commits.
+func TestGetGitDiff_NoCommits_Staged(t *testing.T) {
+	dir := initEmptyRepo(t)
+
+	if err := os.WriteFile(dir+"/world.txt", []byte("world"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", dir, "add", ".").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+
+	diff, err := getGitDiff("", true, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(diff, "world.txt") {
+		t.Errorf("expected staged file in diff output, got:\n%s", diff)
+	}
+}
+
 // TestGitCommit_EmptyMessageFails verifies that gitCommit with an empty message
 // causes git to return an error (git rejects empty commit messages).
 func TestGitCommit_EmptyMessageFails(t *testing.T) {
