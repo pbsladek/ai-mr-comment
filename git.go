@@ -156,7 +156,13 @@ func isGitRepo() bool {
 func getCurrentBranch() (string, error) {
 	out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").CombinedOutput() //nolint:gosec // G204: git is a fixed binary, args are internal constants
 	if err != nil {
-		return "", fmt.Errorf("getting current branch: %w", err)
+		// rev-parse fails on repos with no commits yet. Fall back to symbolic-ref
+		// which reads the branch name directly from .git/HEAD without needing commits.
+		out2, err2 := exec.Command("git", "symbolic-ref", "--short", "HEAD").CombinedOutput() //nolint:gosec // G204: git is a fixed binary, args are internal constants
+		if err2 != nil {
+			return "", fmt.Errorf("getting current branch: %w", err)
+		}
+		return strings.TrimSpace(string(out2)), nil
 	}
 	branch := strings.TrimSpace(string(out))
 	if branch == "HEAD" {
@@ -201,6 +207,12 @@ func gitPush(branch string) error {
 	return nil
 }
 
+// hasCommits reports whether the repository has at least one commit.
+func hasCommits() bool {
+	err := exec.Command("git", "rev-parse", "HEAD").Run() //nolint:gosec // G204: git is a fixed binary, args are internal constants
+	return err == nil
+}
+
 // getGitDiff returns the git diff for the given mode.
 // Priority: staged > explicit commit > auto merge-base > unstaged working tree.
 // Patterns in exclude are passed as git pathspecs (":!pattern") to filter files at the source.
@@ -220,11 +232,14 @@ func getGitDiff(commit string, staged bool, exclude []string) (string, error) {
 		// Diff the merge base against the working tree (staged + unstaged).
 		// This covers both committed and uncommitted changes on the branch.
 		args = []string{"diff", base}
-	} else {
+	} else if hasCommits() {
 		// No merge base found (no remote, detached HEAD, etc.).
 		// Fall back to all changes relative to the last commit — includes both
 		// staged and unstaged changes, so nothing is silently missed.
 		args = []string{"diff", "HEAD"}
+	} else {
+		// No commits yet — show everything in the index as a staged diff.
+		args = []string{"diff", "--cached"}
 	}
 
 	if len(exclude) > 0 {
