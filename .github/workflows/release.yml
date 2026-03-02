@@ -81,7 +81,7 @@ jobs:
 
       - name: Attest release archives provenance
         id: attest_binaries
-        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-checksums: dist/checksums.txt
 
@@ -186,7 +186,7 @@ jobs:
       - name: Attest Docker image provenance
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
         id: attest_docker
-        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-name: docker.io/pwbsladek/ai-mr-comment
           subject-digest: ${{ steps.docker_build.outputs.digest }}
@@ -298,7 +298,7 @@ jobs:
       - name: Attest Docker FIPS image provenance
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
         id: attest_docker_fips
-        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-name: docker.io/pwbsladek/ai-mr-comment
           subject-digest: ${{ steps.docker_build_fips.outputs.digest }}
