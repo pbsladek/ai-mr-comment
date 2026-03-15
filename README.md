@@ -1017,6 +1017,19 @@ AMC_EVAL_PROVIDER=ollama AMC_EVAL_MODEL=llama3.1:8b AMC_EVAL_TEMPLATE=default ma
 make eval-quality-view
 ```
 
+### Dependency Updates
+
+Dependabot opens grouped PRs weekly (Monday) for Go modules, npm packages in `evals/`, and GitHub Actions.
+
+To approve and auto-merge all open Dependabot PRs at once:
+
+```bash
+gh pr list --author "app/dependabot" --json number --jq '.[].number' | \
+  xargs -I {} gh pr merge {} --auto --squash
+```
+
+> `--auto` queues each PR to merge once all required status checks pass. Requires auto-merge to be enabled in the repo settings. Drop `--auto` and use `--squash` alone to merge immediately without waiting for CI.
+
 ### Shell Completions
 
 ```bash
