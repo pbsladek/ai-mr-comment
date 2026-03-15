@@ -323,6 +323,145 @@ func parseMRURL(mrURL string) (namespace, project string, iid int64, err error) 
 	return projectPath[:slashIdx], projectPath[slashIdx+1:], num, nil
 }
 
+// remoteInfo holds parsed components of a git remote URL.
+type remoteInfo struct {
+	Host      string   // e.g. "github.com" or "gitlab.myco.com"
+	PathParts []string // path segments, e.g. ["owner","repo"] or ["group","sub","project"]
+}
+
+// parseRemoteInfo normalises a raw git remote URL (SSH or HTTPS) and extracts
+// the host and path segments. Handles git@host:path.git and https://host/path.git.
+func parseRemoteInfo(rawURL string) (remoteInfo, error) {
+	raw := rawURL
+	if strings.HasPrefix(raw, "git@") {
+		raw = strings.TrimPrefix(raw, "git@")
+		raw = strings.Replace(raw, ":", "/", 1)
+		raw = "https://" + raw
+	}
+	raw = strings.TrimSuffix(raw, ".git")
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return remoteInfo{}, fmt.Errorf("cannot parse remote URL %q", rawURL)
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) < 2 || parts[0] == "" {
+		return remoteInfo{}, fmt.Errorf("remote URL %q has too few path segments", rawURL)
+	}
+	return remoteInfo{Host: strings.ToLower(u.Host), PathParts: parts}, nil
+}
+
+// isGitHubHost reports whether host belongs to GitHub (github.com or GHE instance).
+func isGitHubHost(host, configuredBaseURL string) bool {
+	if strings.Contains(host, "github") {
+		return true
+	}
+	if configuredBaseURL == "" {
+		return false
+	}
+	u, err := url.Parse(configuredBaseURL)
+	return err == nil && strings.ToLower(u.Hostname()) == host
+}
+
+// isGitLabHost reports whether host belongs to GitLab (gitlab.com or self-hosted).
+func isGitLabHost(host, configuredBaseURL string) bool {
+	if strings.Contains(host, "gitlab") {
+		return true
+	}
+	if configuredBaseURL == "" {
+		return false
+	}
+	u, err := url.Parse(configuredBaseURL)
+	return err == nil && strings.ToLower(u.Hostname()) == host
+}
+
+// findOrCreateGitHubPR finds an open PR for branch on owner/repo, or creates
+// one targeting the repo's default branch. Returns the PR HTML URL.
+func findOrCreateGitHubPR(ctx context.Context, gh *gogithub.Client, owner, repo, branch, title string) (string, error) {
+	// Search for an existing open PR from this branch.
+	prs, _, err := gh.PullRequests.List(ctx, owner, repo, &gogithub.PullRequestListOptions{
+		State: "open",
+		Head:  owner + ":" + branch,
+	})
+	if err != nil {
+		return "", wrapGitHubAuthError("listing GitHub PRs", err)
+	}
+	if len(prs) > 0 {
+		return prs[0].GetHTMLURL(), nil
+	}
+
+	// No existing PR — find the default branch then create one.
+	repoInfo, _, err := gh.Repositories.Get(ctx, owner, repo)
+	if err != nil {
+		return "", wrapGitHubAuthError("getting GitHub repo info", err)
+	}
+	base := repoInfo.GetDefaultBranch()
+	if base == "" {
+		base = "main"
+	}
+	pr, _, err := gh.PullRequests.Create(ctx, owner, repo, &gogithub.NewPullRequest{
+		Title: &title,
+		Head:  &branch,
+		Base:  &base,
+	})
+	if err != nil {
+		return "", wrapGitHubAuthError("creating GitHub PR", err)
+	}
+	return pr.GetHTMLURL(), nil
+}
+
+// findOrCreateGitHubPRFromConfig wraps findOrCreateGitHubPR using credentials from cfg.
+func findOrCreateGitHubPRFromConfig(ctx context.Context, cfg *Config, owner, repo, branch, title string) (string, error) {
+	gh, err := newGitHubClient(ctx, cfg.GitHubToken, cfg.GitHubBaseURL)
+	if err != nil {
+		return "", err
+	}
+	return findOrCreateGitHubPR(ctx, gh, owner, repo, branch, title)
+}
+
+// findOrCreateGitLabMR finds an open MR for branch in projectPath, or creates
+// one targeting the project's default branch. Returns the MR web URL.
+func findOrCreateGitLabMR(ctx context.Context, gl *gogitlab.Client, projectPath, branch, title string) (string, error) {
+	state := "opened"
+	mrs, _, err := gl.MergeRequests.ListProjectMergeRequests(projectPath, &gogitlab.ListProjectMergeRequestsOptions{
+		State:        &state,
+		SourceBranch: &branch,
+	}, gogitlab.WithContext(ctx))
+	if err != nil {
+		return "", wrapGitLabAuthError("listing GitLab MRs", err)
+	}
+	if len(mrs) > 0 {
+		return mrs[0].WebURL, nil
+	}
+
+	// No existing MR — find the default branch then create one.
+	proj, _, err := gl.Projects.GetProject(projectPath, nil, gogitlab.WithContext(ctx))
+	if err != nil {
+		return "", wrapGitLabAuthError("getting GitLab project info", err)
+	}
+	base := proj.DefaultBranch
+	if base == "" {
+		base = "main"
+	}
+	mr, _, err := gl.MergeRequests.CreateMergeRequest(projectPath, &gogitlab.CreateMergeRequestOptions{
+		Title:        &title,
+		SourceBranch: &branch,
+		TargetBranch: &base,
+	}, gogitlab.WithContext(ctx))
+	if err != nil {
+		return "", wrapGitLabAuthError("creating GitLab MR", err)
+	}
+	return mr.WebURL, nil
+}
+
+// findOrCreateGitLabMRFromConfig wraps findOrCreateGitLabMR using credentials from cfg.
+func findOrCreateGitLabMRFromConfig(ctx context.Context, cfg *Config, projectPath, branch, title string) (string, error) {
+	gl, err := newGitLabClient(cfg.GitLabToken, cfg.GitLabBaseURL)
+	if err != nil {
+		return "", err
+	}
+	return findOrCreateGitLabMR(ctx, gl, projectPath, branch, title)
+}
+
 // newGitHubClient returns a go-github client. When token is non-empty the client
 // is authenticated (5000 req/hr); otherwise unauthenticated (60 req/hr for
 // public repos). When baseURL is non-empty the client is configured for a

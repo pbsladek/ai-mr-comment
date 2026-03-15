@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -857,6 +858,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.AddCommand(newQuickCommitCmd(chatFn))
 	rootCmd.AddCommand(newChangelogCmd(chatFn))
 	rootCmd.AddCommand(newGenAliasesCmd())
+	rootCmd.AddCommand(newGenWorkflowCmd())
 
 	rootCmd.AddCommand(&cobra.Command{
 		Use:       "completion [bash|zsh|fish|powershell]",
@@ -1190,7 +1192,7 @@ func newModelsCmd() *cobra.Command {
 // AI commit message, commits, and pushes — all in one step.
 func newQuickCommitCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
 	var provider, modelOverride, format, profileName string
-	var dryRun, noPush, breaking, multiLine, emoji, noConventional bool
+	var dryRun, noPush, breaking, multiLine, emoji, noConventional, postFlag bool
 	var chaos, haiku, roast, fortune bool
 	var qcMonday, qcJira, qcEmoji, qcSassy, qcTechnical bool
 	var qcIntern, qcShakespeare, qcManager, qcYoda, qcExcuse bool
@@ -1218,6 +1220,12 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			}
 			if cfgErr := validateProviderConfig(cfg); cfgErr != nil {
 				return cfgErr
+			}
+			if postFlag && dryRun {
+				return errors.New("--post cannot be combined with --dry-run")
+			}
+			if postFlag && noPush {
+				return errors.New("--post cannot be combined with --no-push")
 			}
 
 			branch, err := getCurrentBranch()
@@ -1414,6 +1422,75 @@ remote. Use --dry-run to preview the generated message without committing.`,
 					}
 				}
 			}
+
+			if postFlag {
+				remoteURL, remErr := getRemoteURL()
+				if remErr != nil {
+					return fmt.Errorf("--post: getting remote URL: %w", remErr)
+				}
+				info, parseErr := parseRemoteInfo(remoteURL)
+				if parseErr != nil {
+					return fmt.Errorf("--post: %w", parseErr)
+				}
+
+				// Derive PR/MR title from the commit message subject line.
+				subject, _, _ := strings.Cut(commitMessage, "\n")
+
+				// Find an existing open PR/MR or create a new one.
+				var prMRURL string
+				switch {
+				case isGitHubHost(info.Host, cfg.GitHubBaseURL):
+					if len(info.PathParts) < 2 {
+						return fmt.Errorf("--post: could not parse owner/repo from remote URL")
+					}
+					prMRURL, err = findOrCreateGitHubPRFromConfig(cmd.Context(), cfg, info.PathParts[0], info.PathParts[1], branch, subject)
+				case isGitLabHost(info.Host, cfg.GitLabBaseURL):
+					prMRURL, err = findOrCreateGitLabMRFromConfig(cmd.Context(), cfg, strings.Join(info.PathParts, "/"), branch, subject)
+				default:
+					return fmt.Errorf("--post: unrecognised remote host %q; set github_base_url or gitlab_base_url in config", info.Host)
+				}
+				if err != nil {
+					return fmt.Errorf("--post: finding or creating PR/MR: %w", err)
+				}
+				_, _ = fmt.Fprintf(out, "PR/MR: %s\n", prMRURL)
+
+				// Fetch the PR/MR diff from the remote API.
+				_, _ = fmt.Fprintln(out, "Generating AI review comment...")
+				var diffForReview string
+				switch {
+				case isGitHubHost(info.Host, cfg.GitHubBaseURL):
+					diffForReview, err = getPRDiff(cmd.Context(), prMRURL, cfg.GitHubToken, cfg.GitHubBaseURL)
+				case isGitLabHost(info.Host, cfg.GitLabBaseURL):
+					diffForReview, err = getMRDiff(cmd.Context(), prMRURL, cfg.GitLabToken, cfg.GitLabBaseURL)
+				}
+				if err != nil {
+					return fmt.Errorf("--post: fetching PR/MR diff: %w", err)
+				}
+
+				// Generate the AI review using the default MR system prompt.
+				reviewComment, reviewErr := chatFn(cmd.Context(), cfg, cfg.Provider, defaultPromptTemplate, diffForReview)
+				if reviewErr != nil {
+					return fmt.Errorf("--post: generating review comment: %w", reviewErr)
+				}
+
+				// Post the comment back to the PR/MR.
+				switch {
+				case isGitHubHost(info.Host, cfg.GitHubBaseURL):
+					err = postGitHubPRComment(cmd.Context(), prMRURL, cfg.GitHubToken, cfg.GitHubBaseURL, reviewComment)
+					if err == nil {
+						_, _ = fmt.Fprintln(out, "Posted AI review comment to GitHub PR.")
+					}
+				case isGitLabHost(info.Host, cfg.GitLabBaseURL):
+					err = postGitLabMRNote(cmd.Context(), prMRURL, cfg.GitLabToken, cfg.GitLabBaseURL, reviewComment)
+					if err == nil {
+						_, _ = fmt.Fprintln(out, "Posted AI review note to GitLab MR.")
+					}
+				}
+				if err != nil {
+					return fmt.Errorf("--post: posting comment: %w", err)
+				}
+			}
+
 			return nil
 		},
 	}
@@ -1423,6 +1500,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 	cmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Generate and print the commit message without staging, committing, or pushing")
 	cmd.Flags().BoolVar(&noPush, "no-push", false, "Commit but skip the push step")
+	cmd.Flags().BoolVar(&postFlag, "post", false, "After pushing, find or create a PR/MR and post an AI review comment (requires GITHUB_TOKEN or GITLAB_TOKEN)")
 	cmd.Flags().BoolVar(&breaking, "breaking", false, "Mark as a breaking change: forces feat! conventional commit type for a major version bump")
 	cmd.Flags().BoolVar(&multiLine, "multi-line", false, "Generate a multi-line commit message (subject + body) that pre-fills the PR/MR title and description")
 	cmd.Flags().BoolVar(&emoji, "emoji", false, "Append a type-matched gitmoji to the commit subject (e.g. feat → ✨, fix → 🐛, breaking → 💥)")
@@ -1442,6 +1520,88 @@ remote. Use --dry-run to preview the generated message without committing.`,
 	cmd.Flags().BoolVar(&qcYoda, "yoda", false, "Generate the commit description in Yoda's inverted syntax")
 	cmd.Flags().BoolVar(&qcExcuse, "excuse", false, "Generate a technically accurate commit message with a built-in excuse")
 	cmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate (defined in ~/.ai-mr-comment.toml under [profile.<name>])")
+	return cmd
+}
+
+// providerSecrets maps each supported AI provider to the conventional GitHub
+// Actions secret name used for its API key.
+var providerSecrets = map[string]string{
+	"openai":    "OPENAI_API_KEY",
+	"anthropic": "ANTHROPIC_API_KEY",
+	"gemini":    "GEMINI_API_KEY",
+}
+
+// newGenWorkflowCmd returns a command that generates a GitHub Actions workflow
+// file that automatically runs ai-mr-comment on every pull request.
+func newGenWorkflowCmd() *cobra.Command {
+	var provider, outputPath string
+
+	cmd := &cobra.Command{
+		Use:   "gen-workflow",
+		Short: "Generate a GitHub Actions workflow for automatic AI PR review",
+		Long: `Writes a GitHub Actions workflow YAML file that automatically runs
+ai-mr-comment on every pull request (opened, synchronised, reopened) and
+posts the AI review as a PR comment.
+
+Use --output=- to print to stdout instead of writing a file.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			secretName, ok := providerSecrets[provider]
+			if !ok {
+				supported := []string{"openai", "anthropic", "gemini"}
+				return fmt.Errorf("unsupported provider %q for gen-workflow; supported: %s", provider, strings.Join(supported, ", "))
+			}
+			providerEnvVar := secretName // env var name == secret name
+
+			workflow := fmt.Sprintf(`name: AI PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  ai-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install ai-mr-comment
+        run: |
+          curl -fsSL https://github.com/pbsladek/ai-mr-comment/releases/latest/download/ai-mr-comment-linux-amd64 \
+            -o /usr/local/bin/ai-mr-comment
+          chmod +x /usr/local/bin/ai-mr-comment
+
+      - name: Generate and post AI review
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          %s: ${{ secrets.%s }}
+        run: |
+          ai-mr-comment \
+            --pr "${{ github.event.pull_request.html_url }}" \
+            --provider %s \
+            --post
+`, providerEnvVar, secretName, provider)
+
+			if outputPath == "-" {
+				_, _ = fmt.Fprint(cmd.OutOrStdout(), workflow)
+				return nil
+			}
+
+			if err := os.MkdirAll(filepath.Dir(outputPath), 0o750); err != nil {
+				return fmt.Errorf("creating output directory: %w", err)
+			}
+			if err := os.WriteFile(outputPath, []byte(workflow), 0o600); err != nil {
+				return fmt.Errorf("writing workflow file: %w", err)
+			}
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Wrote workflow to %s\n", outputPath)
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Add secret %q to your repo, then commit the workflow file.\n", secretName)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&provider, "provider", "openai", "AI provider to use in the workflow (openai, anthropic, gemini)")
+	cmd.Flags().StringVar(&outputPath, "output", ".github/workflows/ai-review.yml", "Output file path (use - for stdout)")
 	return cmd
 }
 

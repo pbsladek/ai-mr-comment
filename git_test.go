@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1086,5 +1087,175 @@ func TestPRCreateURL(t *testing.T) {
 				t.Errorf("prCreateURL(%q, %q)\n got:  %q\n want: %q", tt.remoteURL, tt.branch, got, tt.want)
 			}
 		})
+	}
+}
+
+// ── parseRemoteInfo tests ─────────────────────────────────────────────────────
+
+func TestParseRemoteInfo(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantHost  string
+		wantParts []string
+		wantErr   bool
+	}{
+		{"ssh github", "git@github.com:owner/repo.git", "github.com", []string{"owner", "repo"}, false},
+		{"https github", "https://github.com/owner/repo.git", "github.com", []string{"owner", "repo"}, false},
+		{"ssh gitlab nested", "git@gitlab.com:group/sub/project.git", "gitlab.com", []string{"group", "sub", "project"}, false},
+		{"https self-hosted", "https://git.myco.com/ns/proj.git", "git.myco.com", []string{"ns", "proj"}, false},
+		{"no .git suffix", "https://github.com/owner/repo", "github.com", []string{"owner", "repo"}, false},
+		{"invalid url", "not-a-url", "", nil, true},
+		{"single segment path", "https://github.com/onlyone", "", nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseRemoteInfo(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Host != tt.wantHost {
+				t.Errorf("host: got %q, want %q", got.Host, tt.wantHost)
+			}
+			if fmt.Sprint(got.PathParts) != fmt.Sprint(tt.wantParts) {
+				t.Errorf("pathParts: got %v, want %v", got.PathParts, tt.wantParts)
+			}
+		})
+	}
+}
+
+func TestIsGitHubHost(t *testing.T) {
+	if !isGitHubHost("github.com", "") {
+		t.Error("github.com should be detected as GitHub")
+	}
+	if !isGitHubHost("mygithubenterprise.com", "") {
+		t.Error("host containing 'github' should be detected as GitHub")
+	}
+	if !isGitHubHost("git.myco.com", "https://git.myco.com") {
+		t.Error("host matching configuredBaseURL should be detected as GitHub")
+	}
+	if isGitHubHost("git.myco.com", "") {
+		t.Error("unknown host with no config should not be GitHub")
+	}
+}
+
+func TestIsGitLabHost(t *testing.T) {
+	if !isGitLabHost("gitlab.com", "") {
+		t.Error("gitlab.com should be detected as GitLab")
+	}
+	if !isGitLabHost("git.myco.com", "https://git.myco.com") {
+		t.Error("host matching configuredBaseURL should be detected as GitLab")
+	}
+	if isGitLabHost("git.myco.com", "") {
+		t.Error("unknown host with no config should not be GitLab")
+	}
+}
+
+// ── findOrCreateGitHubPR tests ────────────────────────────────────────────────
+
+func TestFindOrCreateGitHubPR_FindsExisting(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/owner/repo/pulls", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "unexpected method", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"number": 7, "html_url": "https://github.com/owner/repo/pull/7"},
+		})
+	})
+	gh := newTestGitHubClient(t, mux)
+	got, err := findOrCreateGitHubPR(context.Background(), gh, "owner", "repo", "feat/my-branch", "My title")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "https://github.com/owner/repo/pull/7" {
+		t.Errorf("got %q, want existing PR URL", got)
+	}
+}
+
+func TestFindOrCreateGitHubPR_CreatesNew(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/owner/repo/pulls", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode([]map[string]any{}) // empty list
+			return
+		}
+		// POST — create
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"number":   42,
+			"html_url": "https://github.com/owner/repo/pull/42",
+		})
+	})
+	mux.HandleFunc("/repos/owner/repo", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"default_branch": "main"})
+	})
+	gh := newTestGitHubClient(t, mux)
+	got, err := findOrCreateGitHubPR(context.Background(), gh, "owner", "repo", "feat/new", "New PR")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "https://github.com/owner/repo/pull/42" {
+		t.Errorf("got %q, want new PR URL", got)
+	}
+}
+
+// ── findOrCreateGitLabMR tests ────────────────────────────────────────────────
+
+func TestFindOrCreateGitLabMR_FindsExisting(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/mygroup%2Fmyproject/merge_requests", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "unexpected method", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"iid": 3, "web_url": "https://gitlab.com/mygroup/myproject/-/merge_requests/3"},
+		})
+	})
+	gl := newTestGitLabClient(t, mux)
+	got, err := findOrCreateGitLabMR(context.Background(), gl, "mygroup/myproject", "feat/my-branch", "My title")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "https://gitlab.com/mygroup/myproject/-/merge_requests/3" {
+		t.Errorf("got %q, want existing MR URL", got)
+	}
+}
+
+func TestFindOrCreateGitLabMR_CreatesNew(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/mygroup%2Fmyproject/merge_requests", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode([]map[string]any{}) // empty
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"iid":     9,
+			"web_url": "https://gitlab.com/mygroup/myproject/-/merge_requests/9",
+		})
+	})
+	mux.HandleFunc("/api/v4/projects/mygroup%2Fmyproject", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"default_branch": "main"})
+	})
+	gl := newTestGitLabClient(t, mux)
+	got, err := findOrCreateGitLabMR(context.Background(), gl, "mygroup/myproject", "feat/new", "New MR")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "https://gitlab.com/mygroup/myproject/-/merge_requests/9" {
+		t.Errorf("got %q, want new MR URL", got)
 	}
 }

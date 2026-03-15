@@ -3078,3 +3078,91 @@ func TestRootCmd_FunFlags_MutualExclusion(t *testing.T) {
 		}
 	}
 }
+
+// ── gen-workflow tests ────────────────────────────────────────────────────────
+
+func TestGenWorkflow_Stdout(t *testing.T) {
+	cmd := newRootCmd(dummyChatFn)
+	var out strings.Builder
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"gen-workflow", "--provider=anthropic", "--output=-"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{
+		"pull_request",
+		"ANTHROPIC_API_KEY",
+		"--provider anthropic",
+		"GITHUB_TOKEN",
+		"ai-mr-comment-linux-amd64",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output missing %q", want)
+		}
+	}
+}
+
+func TestGenWorkflow_AllProviders(t *testing.T) {
+	cases := []struct {
+		provider   string
+		wantSecret string
+	}{
+		{"openai", "OPENAI_API_KEY"},
+		{"anthropic", "ANTHROPIC_API_KEY"},
+		{"gemini", "GEMINI_API_KEY"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.provider, func(t *testing.T) {
+			cmd := newRootCmd(dummyChatFn)
+			var out strings.Builder
+			cmd.SetOut(&out)
+			cmd.SetArgs([]string{"gen-workflow", "--provider=" + tc.provider, "--output=-"})
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !strings.Contains(out.String(), tc.wantSecret) {
+				t.Errorf("expected %q in output for provider %q", tc.wantSecret, tc.provider)
+			}
+		})
+	}
+}
+
+func TestGenWorkflow_InvalidProvider(t *testing.T) {
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"gen-workflow", "--provider=ollama", "--output=-"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error for unsupported provider, got nil")
+	}
+}
+
+func TestGenWorkflow_FileOutput(t *testing.T) {
+	dir := t.TempDir()
+	outputPath := dir + "/workflow.yml"
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"gen-workflow", "--provider=openai", "--output=" + outputPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("file not created: %v", err)
+	}
+	if !strings.Contains(string(data), "OPENAI_API_KEY") {
+		t.Error("generated file missing OPENAI_API_KEY")
+	}
+}
+
+func TestQuickCommit_PostIncompatibleFlags(t *testing.T) {
+	incompatible := [][]string{
+		{"quick-commit", "--post", "--dry-run"},
+		{"quick-commit", "--post", "--no-push"},
+	}
+	for _, args := range incompatible {
+		cmd := newRootCmd(dummyChatFn)
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err == nil {
+			t.Errorf("expected error for args %v, got nil", args)
+		}
+	}
+}
