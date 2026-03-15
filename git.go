@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -340,6 +341,32 @@ func newGitHubClient(ctx context.Context, token, baseURL string) (*gogithub.Clie
 	return gh, nil
 }
 
+// wrapGitHubAuthError inspects a go-github error and, for 401/403/404
+// responses, appends a hint about setting GITHUB_TOKEN.
+func wrapGitHubAuthError(msg string, err error) error {
+	var ghErr *gogithub.ErrorResponse
+	if errors.As(err, &ghErr) {
+		switch ghErr.Response.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+			return fmt.Errorf("%s: %w (set GITHUB_TOKEN for private repos)", msg, err)
+		}
+	}
+	return fmt.Errorf("%s: %w", msg, err)
+}
+
+// wrapGitLabAuthError inspects a go-gitlab error and, for 401/403/404
+// responses, appends a hint about setting GITLAB_TOKEN.
+func wrapGitLabAuthError(msg string, err error) error {
+	var glErr *gogitlab.ErrorResponse
+	if errors.As(err, &glErr) {
+		switch glErr.Response.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+			return fmt.Errorf("%s: %w (set GITLAB_TOKEN for private repos)", msg, err)
+		}
+	}
+	return fmt.Errorf("%s: %w", msg, err)
+}
+
 // getPRDiffWithClient fetches the diff and metadata for a GitHub pull request
 // using the provided go-github client. Separated from getPRDiff to allow tests
 // to inject a client pointed at a local httptest server.
@@ -352,14 +379,14 @@ func getPRDiffWithClient(ctx context.Context, gh *gogithub.Client, prURL string)
 	// Fetch PR metadata (title + body).
 	pr, _, err := gh.PullRequests.Get(ctx, owner, repo, number)
 	if err != nil {
-		return "", fmt.Errorf("fetching GitHub PR metadata: %w", err)
+		return "", wrapGitHubAuthError("fetching GitHub PR metadata", err)
 	}
 
 	// Fetch the raw unified diff via the SDK diff option.
 	opts := &gogithub.RawOptions{Type: gogithub.Diff}
 	rawDiff, _, err := gh.PullRequests.GetRaw(ctx, owner, repo, number, *opts)
 	if err != nil {
-		return "", fmt.Errorf("fetching GitHub PR diff: %w", err)
+		return "", wrapGitHubAuthError("fetching GitHub PR diff", err)
 	}
 
 	return formatPRContent(pr.GetTitle(), pr.GetBody(), rawDiff), nil
@@ -407,13 +434,13 @@ func getMRDiffWithClient(ctx context.Context, gl *gogitlab.Client, mrURL string)
 	// Fetch MR metadata (title + description).
 	mr, _, err := gl.MergeRequests.GetMergeRequest(projectPath, iid, nil, gogitlab.WithContext(ctx))
 	if err != nil {
-		return "", fmt.Errorf("fetching GitLab MR metadata: %w", err)
+		return "", wrapGitLabAuthError("fetching GitLab MR metadata", err)
 	}
 
 	// Fetch the raw unified diff via MR diffs.
 	changes, _, err := gl.MergeRequests.ListMergeRequestDiffs(projectPath, iid, nil, gogitlab.WithContext(ctx))
 	if err != nil {
-		return "", fmt.Errorf("fetching GitLab MR diff: %w", err)
+		return "", wrapGitLabAuthError("fetching GitLab MR diff", err)
 	}
 
 	var diffBuilder strings.Builder
