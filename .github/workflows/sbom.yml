@@ -20,12 +20,12 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Set up Go
-        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
           go-version: "1.26"
 
       - name: Generate SBOM
-        uses: anchore/sbom-action@28d71544de8eaf1b958d335707167c5f783590ad # v0
+        uses: anchore/sbom-action@57aae528053a48a3f6235f2d9461b05fbcb7366d # v0
         with:
           # Scan the whole repository so Go module dependencies are discovered.
           path: .
