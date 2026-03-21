@@ -79,6 +79,16 @@ test: ## Run unit tests
 test-cover: ## Run tests with coverage report
 	go test -v -coverprofile=coverage.out $$(go list ./... | grep -vE '/evals(/|$$)')
 
+test-cover-report: test-cover ## Run tests with coverage and print summary
+	go tool cover -func=coverage.out
+	@echo ""
+	@echo "Total coverage: $$(go tool cover -func=coverage.out | grep total | awk '{print $$3}')"
+
+verify-deps: ## Verify go module integrity and tidiness
+	go mod verify
+	go mod tidy
+	git diff --exit-code go.mod go.sum
+
 test-integration: ## Run all integration tests (provider tests may skip if env vars are missing)
 	go test -v -tags=integration $$(go list ./... | grep -vE '/evals(/|$$)')
 
