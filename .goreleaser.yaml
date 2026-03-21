@@ -48,8 +48,7 @@ signs:
     args:
       - sign-blob
       - --yes
-      - --output-signature=${signature}
-      - --output-certificate=${certificate}
+      - --bundle=${signature}
       - ${artifact}
     artifacts: checksum
     output: true
@@ -58,8 +57,7 @@ signs:
     args:
       - sign-blob
       - --yes
-      - --output-signature=${signature}
-      - --output-certificate=${certificate}
+      - --bundle=${signature}
       - ${artifact}
     artifacts: archive
     output: true
