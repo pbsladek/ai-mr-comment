@@ -2,6 +2,5 @@
 set -euo pipefail
 cosign sign-blob \
   --yes \
-  --output-signature "dist/release-manifest.json.sig" \
-  --output-certificate "dist/release-manifest.json.pem" \
+  --bundle "dist/release-manifest.json.bundle" \
   "dist/release-manifest.json"

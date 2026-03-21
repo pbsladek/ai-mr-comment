@@ -315,7 +315,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.validate.outputs.tag }}
-        run: .github/scripts/upload-release-assets.sh "${TAG}" "dist/release-manifest.json" "dist/release-manifest.json.sig" "dist/release-manifest.json.pem"
+        run: .github/scripts/upload-release-assets.sh "${TAG}" "dist/release-manifest.json" "dist/release-manifest.json.bundle"
 
       - name: Verify release assets
         env:
