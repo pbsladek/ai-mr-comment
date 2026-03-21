@@ -101,7 +101,7 @@ func applyProfile(v *viper.Viper, profile string) error {
 // the named profile (if any), and unmarshals the result into a Config.
 // It is split from loadConfigForProfile to allow tests to inject a pre-configured Viper instance.
 func loadConfigWith(v *viper.Viper, profile string) (*Config, error) {
-	v.SetDefault("provider", OpenAI)
+	v.SetDefault("provider", Anthropic)
 	v.SetDefault("openai_model", "gpt-4.1-mini")
 	v.SetDefault("openai_endpoint", "https://api.openai.com/v1/")
 	v.SetDefault("anthropic_model", "claude-sonnet-4-6")

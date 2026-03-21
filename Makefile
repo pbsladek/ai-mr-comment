@@ -79,6 +79,16 @@ test: ## Run unit tests
 test-cover: ## Run tests with coverage report
 	go test -v -coverprofile=coverage.out $$(go list ./... | grep -vE '/evals(/|$$)')
 
+test-cover-report: test-cover ## Run tests with coverage and print summary
+	go tool cover -func=coverage.out
+	@echo ""
+	@echo "Total coverage: $$(go tool cover -func=coverage.out | grep total | awk '{print $$3}')"
+
+verify-deps: ## Verify go module integrity and tidiness
+	go mod verify
+	go mod tidy
+	git diff --exit-code go.mod go.sum
+
 test-integration: ## Run all integration tests (provider tests may skip if env vars are missing)
 	go test -v -tags=integration $$(go list ./... | grep -vE '/evals(/|$$)')
 
@@ -86,6 +96,9 @@ INTEGRATION_TEST_PATTERN ?= ^TestIntegration_Ollama
 LOCAL_OLLAMA_ENDPOINT ?= http://127.0.0.1:11434/api/generate
 LOCAL_OLLAMA_MODEL ?= llama3.1:8b
 LOCAL_OLLAMA_TIMEOUT_MS ?= 300000
+
+test-integration-anthropic: ## Run only Anthropic CLI e2e tests (requires ANTHROPIC_API_KEY)
+	go test -v -tags=integration -run '^TestIntegration_Anthropic_CLI' -count=1 -timeout 120s $$(go list ./... | grep -vE '/evals(/|$$)')
 
 test-integration-ollama: ## Run only Ollama integration tests (set OLLAMA_MODEL/OLLAMA_ENDPOINT as needed)
 	go test -v -tags=integration -run '$(INTEGRATION_TEST_PATTERN)' $$(go list ./... | grep -vE '/evals(/|$$)')

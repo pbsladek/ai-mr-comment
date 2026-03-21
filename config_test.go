@@ -54,8 +54,8 @@ func TestLoadConfig_DefaultsWhenMissingFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Provider != OpenAI {
-		t.Errorf("expected provider OpenAI, got %v", cfg.Provider)
+	if cfg.Provider != Anthropic {
+		t.Errorf("expected provider Anthropic, got %v", cfg.Provider)
 	}
 	if cfg.OpenAIModel != "gpt-4.1-mini" {
 		t.Errorf("expected OpenAI model gpt-4.1-mini, got %v", cfg.OpenAIModel)

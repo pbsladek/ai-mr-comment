@@ -26,11 +26,11 @@ jobs:
         with:
           version: v2.9
 
+      - name: Download Dependencies
+        run: go mod download 2>/dev/null
+
       - name: Verify Dependencies
-        run: |
-          go mod verify
-          go mod tidy
-          git diff --exit-code go.mod go.sum
+        run: make verify-deps
 
       - name: Validate Installer Scripts
         run: .github/scripts/validate-installer-scripts.sh
@@ -47,11 +47,7 @@ jobs:
         run: make test
 
       - name: Run Coverage
-        run: |
-          make test-cover
-          go tool cover -func=coverage.out
-          echo ""
-          echo "Total coverage: $(go tool cover -func=coverage.out | grep total | awk '{print $3}')"
+        run: make test-cover-report
 
       # - name: Fuzz Smoke Test
       #   run: |

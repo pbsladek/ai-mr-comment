@@ -91,12 +91,47 @@ func callOpenAI(ctx context.Context, client *openai.Client, cfg *Config, systemP
 		MaxTokens:   param.NewOpt(int64(4000)),
 	})
 	if err != nil {
-		return "", err
+		return "", enrichOpenAIError(err)
 	}
 	if len(resp.Choices) == 0 {
 		return "", errors.New("no choices returned")
 	}
 	return resp.Choices[0].Message.Content, nil
+}
+
+// enrichAnthropicError wraps Anthropic API errors with actionable hints.
+func enrichAnthropicError(err error) error {
+	var apiErr *anthropic.Error
+	if !errors.As(err, &apiErr) {
+		return err
+	}
+	switch apiErr.StatusCode {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return fmt.Errorf("%w\n\nYour Anthropic API key is invalid or lacks permission.\nCheck ANTHROPIC_API_KEY or 'anthropic_api_key' in ~/.ai-mr-comment.toml", err)
+	case http.StatusTooManyRequests:
+		return fmt.Errorf("%w\n\nYou have hit the Anthropic rate limit. Wait a moment and try again", err)
+	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout,
+		529: // Anthropic overloaded
+		return fmt.Errorf("%w\n\nThe Anthropic API returned a server error. This is usually transient — try again in a moment", err)
+	}
+	return err
+}
+
+// enrichOpenAIError wraps OpenAI API errors with actionable hints.
+func enrichOpenAIError(err error) error {
+	var apiErr *openai.Error
+	if !errors.As(err, &apiErr) {
+		return err
+	}
+	switch apiErr.StatusCode {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return fmt.Errorf("%w\n\nYour OpenAI API key is invalid or lacks permission.\nCheck OPENAI_API_KEY or 'openai_api_key' in ~/.ai-mr-comment.toml", err)
+	case http.StatusTooManyRequests:
+		return fmt.Errorf("%w\n\nYou have hit the OpenAI rate limit. Wait a moment and try again", err)
+	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return fmt.Errorf("%w\n\nThe OpenAI API returned a server error. This is usually transient — try again in a moment", err)
+	}
+	return err
 }
 
 // callAnthropic sends a message request to the Anthropic API and returns the
@@ -118,7 +153,7 @@ func callAnthropic(ctx context.Context, client *anthropic.Client, cfg *Config, s
 		},
 	})
 	if err != nil {
-		return "", err
+		return "", enrichAnthropicError(err)
 	}
 	if len(resp.Content) == 0 {
 		return "", errors.New("no content returned")
@@ -289,7 +324,7 @@ func streamOpenAI(ctx context.Context, client *openai.Client, cfg *Config, syste
 		}
 	}
 	if err := stream.Err(); err != nil {
-		return "", err
+		return "", enrichOpenAIError(err)
 	}
 	return sb.String(), nil
 }
@@ -325,7 +360,7 @@ func streamAnthropic(ctx context.Context, client *anthropic.Client, cfg *Config,
 		}
 	}
 	if err := stream.Err(); err != nil {
-		return "", err
+		return "", enrichAnthropicError(err)
 	}
 	return sb.String(), nil
 }

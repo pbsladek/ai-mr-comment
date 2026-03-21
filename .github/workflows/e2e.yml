@@ -1,0 +1,33 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+# Secrets are available for PRs from the same repo but not from forks.
+# The run script exits cleanly when ANTHROPIC_API_KEY is absent.
+permissions: read-all
+
+jobs:
+  e2e-anthropic:
+    name: E2E Anthropic CLI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Go
+        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Download Dependencies
+        run: go mod download 2>/dev/null
+
+      - name: Run Anthropic CLI e2e tests
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: make test-integration-anthropic
