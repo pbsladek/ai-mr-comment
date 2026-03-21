@@ -13,8 +13,7 @@ fi
 required_exact=(
   "checksums.txt"
   "release-manifest.json"
-  "release-manifest.json.sig"
-  "release-manifest.json.pem"
+  "release-manifest.json.bundle"
   "provenance-binaries.intoto.jsonl"
 )
 

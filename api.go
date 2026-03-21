@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -99,6 +100,20 @@ func callOpenAI(ctx context.Context, client *openai.Client, cfg *Config, systemP
 	return resp.Choices[0].Message.Content, nil
 }
 
+// enrichNetworkError wraps DNS/connection errors with a human-readable hint.
+// It is called as a final fallback from all provider-specific enrichers.
+func enrichNetworkError(err error) error {
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
+		return fmt.Errorf("%w\n\nCould not reach the API host (%s).\nCheck your internet connection or proxy settings", err, dnsErr.Name)
+	}
+	var netErr *net.OpError
+	if errors.As(err, &netErr) && netErr.Op == "dial" {
+		return fmt.Errorf("%w\n\nCould not connect to the API.\nCheck your internet connection or proxy settings", err)
+	}
+	return err
+}
+
 // enrichAnthropicError wraps Anthropic API errors with actionable hints.
 func enrichAnthropicError(err error) error {
 	var apiErr *anthropic.Error
@@ -114,14 +129,14 @@ func enrichAnthropicError(err error) error {
 		529: // Anthropic overloaded
 		return fmt.Errorf("%w\n\nThe Anthropic API returned a server error. This is usually transient — try again in a moment", err)
 	}
-	return err
+	return enrichNetworkError(err)
 }
 
 // enrichOpenAIError wraps OpenAI API errors with actionable hints.
 func enrichOpenAIError(err error) error {
 	var apiErr *openai.Error
 	if !errors.As(err, &apiErr) {
-		return err
+		return enrichNetworkError(err)
 	}
 	switch apiErr.StatusCode {
 	case http.StatusUnauthorized, http.StatusForbidden:
@@ -131,7 +146,7 @@ func enrichOpenAIError(err error) error {
 	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 		return fmt.Errorf("%w\n\nThe OpenAI API returned a server error. This is usually transient — try again in a moment", err)
 	}
-	return err
+	return enrichNetworkError(err)
 }
 
 // callAnthropic sends a message request to the Anthropic API and returns the
@@ -226,7 +241,7 @@ func callGemini(ctx context.Context, cfg *Config, systemPrompt, diffContent stri
 
 	resp, err := model.GenerateContent(ctx, genai.Text(diffContent))
 	if err != nil {
-		return "", err
+		return "", enrichNetworkError(err)
 	}
 
 	if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil || len(resp.Candidates[0].Content.Parts) == 0 {
@@ -387,7 +402,7 @@ func streamGemini(ctx context.Context, cfg *Config, systemPrompt, diffContent st
 			break
 		}
 		if err != nil {
-			return "", err
+			return "", enrichNetworkError(err)
 		}
 		if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil || len(resp.Candidates[0].Content.Parts) == 0 {
 			continue

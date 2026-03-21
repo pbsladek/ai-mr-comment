@@ -84,6 +84,9 @@ test-cover-report: test-cover ## Run tests with coverage and print summary
 	@echo ""
 	@echo "Total coverage: $$(go tool cover -func=coverage.out | grep total | awk '{print $$3}')"
 
+install-shellcheck: ## Install shellcheck (requires sudo, for CI)
+	sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends shellcheck
+
 verify-deps: ## Verify go module integrity and tidiness
 	go mod verify
 	go mod tidy

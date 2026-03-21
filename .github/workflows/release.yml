@@ -31,11 +31,7 @@ jobs:
 
       - name: Resolve and validate release tag
         id: resolve_tag
-        run: |
-          .github/scripts/resolve-release-tag.sh \
-            "${{ github.event.inputs.tag }}" \
-            "${{ github.event.workflow_run.head_sha }}" \
-            "${GITHUB_OUTPUT}"
+        run: .github/scripts/resolve-release-tag.sh "${{ github.event.inputs.tag }}" "${{ github.event.workflow_run.head_sha }}" "${GITHUB_OUTPUT}"
 
   artifacts:
     name: Build Release Artifacts
@@ -92,10 +88,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.validate.outputs.tag }}
-        run: |
-          set -euo pipefail
-          bash .github/scripts/upload-release-assets.sh "${TAG}" \
-            "dist/provenance-binaries.intoto.jsonl"
+        run: .github/scripts/upload-release-assets.sh "${TAG}" "dist/provenance-binaries.intoto.jsonl"
 
   docker:
     name: Build and Push Docker Image
@@ -121,14 +114,7 @@ jobs:
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${DOCKERHUB_USERNAME}" ] || [ -z "${DOCKERHUB_TOKEN}" ]; then
-            echo "enabled=false" >> "${GITHUB_OUTPUT}"
-            echo "Docker publish skipped: DOCKERHUB_USERNAME or DOCKERHUB_TOKEN is missing."
-          else
-            echo "enabled=true" >> "${GITHUB_OUTPUT}"
-          fi
+        run: .github/scripts/check-docker-creds.sh
 
       - name: Set up QEMU
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
@@ -159,13 +145,7 @@ jobs:
         env:
           TAG: ${{ needs.validate.outputs.tag }}
           IMAGE: pwbsladek/ai-mr-comment
-        run: |
-          set -euo pipefail
-          if [[ "${TAG}" == *-* ]]; then
-            echo "tags=${IMAGE}:${TAG}" >> "${GITHUB_OUTPUT}"
-          else
-            echo "tags=${IMAGE}:${TAG},${IMAGE}:latest" >> "${GITHUB_OUTPUT}"
-          fi
+        run: .github/scripts/compute-docker-tags.sh "${TAG}" "${IMAGE}"
 
       - name: Build and push Docker image
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
@@ -193,20 +173,14 @@ jobs:
 
       - name: Stage Docker provenance bundle
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        run: |
-          mkdir -p dist
-          cp "${{ steps.attest_docker.outputs.bundle-path }}" "dist/provenance-docker.intoto.jsonl"
+        run: mkdir -p dist && cp "${{ steps.attest_docker.outputs.bundle-path }}" dist/provenance-docker.intoto.jsonl
 
       - name: Upload Docker provenance
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.validate.outputs.tag }}
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          bash .github/scripts/upload-release-assets.sh "${TAG}" \
-            "dist/provenance-docker.intoto.jsonl"
+        run: .github/scripts/upload-release-assets.sh "${TAG}" "dist/provenance-docker.intoto.jsonl"
 
   docker_fips:
     name: Build and Push Docker FIPS Image
@@ -232,14 +206,7 @@ jobs:
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${DOCKERHUB_USERNAME}" ] || [ -z "${DOCKERHUB_TOKEN}" ]; then
-            echo "enabled=false" >> "${GITHUB_OUTPUT}"
-            echo "Docker publish skipped: DOCKERHUB_USERNAME or DOCKERHUB_TOKEN is missing."
-          else
-            echo "enabled=true" >> "${GITHUB_OUTPUT}"
-          fi
+        run: .github/scripts/check-docker-creds.sh
 
       - name: Set up QEMU
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
@@ -270,13 +237,7 @@ jobs:
         env:
           TAG: ${{ needs.validate.outputs.tag }}
           IMAGE: pwbsladek/ai-mr-comment
-        run: |
-          set -euo pipefail
-          if [[ "${TAG}" == *-* ]]; then
-            echo "tags=${IMAGE}:${TAG}-fips" >> "${GITHUB_OUTPUT}"
-          else
-            echo "tags=${IMAGE}:${TAG}-fips,${IMAGE}:latest-fips" >> "${GITHUB_OUTPUT}"
-          fi
+        run: .github/scripts/compute-docker-tags.sh "${TAG}" "${IMAGE}" "-fips"
 
       - name: Build and push Docker FIPS image
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
@@ -305,20 +266,14 @@ jobs:
 
       - name: Stage Docker FIPS provenance bundle
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        run: |
-          mkdir -p dist
-          cp "${{ steps.attest_docker_fips.outputs.bundle-path }}" "dist/provenance-docker-fips.intoto.jsonl"
+        run: mkdir -p dist && cp "${{ steps.attest_docker_fips.outputs.bundle-path }}" dist/provenance-docker-fips.intoto.jsonl
 
       - name: Upload Docker FIPS provenance
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.validate.outputs.tag }}
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          bash .github/scripts/upload-release-assets.sh "${TAG}" \
-            "dist/provenance-docker-fips.intoto.jsonl"
+        run: .github/scripts/upload-release-assets.sh "${TAG}" "dist/provenance-docker-fips.intoto.jsonl"
 
   finalize:
     name: Finalize Release
@@ -351,39 +306,16 @@ jobs:
           DOCKER_IMAGE: pwbsladek/ai-mr-comment
           DOCKER_TAGS: ${{ needs.docker.outputs.docker_tags }}
           DOCKER_DIGEST: ${{ needs.docker.outputs.docker_digest }}
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          COMMIT_SHA="$(git rev-list -n 1 "${TAG}")"
-          bash .github/scripts/generate-release-manifest.sh \
-            "${TAG}" \
-            "${COMMIT_SHA}" \
-            "${SOURCE_URL}" \
-            "${SOURCE_SHA256}" \
-            "${DOCKER_IMAGE}" \
-            "${DOCKER_TAGS}" \
-            "${DOCKER_DIGEST}" \
-            "dist/release-manifest.json"
+        run: .github/scripts/generate-release-manifest.sh "${TAG}" "$(git rev-list -n 1 "${TAG}")" "${SOURCE_URL}" "${SOURCE_SHA256}" "${DOCKER_IMAGE}" "${DOCKER_TAGS}" "${DOCKER_DIGEST}" "dist/release-manifest.json"
 
       - name: Sign immutable release manifest
-        run: |
-          set -euo pipefail
-          cosign sign-blob \
-            --yes \
-            --output-signature "dist/release-manifest.json.sig" \
-            --output-certificate "dist/release-manifest.json.pem" \
-            "dist/release-manifest.json"
+        run: .github/scripts/sign-release-manifest.sh
 
       - name: Upload release manifest assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.validate.outputs.tag }}
-        run: |
-          set -euo pipefail
-          bash .github/scripts/upload-release-assets.sh "${TAG}" \
-            "dist/release-manifest.json" \
-            "dist/release-manifest.json.sig" \
-            "dist/release-manifest.json.pem"
+        run: .github/scripts/upload-release-assets.sh "${TAG}" "dist/release-manifest.json" "dist/release-manifest.json.bundle"
 
       - name: Verify release assets
         env:
