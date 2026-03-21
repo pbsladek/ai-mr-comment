@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -112,7 +113,7 @@ func TestIntegration_Anthropic(t *testing.T) {
 	cfg := &Config{
 		Provider:          Anthropic,
 		AnthropicAPIKey:   apiKey,
-		AnthropicModel:    "claude-sonnet-4-5",
+		AnthropicModel:    "claude-sonnet-4-6",
 		AnthropicEndpoint: "https://api.anthropic.com",
 	}
 
@@ -381,6 +382,133 @@ func TestIntegration_SmartChunk_Gemini(t *testing.T) {
 		t.Error("expected non-empty output from smart-chunk synthesis")
 	}
 	t.Logf("Smart-chunk synthesis output:\n%s", out)
+}
+
+// TestIntegration_Anthropic_CLI_Default exercises the full CLI pipeline with
+// no explicit provider or model flags — only ANTHROPIC_API_KEY and
+// AI_MR_COMMENT_PROVIDER are set, so the default model (claude-sonnet-4-6)
+// is resolved from config defaults. This mirrors how a typical user runs the
+// tool after setting their API key.
+func TestIntegration_Anthropic_CLI_Default(t *testing.T) {
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+	if apiKey == "" {
+		t.Skip("Skipping: ANTHROPIC_API_KEY not set")
+	}
+	t.Setenv("ANTHROPIC_API_KEY", apiKey)
+	t.Setenv("AI_MR_COMMENT_PROVIDER", "anthropic")
+
+	var out strings.Builder
+	cmd := newRootCmd(chatCompletions)
+	cmd.SetArgs([]string{
+		"--file=testdata/simple.diff",
+	})
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		if strings.Contains(err.Error(), "404") {
+			t.Logf("Skipping: model not found (%v)", err)
+			t.SkipNow()
+		}
+		t.Fatalf("command failed: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "── Description ──") {
+		t.Fatalf("expected description section in output, got %d bytes", len(got))
+	}
+	t.Logf("output length: %d bytes", len(got))
+}
+
+// TestIntegration_Anthropic_CLI_NoConfig exercises the full CLI pipeline with
+// Anthropic using only the ANTHROPIC_API_KEY environment variable (no config
+// file). The API key is never written to disk or included in any log output.
+func TestIntegration_Anthropic_CLI_NoConfig(t *testing.T) {
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+	if apiKey == "" {
+		t.Skip("Skipping: ANTHROPIC_API_KEY not set")
+	}
+	// Isolate the env var; never log it.
+	t.Setenv("ANTHROPIC_API_KEY", apiKey)
+
+	var out strings.Builder
+	cmd := newRootCmd(chatCompletions)
+	cmd.SetArgs([]string{
+		"--provider=anthropic",
+		"--model=claude-sonnet-4-6",
+		"--file=testdata/simple.diff",
+	})
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		if strings.Contains(err.Error(), "404") {
+			t.Logf("Skipping: model not found (%v)", err)
+			t.SkipNow()
+		}
+		t.Fatalf("command failed: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "── Description ──") {
+		t.Fatalf("expected description section in output, got %d bytes", len(got))
+	}
+	t.Logf("output length: %d bytes", len(got))
+}
+
+// TestIntegration_Anthropic_CLI_WithConfig exercises the full CLI pipeline with
+// Anthropic when provider and model are read from a TOML config file. The API
+// key is supplied via environment variable so it is never written to disk.
+func TestIntegration_Anthropic_CLI_WithConfig(t *testing.T) {
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+	if apiKey == "" {
+		t.Skip("Skipping: ANTHROPIC_API_KEY not set")
+	}
+	t.Setenv("ANTHROPIC_API_KEY", apiKey)
+
+	// Resolve testdata path before changing directory.
+	testdataDiff, err := filepath.Abs("testdata/simple.diff")
+	if err != nil {
+		t.Fatalf("resolving testdata path: %v", err)
+	}
+
+	// Write a minimal config that sets provider and model; the API key stays
+	// in the environment so it is never persisted to disk.
+	tmpDir := t.TempDir()
+	cfgContent := "provider = \"anthropic\"\nanthropic_model = \"claude-sonnet-4-6\"\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, ".ai-mr-comment.toml"), []byte(cfgContent), 0o600); err != nil {
+		t.Fatalf("writing config: %v", err)
+	}
+	// Viper searches "." before "$HOME", so our tmpDir config takes priority.
+	t.Chdir(tmpDir)
+
+	var out strings.Builder
+	cmd := newRootCmd(chatCompletions)
+	cmd.SetArgs([]string{
+		"--file=" + testdataDiff,
+	})
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		if strings.Contains(err.Error(), "404") {
+			t.Logf("Skipping: model not found (%v)", err)
+			t.SkipNow()
+		}
+		t.Fatalf("command failed: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "── Description ──") {
+		t.Fatalf("expected description section in output, got %d bytes", len(got))
+	}
+	t.Logf("output length: %d bytes", len(got))
 }
 
 // TestIntegration_SmartChunk_OpenAI verifies the same end-to-end behaviour

@@ -87,6 +87,9 @@ LOCAL_OLLAMA_ENDPOINT ?= http://127.0.0.1:11434/api/generate
 LOCAL_OLLAMA_MODEL ?= llama3.1:8b
 LOCAL_OLLAMA_TIMEOUT_MS ?= 300000
 
+test-integration-anthropic: ## Run only Anthropic CLI e2e tests (requires ANTHROPIC_API_KEY)
+	go test -v -tags=integration -run '^TestIntegration_Anthropic_CLI' -count=1 -timeout 120s $$(go list ./... | grep -vE '/evals(/|$$)')
+
 test-integration-ollama: ## Run only Ollama integration tests (set OLLAMA_MODEL/OLLAMA_ENDPOINT as needed)
 	go test -v -tags=integration -run '$(INTEGRATION_TEST_PATTERN)' $$(go list ./... | grep -vE '/evals(/|$$)')
 

@@ -827,8 +827,8 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().StringVar(&provider, "provider", "openai", "API provider (openai, anthropic, gemini, ollama)")
 	rootCmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this run (e.g. gpt-4o, claude-opus-4-6, gemini-2.5-flash)")
 	rootCmd.Flags().StringVarP(&templateName, "template", "t", "default", "Prompt template to use (e.g., default, conventional, technical)")
-	rootCmd.Flags().BoolVar(&debug, "debug", false, "Estimate token usage")
-	rootCmd.Flags().BoolVar(&verbose, "verbose", false, "Enable verbose debug logging to stderr")
+	rootCmd.Flags().BoolVar(&debug, "debug", false, "Show token/cost estimate and exit without calling the API")
+	rootCmd.Flags().BoolVar(&verbose, "verbose", false, "Enable verbose debug logging to stderr (provider, model, timing, errors)")
 	rootCmd.Flags().BoolVar(&staged, "staged", false, "Diff staged changes only (git diff --cached)")
 	rootCmd.Flags().StringVar(&clipboardFlag, "clipboard", "", "Copy to clipboard: title, description, or all")
 	rootCmd.Flags().StringArrayVar(&exclude, "exclude", nil, "Exclude files matching pattern (e.g. vendor/**, *.sum). Can be repeated.")
@@ -890,7 +890,7 @@ const defaultConfigTOML = `# ai-mr-comment configuration
 # Place this file at ~/.ai-mr-comment.toml or in the project root.
 
 # Default AI provider: openai | anthropic | gemini | ollama
-provider = "openai"
+provider = "anthropic"
 
 # Default prompt template.
 # Built-in options: default | conventional | technical | user-focused | emoji | sassy | monday

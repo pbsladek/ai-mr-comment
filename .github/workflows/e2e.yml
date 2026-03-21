@@ -1,0 +1,36 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+# Only push to main (or manual dispatch) runs here — fork PRs never receive
+# repository secrets so they are intentionally excluded.
+permissions: read-all
+
+jobs:
+  e2e-anthropic:
+    name: E2E Anthropic CLI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Go
+        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Run Anthropic CLI e2e tests
+        # ANTHROPIC_API_KEY is injected from the repository secret.
+        # GitHub automatically masks the value in all log output.
+        # The tests themselves never log the key — only response lengths.
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "ANTHROPIC_API_KEY secret not set — skipping e2e tests"
+            exit 0
+          fi
+          go test -tags=integration -run '^TestIntegration_Anthropic_CLI' -v -count=1 -timeout 120s .
