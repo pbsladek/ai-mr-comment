@@ -101,7 +101,7 @@ func callOpenAI(ctx context.Context, client *openai.Client, cfg *Config, systemP
 }
 
 // enrichNetworkError wraps DNS/connection errors with a human-readable hint.
-// It is called as a final fallback from all provider-specific enrichers.
+// Called as a final fallback from all provider-specific enrichers.
 func enrichNetworkError(err error) error {
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
@@ -257,9 +257,31 @@ func callGemini(ctx context.Context, cfg *Config, systemPrompt, diffContent stri
 	return sb.String(), nil
 }
 
+// validateAPIKey returns an error if the required API key for provider is missing.
+func validateAPIKey(provider ApiProvider, cfg *Config) error {
+	switch provider {
+	case OpenAI:
+		if cfg.OpenAIAPIKey == "" {
+			return errors.New("no OpenAI API key found\n\nSet the OPENAI_API_KEY environment variable or add 'openai_api_key' to ~/.ai-mr-comment.toml")
+		}
+	case Anthropic:
+		if cfg.AnthropicAPIKey == "" {
+			return errors.New("no Anthropic API key found\n\nSet the ANTHROPIC_API_KEY environment variable or add 'anthropic_api_key' to ~/.ai-mr-comment.toml")
+		}
+	case Gemini:
+		if cfg.GeminiAPIKey == "" {
+			return errors.New("no Gemini API key found\n\nSet the GEMINI_API_KEY environment variable or add 'gemini_api_key' to ~/.ai-mr-comment.toml")
+		}
+	}
+	return nil
+}
+
 // chatCompletions dispatches a prompt and diff to the appropriate provider and
 // returns the generated comment.
 func chatCompletions(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
+	if err := validateAPIKey(provider, cfg); err != nil {
+		return "", err
+	}
 	switch provider {
 	case OpenAI:
 		debugLog(cfg, "api: calling openai model=%s endpoint=%s mode=buffered", cfg.OpenAIModel, cfg.OpenAIEndpoint)
@@ -290,6 +312,9 @@ func chatCompletions(ctx context.Context, cfg *Config, provider ApiProvider, sys
 // returns the full accumulated response. It is used when stdout is a TTY and
 // text output is selected. Callers should fall back to chatCompletions on error.
 func streamToWriter(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string, w io.Writer) (string, error) {
+	if err := validateAPIKey(provider, cfg); err != nil {
+		return "", err
+	}
 	switch provider {
 	case OpenAI:
 		debugLog(cfg, "api: calling openai model=%s endpoint=%s mode=stream", cfg.OpenAIModel, cfg.OpenAIEndpoint)
