@@ -227,13 +227,95 @@ func TestCodexCLIArgs_WithModel(t *testing.T) {
 // --- findClaudeBinary ---
 
 func TestFindClaudeBinary_ExplicitPath(t *testing.T) {
-	cfg := &Config{ClaudeCLIPath: "/custom/claude"}
+	binary := makeFakeBinary(t, "", "", 0)
+	cfg := &Config{ClaudeCLIPath: binary}
 	got, err := findClaudeBinary(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != "/custom/claude" {
+	if got != binary {
 		t.Errorf("expected explicit path, got %q", got)
+	}
+}
+
+func TestFindClaudeBinary_ExplicitPathMissing(t *testing.T) {
+	cfg := &Config{ClaudeCLIPath: "/nonexistent/claude"}
+	_, err := findClaudeBinary(cfg)
+	if err == nil {
+		t.Fatal("expected error for missing explicit path")
+	}
+	if !strings.Contains(err.Error(), "/nonexistent/claude") {
+		t.Errorf("expected path in error message, got %q", err.Error())
+	}
+}
+
+func TestFindGeminiCLIBinary_ExplicitPath(t *testing.T) {
+	binary := makeFakeBinary(t, "", "", 0)
+	cfg := &Config{GeminiCLIPath: binary}
+	got, err := findGeminiCLIBinary(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != binary {
+		t.Errorf("expected explicit path, got %q", got)
+	}
+}
+
+func TestFindGeminiCLIBinary_ExplicitPathMissing(t *testing.T) {
+	cfg := &Config{GeminiCLIPath: "/nonexistent/gemini"}
+	_, err := findGeminiCLIBinary(cfg)
+	if err == nil {
+		t.Fatal("expected error for missing explicit path")
+	}
+	if !strings.Contains(err.Error(), "/nonexistent/gemini") {
+		t.Errorf("expected path in error message, got %q", err.Error())
+	}
+}
+
+func TestFindGeminiCLIBinary_NotFound(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	cfg := &Config{}
+	_, err := findGeminiCLIBinary(cfg)
+	if err == nil {
+		t.Fatal("expected error when gemini not found")
+	}
+	if !strings.Contains(err.Error(), "gemini CLI not found") {
+		t.Errorf("expected install hint in error, got %q", err.Error())
+	}
+}
+
+func TestFindCodexBinary_ExplicitPath(t *testing.T) {
+	binary := makeFakeBinary(t, "", "", 0)
+	cfg := &Config{CodexCLIPath: binary}
+	got, err := findCodexBinary(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != binary {
+		t.Errorf("expected explicit path, got %q", got)
+	}
+}
+
+func TestFindCodexBinary_ExplicitPathMissing(t *testing.T) {
+	cfg := &Config{CodexCLIPath: "/nonexistent/codex"}
+	_, err := findCodexBinary(cfg)
+	if err == nil {
+		t.Fatal("expected error for missing explicit path")
+	}
+	if !strings.Contains(err.Error(), "/nonexistent/codex") {
+		t.Errorf("expected path in error message, got %q", err.Error())
+	}
+}
+
+func TestFindCodexBinary_NotFound(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	cfg := &Config{}
+	_, err := findCodexBinary(cfg)
+	if err == nil {
+		t.Fatal("expected error when codex not found")
+	}
+	if !strings.Contains(err.Error(), "codex CLI not found") {
+		t.Errorf("expected install hint in error, got %q", err.Error())
 	}
 }
 

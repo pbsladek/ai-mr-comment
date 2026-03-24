@@ -314,6 +314,9 @@ func streamExecCLI(ctx context.Context, binary string, args []string, w io.Write
 // Priority: explicit config path → ~/.claude/local/claude → PATH.
 func findClaudeBinary(cfg *Config) (string, error) {
 	if cfg.ClaudeCLIPath != "" {
+		if _, err := os.Stat(cfg.ClaudeCLIPath); err != nil {
+			return "", fmt.Errorf("claude CLI not found at configured path %q: %w", cfg.ClaudeCLIPath, err)
+		}
 		return cfg.ClaudeCLIPath, nil
 	}
 	home, err := os.UserHomeDir()
@@ -357,6 +360,9 @@ func streamClaudeCLI(ctx context.Context, cfg *Config, systemPrompt, diffContent
 // findGeminiCLIBinary returns the path to the gemini CLI binary.
 func findGeminiCLIBinary(cfg *Config) (string, error) {
 	if cfg.GeminiCLIPath != "" {
+		if _, err := os.Stat(cfg.GeminiCLIPath); err != nil {
+			return "", fmt.Errorf("gemini CLI not found at configured path %q: %w", cfg.GeminiCLIPath, err)
+		}
 		return cfg.GeminiCLIPath, nil
 	}
 	path, err := exec.LookPath("gemini")
@@ -393,6 +399,9 @@ func streamGeminiCLI(ctx context.Context, cfg *Config, systemPrompt, diffContent
 // findCodexBinary returns the path to the OpenAI Codex CLI binary.
 func findCodexBinary(cfg *Config) (string, error) {
 	if cfg.CodexCLIPath != "" {
+		if _, err := os.Stat(cfg.CodexCLIPath); err != nil {
+			return "", fmt.Errorf("codex CLI not found at configured path %q: %w", cfg.CodexCLIPath, err)
+		}
 		return cfg.CodexCLIPath, nil
 	}
 	path, err := exec.LookPath("codex")
