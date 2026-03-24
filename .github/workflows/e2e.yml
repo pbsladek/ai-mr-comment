@@ -3,12 +3,9 @@ name: E2E Tests
 on:
   push:
     branches: ["main"]
-  pull_request:
-    branches: ["main"]
   workflow_dispatch:
 
-# Secrets are available for PRs from the same repo but not from forks.
-# The run script exits cleanly when ANTHROPIC_API_KEY is absent.
+# Runs only after merge to main.
 permissions: read-all
 
 jobs:
