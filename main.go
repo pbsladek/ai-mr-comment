@@ -889,7 +889,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 const defaultConfigTOML = `# ai-mr-comment configuration
 # Place this file at ~/.ai-mr-comment.toml or in the project root.
 
-# Default AI provider: openai | anthropic | gemini | ollama
+# Default AI provider: openai | anthropic | gemini | ollama | claude-cli | gemini-cli | codex-cli
 provider = "anthropic"
 
 # Default prompt template.
@@ -918,6 +918,24 @@ gemini_model = "gemini-2.5-flash"
 ollama_model    = "llama3.2"
 ollama_endpoint = "http://localhost:11434/api/generate"
 # Other Ollama models: llama3.1, llama3, mistral, codellama, phi3
+
+# --- Claude CLI (claude-cli) ---
+# Uses the local claude CLI for auth — no API key required.
+# Auth is delegated to the claude CLI process (e.g. Claude Code session).
+# claude_cli_path = ""              # auto-detected: ~/.claude/local/claude, then PATH
+claude_cli_model = "claude-sonnet-4-6"
+
+# --- Gemini CLI (gemini-cli) ---
+# Uses the local gemini CLI with Google OAuth — no API key required.
+# Install: npm install -g @google/gemini-cli
+# gemini_cli_path = ""              # auto-detected via PATH
+gemini_cli_model = "gemini-2.5-flash"
+
+# --- Codex CLI (codex-cli) ---
+# Uses the local OpenAI Codex CLI in quiet mode — requires OPENAI_API_KEY.
+# Install: npm install -g @openai/codex
+# codex_cli_path = ""               # auto-detected via PATH
+# codex_cli_model = ""              # leave empty to use codex default
 
 # --- GitHub / GitHub Enterprise ---
 # github_token = ""    # or set GITHUB_TOKEN env var
@@ -962,6 +980,23 @@ template     = "technical"
 provider     = "ollama"
 ollama_model = "llama3.2"
 template     = "default"
+
+# Claude CLI — delegates auth to the local claude CLI (Claude Code session)
+[profile.claude-cli]
+provider         = "claude-cli"
+claude_cli_model = "claude-sonnet-4-6"
+template         = "default"
+
+# Gemini CLI — delegates auth to the local gemini CLI (Google OAuth)
+[profile.gemini-cli]
+provider         = "gemini-cli"
+gemini_cli_model = "gemini-2.5-flash"
+template         = "default"
+
+# Codex CLI — uses the local codex CLI (requires OPENAI_API_KEY)
+[profile.codex-cli]
+provider = "codex-cli"
+template = "default"
 `
 
 // newInitConfigCmd returns the init-config subcommand, which writes a commented

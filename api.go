@@ -12,6 +12,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -101,7 +103,7 @@ func callOpenAI(ctx context.Context, client *openai.Client, cfg *Config, systemP
 }
 
 // enrichNetworkError wraps DNS/connection errors with a human-readable hint.
-// Called as a final fallback from all provider-specific enrichers.
+// Called as a final fallback from all provider-specific error enrichers.
 func enrichNetworkError(err error) error {
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
@@ -257,6 +259,173 @@ func callGemini(ctx context.Context, cfg *Config, systemPrompt, diffContent stri
 	return sb.String(), nil
 }
 
+// cliPrompt combines the system prompt and diff, stripping null bytes that
+// would cause exec to reject the argument with "invalid argument".
+func cliPrompt(systemPrompt, diffContent string) string {
+	return strings.ReplaceAll(systemPrompt+"\n\n"+diffContent, "\x00", "")
+}
+
+// cliExecError returns a context-aware, human-readable error for a failed CLI call.
+// It prefers stderr output over the raw exec error, and surfaces cancellation clearly.
+func cliExecError(ctx context.Context, name string, err error, stderr string) error {
+	if ctx.Err() != nil {
+		return fmt.Errorf("%s: %w", name, ctx.Err())
+	}
+	if msg := strings.TrimSpace(stderr); msg != "" {
+		return fmt.Errorf("%s: %s", name, msg)
+	}
+	return fmt.Errorf("%s: %w", name, err)
+}
+
+// execCLI runs binary with args, captures stdout, and returns the trimmed output.
+func execCLI(ctx context.Context, binary string, args []string) (string, error) {
+	cmd := exec.CommandContext(ctx, binary, args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", cliExecError(ctx, filepath.Base(binary), err, stderr.String())
+	}
+	result := strings.TrimSpace(string(out))
+	if result == "" {
+		return "", fmt.Errorf("%s returned empty output", filepath.Base(binary))
+	}
+	return result, nil
+}
+
+// streamExecCLI runs binary with args, streaming stdout to w and returning the full output.
+func streamExecCLI(ctx context.Context, binary string, args []string, w io.Writer) (string, error) {
+	cmd := exec.CommandContext(ctx, binary, args...)
+	var sb strings.Builder
+	var stderr bytes.Buffer
+	cmd.Stdout = io.MultiWriter(w, &sb)
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", cliExecError(ctx, filepath.Base(binary), err, stderr.String())
+	}
+	result := strings.TrimSpace(sb.String())
+	if result == "" {
+		return "", fmt.Errorf("%s returned empty output", filepath.Base(binary))
+	}
+	return result, nil
+}
+
+// findClaudeBinary returns the path to the claude CLI binary.
+// Priority: explicit config path → ~/.claude/local/claude → PATH.
+func findClaudeBinary(cfg *Config) (string, error) {
+	if cfg.ClaudeCLIPath != "" {
+		return cfg.ClaudeCLIPath, nil
+	}
+	home, err := os.UserHomeDir()
+	if err == nil {
+		local := filepath.Join(home, ".claude", "local", "claude")
+		if _, err := os.Stat(local); err == nil {
+			return local, nil
+		}
+	}
+	path, err := exec.LookPath("claude")
+	if err != nil {
+		return "", errors.New("claude CLI not found: install Claude Code or set 'claude_cli_path' in ~/.ai-mr-comment.toml")
+	}
+	return path, nil
+}
+
+func claudeCLIArgs(cfg *Config, prompt string) []string {
+	args := []string{"--output-format", "text"}
+	if cfg.ClaudeCLIModel != "" {
+		args = append(args, "--model", cfg.ClaudeCLIModel)
+	}
+	return append(args, "-p", prompt)
+}
+
+func callClaudeCLI(ctx context.Context, cfg *Config, systemPrompt, diffContent string) (string, error) {
+	binary, err := findClaudeBinary(cfg)
+	if err != nil {
+		return "", err
+	}
+	return execCLI(ctx, binary, claudeCLIArgs(cfg, cliPrompt(systemPrompt, diffContent)))
+}
+
+func streamClaudeCLI(ctx context.Context, cfg *Config, systemPrompt, diffContent string, w io.Writer) (string, error) {
+	binary, err := findClaudeBinary(cfg)
+	if err != nil {
+		return "", err
+	}
+	return streamExecCLI(ctx, binary, claudeCLIArgs(cfg, cliPrompt(systemPrompt, diffContent)), w)
+}
+
+// findGeminiCLIBinary returns the path to the gemini CLI binary.
+func findGeminiCLIBinary(cfg *Config) (string, error) {
+	if cfg.GeminiCLIPath != "" {
+		return cfg.GeminiCLIPath, nil
+	}
+	path, err := exec.LookPath("gemini")
+	if err != nil {
+		return "", errors.New("gemini CLI not found: install via 'npm install -g @google/gemini-cli' or set 'gemini_cli_path' in ~/.ai-mr-comment.toml")
+	}
+	return path, nil
+}
+
+func geminiCLIArgs(cfg *Config, prompt string) []string {
+	var args []string
+	if cfg.GeminiCLIModel != "" {
+		args = append(args, "--model", cfg.GeminiCLIModel)
+	}
+	return append(args, "-p", prompt)
+}
+
+func callGeminiCLI(ctx context.Context, cfg *Config, systemPrompt, diffContent string) (string, error) {
+	binary, err := findGeminiCLIBinary(cfg)
+	if err != nil {
+		return "", err
+	}
+	return execCLI(ctx, binary, geminiCLIArgs(cfg, cliPrompt(systemPrompt, diffContent)))
+}
+
+func streamGeminiCLI(ctx context.Context, cfg *Config, systemPrompt, diffContent string, w io.Writer) (string, error) {
+	binary, err := findGeminiCLIBinary(cfg)
+	if err != nil {
+		return "", err
+	}
+	return streamExecCLI(ctx, binary, geminiCLIArgs(cfg, cliPrompt(systemPrompt, diffContent)), w)
+}
+
+// findCodexBinary returns the path to the OpenAI Codex CLI binary.
+func findCodexBinary(cfg *Config) (string, error) {
+	if cfg.CodexCLIPath != "" {
+		return cfg.CodexCLIPath, nil
+	}
+	path, err := exec.LookPath("codex")
+	if err != nil {
+		return "", errors.New("codex CLI not found: install via 'npm install -g @openai/codex' or set 'codex_cli_path' in ~/.ai-mr-comment.toml")
+	}
+	return path, nil
+}
+
+func codexCLIArgs(cfg *Config, prompt string) []string {
+	var args []string
+	if cfg.CodexCLIModel != "" {
+		args = append(args, "--model", cfg.CodexCLIModel)
+	}
+	return append(args, "-q", prompt)
+}
+
+func callCodexCLI(ctx context.Context, cfg *Config, systemPrompt, diffContent string) (string, error) {
+	binary, err := findCodexBinary(cfg)
+	if err != nil {
+		return "", err
+	}
+	return execCLI(ctx, binary, codexCLIArgs(cfg, cliPrompt(systemPrompt, diffContent)))
+}
+
+func streamCodexCLI(ctx context.Context, cfg *Config, systemPrompt, diffContent string, w io.Writer) (string, error) {
+	binary, err := findCodexBinary(cfg)
+	if err != nil {
+		return "", err
+	}
+	return streamExecCLI(ctx, binary, codexCLIArgs(cfg, cliPrompt(systemPrompt, diffContent)), w)
+}
+
 // validateAPIKey returns an error if the required API key for provider is missing.
 func validateAPIKey(provider ApiProvider, cfg *Config) error {
 	switch provider {
@@ -303,6 +472,15 @@ func chatCompletions(ctx context.Context, cfg *Config, provider ApiProvider, sys
 	case Gemini:
 		debugLog(cfg, "api: calling gemini model=%s mode=buffered", cfg.GeminiModel)
 		return callGemini(ctx, cfg, systemPrompt, diffContent)
+	case ClaudeCLI:
+		debugLog(cfg, "api: calling claude-cli model=%s mode=buffered", cfg.ClaudeCLIModel)
+		return callClaudeCLI(ctx, cfg, systemPrompt, diffContent)
+	case GeminiCLI:
+		debugLog(cfg, "api: calling gemini-cli model=%s mode=buffered", cfg.GeminiCLIModel)
+		return callGeminiCLI(ctx, cfg, systemPrompt, diffContent)
+	case CodexCLI:
+		debugLog(cfg, "api: calling codex-cli model=%s mode=buffered", cfg.CodexCLIModel)
+		return callCodexCLI(ctx, cfg, systemPrompt, diffContent)
 	default:
 		return "", errors.New("unsupported provider")
 	}
@@ -336,6 +514,15 @@ func streamToWriter(ctx context.Context, cfg *Config, provider ApiProvider, syst
 	case Gemini:
 		debugLog(cfg, "api: calling gemini model=%s mode=stream", cfg.GeminiModel)
 		return streamGemini(ctx, cfg, systemPrompt, diffContent, w)
+	case ClaudeCLI:
+		debugLog(cfg, "api: calling claude-cli model=%s mode=stream", cfg.ClaudeCLIModel)
+		return streamClaudeCLI(ctx, cfg, systemPrompt, diffContent, w)
+	case GeminiCLI:
+		debugLog(cfg, "api: calling gemini-cli model=%s mode=stream", cfg.GeminiCLIModel)
+		return streamGeminiCLI(ctx, cfg, systemPrompt, diffContent, w)
+	case CodexCLI:
+		debugLog(cfg, "api: calling codex-cli model=%s mode=stream", cfg.CodexCLIModel)
+		return streamCodexCLI(ctx, cfg, systemPrompt, diffContent, w)
 	default:
 		return "", errors.New("unsupported provider")
 	}
