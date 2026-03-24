@@ -253,7 +253,7 @@ func TestNewRootCmd_MissingOpenAIKey(t *testing.T) {
 	cmd.SetErr(io.Discard)
 
 	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "missing OpenAI API key") {
+	if err == nil || !strings.Contains(err.Error(), "OpenAI API key") {
 		t.Fatalf("expected missing API key error, got %v", err)
 	}
 }
@@ -273,7 +273,7 @@ func TestNewRootCmd_MissingAnthropicKey(t *testing.T) {
 	cmd.SetErr(io.Discard)
 
 	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "missing Anthropic API key") {
+	if err == nil || !strings.Contains(err.Error(), "Anthropic API key") {
 		t.Fatalf("expected missing API key error, got %v", err)
 	}
 }
@@ -432,6 +432,9 @@ func TestGetModelName(t *testing.T) {
 		{Anthropic, Config{Provider: Anthropic, AnthropicModel: "claude-3"}, "claude-3"},
 		{Gemini, Config{Provider: Gemini, GeminiModel: "gemini-2.5-flash"}, "gemini-2.5-flash"},
 		{Ollama, Config{Provider: Ollama, OllamaModel: "llama3"}, "llama3"},
+		{ClaudeCLI, Config{Provider: ClaudeCLI, ClaudeCLIModel: "claude-sonnet-4-6"}, "claude-sonnet-4-6"},
+		{GeminiCLI, Config{Provider: GeminiCLI, GeminiCLIModel: "gemini-2.5-flash"}, "gemini-2.5-flash"},
+		{CodexCLI, Config{Provider: CodexCLI, CodexCLIModel: "codex-mini"}, "codex-mini"},
 		{"unknown", Config{Provider: "unknown"}, "unknown"},
 	}
 	for _, tc := range tests {
@@ -905,7 +908,7 @@ func TestNewRootCmd_MissingGeminiKey(t *testing.T) {
 	cmd.SetErr(io.Discard)
 
 	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "missing Gemini API key") {
+	if err == nil || !strings.Contains(err.Error(), "Gemini API key") {
 		t.Fatalf("expected missing API key error, got %v", err)
 	}
 }
@@ -1156,6 +1159,9 @@ func TestSetModelOverride(t *testing.T) {
 		{Anthropic, "claude-opus-4-6", func(c *Config) string { return c.AnthropicModel }},
 		{Gemini, "gemini-2.0-flash", func(c *Config) string { return c.GeminiModel }},
 		{Ollama, "mistral", func(c *Config) string { return c.OllamaModel }},
+		{ClaudeCLI, "claude-opus-4-6", func(c *Config) string { return c.ClaudeCLIModel }},
+		{GeminiCLI, "gemini-2.5-pro", func(c *Config) string { return c.GeminiCLIModel }},
+		{CodexCLI, "codex-mini", func(c *Config) string { return c.CodexCLIModel }},
 	}
 	for _, tc := range tests {
 		t.Run(string(tc.provider), func(t *testing.T) {
@@ -1169,7 +1175,7 @@ func TestSetModelOverride(t *testing.T) {
 }
 
 func TestModelsCmd(t *testing.T) {
-	for _, provider := range []string{"openai", "anthropic", "gemini", "ollama"} {
+	for _, provider := range []string{"openai", "anthropic", "gemini", "ollama", "claude-cli", "gemini-cli", "codex-cli"} {
 		t.Run(provider, func(t *testing.T) {
 			var buf strings.Builder
 			cmd := newRootCmd(dummyChatFn)
@@ -1185,6 +1191,10 @@ func TestModelsCmd(t *testing.T) {
 			}
 			if !strings.Contains(buf.String(), "--model") {
 				t.Errorf("expected output to mention --model flag, got:\n%s", buf.String())
+			}
+			// codex-cli has no fixed model list; verify the fallback message is shown
+			if provider == "codex-cli" && !strings.Contains(buf.String(), "no fixed model list") {
+				t.Errorf("expected codex-cli to show 'no fixed model list' message, got:\n%s", buf.String())
 			}
 		})
 	}
@@ -3164,5 +3174,49 @@ func TestQuickCommit_PostIncompatibleFlags(t *testing.T) {
 		if err := cmd.Execute(); err == nil {
 			t.Errorf("expected error for args %v, got nil", args)
 		}
+	}
+}
+
+func TestValidateProviderConfig_CLIProvidersAccepted(t *testing.T) {
+	// CLI providers require no API key; validateProviderConfig must not reject them.
+	for _, provider := range []ApiProvider{ClaudeCLI, GeminiCLI, CodexCLI} {
+		t.Run(string(provider), func(t *testing.T) {
+			cfg := &Config{Provider: provider}
+			if err := validateProviderConfig(cfg); err != nil {
+				t.Errorf("expected no error for provider %s, got %v", provider, err)
+			}
+		})
+	}
+}
+
+func TestValidateProviderConfig_UnknownProviderRejected(t *testing.T) {
+	cfg := &Config{Provider: "bogus"}
+	err := validateProviderConfig(cfg)
+	if err == nil || !strings.Contains(err.Error(), "unsupported provider") {
+		t.Errorf("expected unsupported provider error, got %v", err)
+	}
+}
+
+func TestNewRootCmd_CLIProvider_NoAPIKeyRequired(t *testing.T) {
+	// Using a CLI provider with no API key set must not error on key validation.
+	// The chatFn is a dummy so no real binary is invoked.
+	for _, provider := range []string{"claude-cli", "gemini-cli", "codex-cli"} {
+		t.Run(provider, func(t *testing.T) {
+			t.Setenv("ANTHROPIC_API_KEY", "")
+			t.Setenv("OPENAI_API_KEY", "")
+			t.Setenv("GEMINI_API_KEY", "")
+
+			cmd := newRootCmd(dummyChatFn)
+			cmd.SetArgs([]string{"--file=testdata/diff.txt", "--provider=" + provider})
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+
+			err := cmd.Execute()
+			if err != nil && (strings.Contains(err.Error(), "API key") || strings.Contains(err.Error(), "unsupported provider")) {
+				t.Errorf("provider %s should not require API key, got: %v", provider, err)
+			}
+		})
 	}
 }
