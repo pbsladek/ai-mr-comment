@@ -5,7 +5,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/pbsladek/ai-mr-comment)](https://goreportcard.com/report/github.com/pbsladek/ai-mr-comment)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A command-line tool written in Go that generates professional GitLab Merge Request (MR) or GitHub Pull Request (PR) comments based on git diffs using AI (OpenAI, Anthropic, Gemini, or Ollama).
+A command-line tool written in Go that generates professional GitLab Merge Request (MR) or GitHub Pull Request (PR) comments based on git diffs using AI (OpenAI, Anthropic, Gemini, Ollama, or local CLI tools — Claude Code, Gemini CLI, or Codex).
 
 ## Features
 
@@ -18,6 +18,10 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 - **Generate comments directly from a GitHub PR or GitLab MR URL** (`--pr`) — no local checkout needed
 - Supports public **github.com**, **GitHub Enterprise**, public **gitlab.com**, and **self-hosted GitLab** instances
 - Supports OpenAI, Anthropic (Claude), Google Gemini, and Ollama APIs
+- **Local CLI providers** — delegate auth to locally installed CLI tools, no API key management needed:
+  - `claude-cli` — uses the local `claude` binary (Claude Code session), no API key required
+  - `gemini-cli` — uses the local `gemini` binary (Google OAuth), no API key required
+  - `codex-cli` — uses the local `codex` binary (quiet mode), requires `OPENAI_API_KEY`
 - Customizable API endpoints and models via `--model` flag or config
 - Multiple prompt styles — `default`, `conventional`, `technical`, `user-focused`, `emoji`, `sassy`, `monday`, `jira`, `commit`, `commit-emoji`, `commit-conventional`, `chaos`, `haiku`, `roast`, `intern`, `shakespeare`, `manager`, `yoda`, `excuse`
 - **Jira-aware template** (`--template=jira`) — extracts ticket key from branch name and places it first so Jira auto-links
@@ -64,7 +68,7 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 ### Prerequisites
 
 - Git
-- API Key for your preferred provider (OpenAI, Anthropic, or Google Gemini)
+- API key for your preferred provider (OpenAI, Anthropic, or Google Gemini) — **not required** when using `claude-cli`, `gemini-cli`, or `ollama`
 
 ### macOS (Homebrew)
 
@@ -181,25 +185,43 @@ ai-mr-comment init-config --output ./ai-mr-comment.toml
 The command refuses to overwrite an existing file. Remove the old file first if you want to regenerate it.
 
 ```toml
-# Choose which provider to use: "openai", "anthropic", "gemini", or "ollama"
-provider = "gemini"
-
-# === Gemini Settings ===
-gemini_api_key = "xxxx"
-gemini_model = "gemini-2.5-flash"
-# Other Gemini models: gemini-2.5-pro, gemini-2.5-flash-lite
-
-# === OpenAI Settings ===
-openai_api_key = "xxxx"
-openai_model = "gpt-4.1-mini"
-openai_endpoint = "https://api.openai.com/v1/"
-# Other OpenAI models: gpt-4.1, gpt-4.1-nano, o3, o3-mini
+# Choose which provider to use: "openai", "anthropic", "gemini", "ollama", "claude-cli", "gemini-cli", or "codex-cli"
+provider = "anthropic"
 
 # === Anthropic Settings ===
 anthropic_api_key = "xxxx"
 anthropic_model = "claude-sonnet-4-6"
 anthropic_endpoint = "https://api.anthropic.com/"
 # Other Anthropic models: claude-opus-4-6, claude-haiku-4-5-20251001
+
+# === Claude CLI Settings ===
+# No API key needed — auth is delegated to the local claude CLI process.
+# Requires Claude Code to be installed (https://claude.ai/code).
+# claude_cli_path = ""              # auto-detected: ~/.claude/local/claude, then PATH
+claude_cli_model = "claude-sonnet-4-6"
+
+# === OpenAI Settings ===
+openai_api_key = "xxxx"
+openai_model = "gpt-4.1-mini"
+openai_endpoint = "https://api.openai.com/v1/"
+# Other OpenAI models: gpt-4.1, gpt-4.1-nano, gpt-4o, gpt-4o-mini, o3, o3-mini
+
+# === Gemini Settings ===
+gemini_api_key = "xxxx"
+gemini_model = "gemini-2.5-flash"
+# Other Gemini models: gemini-2.5-pro, gemini-2.5-flash-lite, gemini-3
+
+# === Gemini CLI Settings ===
+# No API key needed — auth is delegated to the local gemini CLI process (Google OAuth).
+# Requires the Gemini CLI to be installed (https://github.com/google-gemini/gemini-cli).
+# gemini_cli_path = ""              # auto-detected from PATH
+gemini_cli_model = "gemini-2.5-flash"
+
+# === Codex CLI Settings ===
+# No API key needed — auth is delegated to the local codex CLI process.
+# Requires the OpenAI Codex CLI to be installed (https://github.com/openai/codex).
+# codex_cli_path = ""               # auto-detected from PATH
+# codex_cli_model = ""              # uses codex default when empty
 
 # === Ollama Settings ===
 ollama_model = "llama3.2"
@@ -228,10 +250,29 @@ provider     = "openai"
 openai_model = "gpt-4.1-nano"
 template     = "conventional"
 
+[profile.openai]
+provider     = "openai"
+openai_model = "gpt-4.1-mini"
+
 [profile.anthropic]
 provider        = "anthropic"
 anthropic_model = "claude-opus-4-6"
 template        = "technical"
+
+[profile.gemini]
+provider     = "gemini"
+gemini_model = "gemini-2.5-flash"
+
+[profile.claude-cli]
+provider         = "claude-cli"
+claude_cli_model = "claude-sonnet-4-6"
+
+[profile.gemini-cli]
+provider          = "gemini-cli"
+gemini_cli_model  = "gemini-2.5-flash"
+
+[profile.codex-cli]
+provider = "codex-cli"
 
 [profile.local]
 provider     = "ollama"
@@ -417,7 +458,7 @@ ai-mr-comment --profile anthropic --title
 - `--output <FILE>`: Write output to file instead of stdout — **suppresses all terminal output**. Writes JSON when `--format=json` is set; writes the commit message when `--commit-msg` is set.
 - `--clipboard <WHAT>`: Copy to system clipboard — `title`, `description` (or `comment`), `commit-msg`, or `all` (title + description separated by a blank line)
 - `--format <FORMAT>`: Output format — `text` (default) or `json`
-- `--provider <PROVIDER>`: Provider (openai, anthropic, gemini, ollama)
+- `--provider <PROVIDER>`: Provider (`openai`, `anthropic`, `gemini`, `ollama`, `claude-cli`, `gemini-cli`, `codex-cli`)
 - `--model <NAME>`: Override the model for this run (e.g. `gpt-4o`, `claude-opus-4-6`, `gemini-2.5-flash`)
 - `-t, --template <NAME>`: Template style — `default`, `conventional`, `technical`, `user-focused`, `emoji`, `sassy`, `monday`, `jira`, `commit`, `commit-emoji`, `commit-conventional`, `chaos`, `haiku`, `roast`, `intern`, `shakespeare`, `manager`, `yoda`, `excuse` (`commit`, `commit-emoji`, and `commit-conventional` require `--commit-msg`; style templates cannot be combined with `--commit-msg`)
 - `--system-prompt <TEXT|@FILE>`: Override the system prompt for this run. Pass the prompt inline (`--system-prompt="Focus on security"`) or read it from a file with an `@` prefix (`--system-prompt=@review.txt`). Mutually exclusive with `--template`.
@@ -805,13 +846,78 @@ Aliases defined:
 | `--shell` | `bash` (default) or `zsh` — both use identical alias syntax |
 | `--output` | Also write aliases to this file |
 
+## Local CLI Providers
+
+Three providers delegate AI calls and authentication to a locally installed CLI tool — no API key management in `ai-mr-comment` is required. These are useful on machines where auth is handled by the CLI's own session (SSO, OAuth, Claude Code session).
+
+### `claude-cli` — Claude Code
+
+Delegates to the [`claude`](https://claude.ai/code) binary. Auth is managed by Claude Code — no `ANTHROPIC_API_KEY` needed.
+
+```toml
+provider = "claude-cli"
+claude_cli_model = "claude-sonnet-4-6"
+```
+
+Binary lookup order:
+1. `claude_cli_path` in config (if set)
+2. `~/.claude/local/claude`
+3. `claude` on `$PATH`
+
+| Key | Description | Default |
+|---|---|---|
+| `claude_cli_path` | Explicit path to the `claude` binary | auto-detected |
+| `claude_cli_model` | Model passed via `--model` | `claude-sonnet-4-6` |
+
+### `gemini-cli` — Google Gemini CLI
+
+Delegates to the [`gemini`](https://github.com/google-gemini/gemini-cli) binary. Auth uses Google OAuth — no `GEMINI_API_KEY` needed.
+
+Install: `npm install -g @google/gemini-cli`
+
+```toml
+provider = "gemini-cli"
+gemini_cli_model = "gemini-2.5-flash"
+```
+
+| Key | Description | Default |
+|---|---|---|
+| `gemini_cli_path` | Explicit path to the `gemini` binary | auto-detected via `$PATH` |
+| `gemini_cli_model` | Model passed via `--model` | `gemini-2.5-flash` |
+
+### `codex-cli` — OpenAI Codex CLI
+
+Delegates to the [`codex`](https://github.com/openai/codex) binary in quiet/non-interactive mode. Still requires `OPENAI_API_KEY` but handles its own session and approval flow.
+
+Install: `npm install -g @openai/codex`
+
+```toml
+provider = "codex-cli"
+# codex_cli_model = ""   # leave empty to use codex default
+```
+
+| Key | Description | Default |
+|---|---|---|
+| `codex_cli_path` | Explicit path to the `codex` binary | auto-detected via `$PATH` |
+| `codex_cli_model` | Model passed via `--model` | empty (codex default) |
+
+### Profiles
+
+All three have built-in profiles:
+
+```bash
+ai-mr-comment --profile claude-cli
+ai-mr-comment --profile gemini-cli
+ai-mr-comment --profile codex-cli
+```
+
 ## Named Profiles
 
 Define named profiles in `~/.ai-mr-comment.toml` under `[profile.<name>]` sections. Each profile can override any top-level setting — provider, model, template, endpoint, etc.
 
 ```toml
-provider        = "openai"
-openai_model    = "gpt-4.1-mini"
+provider        = "anthropic"
+anthropic_model = "claude-sonnet-4-6"
 template        = "default"
 
 [profile.fast]
@@ -837,6 +943,17 @@ template     = "technical"
 [profile.local]
 provider     = "ollama"
 ollama_model = "llama3.2"
+
+[profile.claude-cli]
+provider         = "claude-cli"
+claude_cli_model = "claude-sonnet-4-6"
+
+[profile.gemini-cli]
+provider         = "gemini-cli"
+gemini_cli_model = "gemini-2.5-flash"
+
+[profile.codex-cli]
+provider = "codex-cli"
 ```
 
 Activate a profile by passing `--profile <name>` to any command:
@@ -853,6 +970,15 @@ ai-mr-comment changelog --profile gemini --commit="v1.2.0..HEAD"
 
 # Commit with Ollama (no API key needed)
 ai-mr-comment quick-commit --profile local --dry-run
+
+# Use Claude CLI session auth (no API key needed)
+ai-mr-comment --profile claude-cli
+
+# Use Gemini CLI with Google OAuth (no API key needed)
+ai-mr-comment --profile gemini-cli
+
+# Use Codex CLI
+ai-mr-comment --profile codex-cli
 ```
 
 Run `ai-mr-comment init-config` to generate a config file pre-populated with the standard profiles above.

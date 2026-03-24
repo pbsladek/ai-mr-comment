@@ -18,6 +18,9 @@ const (
 	Anthropic ApiProvider = "anthropic"
 	Ollama    ApiProvider = "ollama"
 	Gemini    ApiProvider = "gemini"
+	ClaudeCLI ApiProvider = "claude-cli"
+	GeminiCLI ApiProvider = "gemini-cli"
+	CodexCLI  ApiProvider = "codex-cli"
 )
 
 // Config holds all runtime settings, populated from the TOML config file,
@@ -35,6 +38,12 @@ type Config struct {
 	AnthropicModel string `mapstructure:"anthropic_model"`
 	OllamaModel    string `mapstructure:"ollama_model"`
 	GeminiModel    string `mapstructure:"gemini_model"`
+	ClaudeCLIModel string `mapstructure:"claude_cli_model"`
+	ClaudeCLIPath  string `mapstructure:"claude_cli_path"`
+	GeminiCLIModel string `mapstructure:"gemini_cli_model"`
+	GeminiCLIPath  string `mapstructure:"gemini_cli_path"`
+	CodexCLIModel  string `mapstructure:"codex_cli_model"`
+	CodexCLIPath   string `mapstructure:"codex_cli_path"`
 
 	OpenAIEndpoint    string      `mapstructure:"openai_endpoint"`
 	AnthropicEndpoint string      `mapstructure:"anthropic_endpoint"`
@@ -109,6 +118,12 @@ func loadConfigWith(v *viper.Viper, profile string) (*Config, error) {
 	v.SetDefault("ollama_model", "llama3")
 	v.SetDefault("ollama_endpoint", "http://localhost:11434/api/generate")
 	v.SetDefault("gemini_model", "gemini-2.5-flash")
+	v.SetDefault("claude_cli_model", "claude-sonnet-4-6")
+	v.SetDefault("claude_cli_path", "")
+	v.SetDefault("gemini_cli_model", "gemini-2.5-flash")
+	v.SetDefault("gemini_cli_path", "")
+	v.SetDefault("codex_cli_model", "")
+	v.SetDefault("codex_cli_path", "")
 	v.SetDefault("template", "default")
 
 	if err := v.ReadInConfig(); err != nil {

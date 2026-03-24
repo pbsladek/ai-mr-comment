@@ -889,7 +889,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 const defaultConfigTOML = `# ai-mr-comment configuration
 # Place this file at ~/.ai-mr-comment.toml or in the project root.
 
-# Default AI provider: openai | anthropic | gemini | ollama
+# Default AI provider: openai | anthropic | gemini | ollama | claude-cli | gemini-cli | codex-cli
 provider = "anthropic"
 
 # Default prompt template.
@@ -918,6 +918,24 @@ gemini_model = "gemini-2.5-flash"
 ollama_model    = "llama3.2"
 ollama_endpoint = "http://localhost:11434/api/generate"
 # Other Ollama models: llama3.1, llama3, mistral, codellama, phi3
+
+# --- Claude CLI (claude-cli) ---
+# Uses the local claude CLI for auth — no API key required.
+# Auth is delegated to the claude CLI process (e.g. Claude Code session).
+# claude_cli_path = ""              # auto-detected: ~/.claude/local/claude, then PATH
+claude_cli_model = "claude-sonnet-4-6"
+
+# --- Gemini CLI (gemini-cli) ---
+# Uses the local gemini CLI with Google OAuth — no API key required.
+# Install: npm install -g @google/gemini-cli
+# gemini_cli_path = ""              # auto-detected via PATH
+gemini_cli_model = "gemini-2.5-flash"
+
+# --- Codex CLI (codex-cli) ---
+# Uses the local OpenAI Codex CLI in quiet mode — requires OPENAI_API_KEY.
+# Install: npm install -g @openai/codex
+# codex_cli_path = ""               # auto-detected via PATH
+# codex_cli_model = ""              # leave empty to use codex default
 
 # --- GitHub / GitHub Enterprise ---
 # github_token = ""    # or set GITHUB_TOKEN env var
@@ -962,6 +980,23 @@ template     = "technical"
 provider     = "ollama"
 ollama_model = "llama3.2"
 template     = "default"
+
+# Claude CLI — delegates auth to the local claude CLI (Claude Code session)
+[profile.claude-cli]
+provider         = "claude-cli"
+claude_cli_model = "claude-sonnet-4-6"
+template         = "default"
+
+# Gemini CLI — delegates auth to the local gemini CLI (Google OAuth)
+[profile.gemini-cli]
+provider         = "gemini-cli"
+gemini_cli_model = "gemini-2.5-flash"
+template         = "default"
+
+# Codex CLI — uses the local codex CLI (requires OPENAI_API_KEY)
+[profile.codex-cli]
+provider = "codex-cli"
+template = "default"
 `
 
 // newInitConfigCmd returns the init-config subcommand, which writes a commented
@@ -1013,28 +1048,26 @@ func getModelName(cfg *Config) string {
 		return cfg.GeminiModel
 	case Ollama:
 		return cfg.OllamaModel
+	case ClaudeCLI:
+		return cfg.ClaudeCLIModel
+	case GeminiCLI:
+		return cfg.GeminiCLIModel
+	case CodexCLI:
+		return cfg.CodexCLIModel
 	default:
 		return "unknown"
 	}
 }
 
 func validateProviderConfig(cfg *Config) error {
-	if cfg.Provider != OpenAI && cfg.Provider != Anthropic && cfg.Provider != Ollama && cfg.Provider != Gemini {
+	switch cfg.Provider {
+	case OpenAI, Anthropic, Gemini, Ollama, ClaudeCLI, GeminiCLI, CodexCLI:
+		// valid
+	default:
 		return errors.New("unsupported provider: " + string(cfg.Provider))
 	}
-	if cfg.Provider == OpenAI && cfg.OpenAIAPIKey == "" {
-		return fmt.Errorf("missing OpenAI API key.\n\n" +
-			"Please set the OPENAI_API_KEY environment variable or configure 'openai_api_key' in ~/.ai-mr-comment.toml")
-	}
-	if cfg.Provider == Anthropic && cfg.AnthropicAPIKey == "" {
-		return fmt.Errorf("missing Anthropic API key.\n\n" +
-			"Please set the ANTHROPIC_API_KEY environment variable or configure 'anthropic_api_key' in ~/.ai-mr-comment.toml")
-	}
-	if cfg.Provider == Gemini && cfg.GeminiAPIKey == "" {
-		return fmt.Errorf("missing Gemini API key.\n\n" +
-			"Please set the GEMINI_API_KEY environment variable or configure 'gemini_api_key' in ~/.ai-mr-comment.toml")
-	}
-	return nil
+	// Delegate API key validation to validateAPIKey (same check used by chatCompletions).
+	return validateAPIKey(cfg.Provider, cfg)
 }
 
 // debugLog writes a formatted debug message to cfg.DebugWriter when verbose mode is enabled.
@@ -1118,6 +1151,12 @@ func setModelOverride(cfg *Config, model string) {
 		cfg.GeminiModel = model
 	case Ollama:
 		cfg.OllamaModel = model
+	case ClaudeCLI:
+		cfg.ClaudeCLIModel = model
+	case GeminiCLI:
+		cfg.GeminiCLIModel = model
+	case CodexCLI:
+		cfg.CodexCLIModel = model
 	}
 }
 
@@ -1158,6 +1197,20 @@ var providerModels = map[ApiProvider][]string{
 		"codellama",
 		"phi3",
 	},
+	ClaudeCLI: {
+		"claude-opus-4-6",
+		"claude-sonnet-4-6",
+		"claude-haiku-4-5-20251001",
+	},
+	GeminiCLI: {
+		"gemini-2.5-pro",
+		"gemini-2.5-flash",
+		"gemini-2.5-flash-lite",
+	},
+	CodexCLI: {
+		// Model names depend on what is configured in the local codex CLI.
+		// Leave empty to use codex default, or set codex_cli_model in config.
+	},
 }
 
 // newModelsCmd returns the models subcommand, which lists known models for the active provider.
@@ -1172,9 +1225,12 @@ func newModelsCmd() *cobra.Command {
 			p := ApiProvider(provider)
 			models, ok := providerModels[p]
 			if !ok {
-				return fmt.Errorf("unknown provider %q: choose from openai, anthropic, gemini, ollama", provider)
+				return fmt.Errorf("unknown provider %q: choose from openai, anthropic, gemini, ollama, claude-cli, gemini-cli, codex-cli", provider)
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Models for provider %s:\n\n", p)
+			if len(models) == 0 {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "  (no fixed model list — configured by the local CLI tool)")
+			}
 			for _, m := range models {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", m)
 			}
@@ -1184,7 +1240,7 @@ func newModelsCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&provider, "provider", "openai", "Provider to list models for (openai, anthropic, gemini, ollama)")
+	cmd.Flags().StringVar(&provider, "provider", "anthropic", "Provider to list models for (openai, anthropic, gemini, ollama, claude-cli, gemini-cli, codex-cli)")
 	return cmd
 }
 
