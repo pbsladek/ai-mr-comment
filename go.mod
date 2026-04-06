@@ -3,7 +3,7 @@ module github.com/pbsladek/ai-mr-comment
 go 1.26
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.27.1
+	github.com/anthropics/anthropic-sdk-go v1.30.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/google/generative-ai-go v0.20.1
@@ -15,7 +15,7 @@ require (
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.20.0
 	golang.org/x/term v0.41.0
-	google.golang.org/api v0.273.0
+	google.golang.org/api v0.274.0
 )
 
 require (
