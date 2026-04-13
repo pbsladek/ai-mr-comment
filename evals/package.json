@@ -14,7 +14,7 @@
     "view": "promptfoo view"
   },
   "devDependencies": {
-    "promptfoo": "0.121.3"
+    "promptfoo": "0.121.4"
   },
   "overrides": {
     "minimatch": "^10.2.3",
