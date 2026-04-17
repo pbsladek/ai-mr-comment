@@ -16,11 +16,9 @@ jobs:
           - lane: model-qwen2.5-7b-full
             model: qwen2.5:7b-instruct-q4_K_M
             test_pattern: "^TestIntegration_Ollama"
-            run_evals: true
           - lane: model-8b-full
             model: llama3.1:8b
             test_pattern: "^TestIntegration_Ollama"
-            run_evals: true
     name: Integration (Ollama, ${{ matrix.lane }})
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -49,22 +47,6 @@ jobs:
           OLLAMA_MODEL: ${{ matrix.model }}
           INTEGRATION_TEST_PATTERN: ${{ matrix.test_pattern }}
         run: make test-integration-ollama
-
-      - name: Run quality evals (promptfoo)
-        if: ${{ matrix.run_evals }}
-        id: quality_evals
-        continue-on-error: true
-        env:
-          AMC_EVAL_PROVIDER: ollama
-          AMC_EVAL_MODEL: ${{ matrix.model }}
-          AI_MR_COMMENT_OLLAMA_ENDPOINT: http://127.0.0.1:11434/api/generate
-          PROMPTFOO_MAX_CONCURRENCY: "1"
-          PROMPTFOO_EVAL_TIMEOUT_MS: "300000"
-        run: .github/scripts/run-promptfoo-eval.sh
-
-      - name: Summarize quality evals
-        if: ${{ matrix.run_evals }}
-        run: .github/scripts/summarize-promptfoo-eval.sh "${{ matrix.lane }}" "${{ steps.quality_evals.outcome }}"
 
       - name: Ollama logs on failure
         if: failure()

@@ -14,7 +14,7 @@ PLATFORMS := linux/amd64 darwin/amd64 darwin/arm64 windows/amd64
 # Raise this ceiling deliberately if you add large deps; shrink it to lock in gains.
 MAX_BINARY_BYTES := 36700160
 
-.PHONY: all clean build fetch-tags release test test-cover test-integration test-integration-ollama test-integration-ollama-8b eval-quality-ollama-8b eval-quality-commit eval-quality-pr eval-quality-writing eval-quality-writing-ollama-8b local-ollama-8b-ci test-fuzz lint lint-shell test-run quick-commit run-debug changelog gen-aliases install install-completion-bash install-completion-zsh check-size help docker-build docker-build-fips docker-run docker-run-fips docker-quick-commit profile-cpu profile-mem profile-bench eval-quality-deps eval-quality eval-quality-view
+.PHONY: all clean build fetch-tags release test test-cover test-integration test-integration-ollama test-integration-ollama-8b test-fuzz lint lint-shell test-run quick-commit run-debug changelog gen-aliases install install-completion-bash install-completion-zsh check-size help docker-build docker-build-fips docker-run docker-run-fips docker-quick-commit profile-cpu profile-mem profile-bench
 
 all: build
 
@@ -74,10 +74,10 @@ run-debug: ## Build and run with --debug flag
 	./dist/ai-mr-comment --debug
 
 test: ## Run unit tests
-	go test -v $$(go list ./... | grep -vE '/evals(/|$$)')
+	go test -v ./...
 
 test-cover: ## Run tests with coverage report
-	go test -v -coverprofile=coverage.out $$(go list ./... | grep -vE '/evals(/|$$)')
+	go test -v -coverprofile=coverage.out ./...
 
 test-cover-report: test-cover ## Run tests with coverage and print summary
 	go tool cover -func=coverage.out
@@ -93,7 +93,7 @@ verify-deps: ## Verify go module integrity and tidiness
 	git diff --exit-code go.mod go.sum
 
 test-integration: ## Run all integration tests (provider tests may skip if env vars are missing)
-	go test -v -tags=integration $$(go list ./... | grep -vE '/evals(/|$$)')
+	go test -v -tags=integration ./...
 
 INTEGRATION_TEST_PATTERN ?= ^TestIntegration_Ollama
 LOCAL_OLLAMA_ENDPOINT ?= http://127.0.0.1:11434/api/generate
@@ -101,10 +101,10 @@ LOCAL_OLLAMA_MODEL ?= llama3.1:8b
 LOCAL_OLLAMA_TIMEOUT_MS ?= 300000
 
 test-integration-anthropic: ## Run only Anthropic CLI e2e tests (requires ANTHROPIC_API_KEY)
-	go test -v -tags=integration -run '^TestIntegration_Anthropic_CLI' -count=1 -timeout 120s $$(go list ./... | grep -vE '/evals(/|$$)')
+	go test -v -tags=integration -run '^TestIntegration_Anthropic_CLI' -count=1 -timeout 120s ./...
 
 test-integration-ollama: ## Run only Ollama integration tests (set OLLAMA_MODEL/OLLAMA_ENDPOINT as needed)
-	go test -v -tags=integration -run '$(INTEGRATION_TEST_PATTERN)' $$(go list ./... | grep -vE '/evals(/|$$)')
+	go test -v -tags=integration -run '$(INTEGRATION_TEST_PATTERN)' ./...
 
 test-integration-ollama-8b: ## Step 4: Run Ollama integration tests with local llama3.1:8b
 	OLLAMA_ENDPOINT="$(LOCAL_OLLAMA_ENDPOINT)" \
@@ -112,77 +112,8 @@ test-integration-ollama-8b: ## Step 4: Run Ollama integration tests with local l
 	INTEGRATION_TEST_PATTERN='^TestIntegration_Ollama' \
 	$(MAKE) test-integration-ollama
 
-PROMPTFOO_DIR ?= evals
-PROMPTFOO_BIN ?= ./node_modules/.bin/promptfoo
-PROMPTFOO_CONFIG ?= promptfooconfig.yaml
-PROMPTFOO_OUTPUT ?= promptfoo-results.json
-PROMPTFOO_COMMIT_CONFIG ?= promptfooconfig-commit.yaml
-PROMPTFOO_COMMIT_OUTPUT ?= promptfoo-commit-results.json
-PROMPTFOO_PR_CONFIG ?= promptfooconfig-pr.yaml
-PROMPTFOO_PR_OUTPUT ?= promptfoo-pr-results.json
-PROMPTFOO_MAX_CONCURRENCY ?= 1
-PROMPTFOO_EVAL_TIMEOUT_MS ?= 300000
-PROMPTFOO_MAX_EVAL_TIME_MS ?= 0
-PROMPTFOO_COMMON_FLAGS ?= --max-concurrency $(PROMPTFOO_MAX_CONCURRENCY) --no-share --no-progress-bar --no-table
-PROMPTFOO_EVAL_FLAGS ?= $(PROMPTFOO_COMMON_FLAGS) --output $(PROMPTFOO_OUTPUT)
-
-eval-quality-deps: ## Install pinned promptfoo deps for quality evals
-	cd $(PROMPTFOO_DIR) && if [ ! -x node_modules/.bin/promptfoo ]; then npm ci --no-audit --no-fund --loglevel=error; fi
-
-eval-quality: build eval-quality-deps ## Run response-quality evals on curated diff fixtures
-	AMC_BIN="$$(pwd)/dist/$(APP)" ; \
-	PROMPTFOO_EVAL_TIMEOUT_MS="$(PROMPTFOO_EVAL_TIMEOUT_MS)" ; \
-	PROMPTFOO_MAX_EVAL_TIME_MS="$(PROMPTFOO_MAX_EVAL_TIME_MS)" ; \
-	export AMC_BIN ; \
-	export PROMPTFOO_EVAL_TIMEOUT_MS ; \
-	export PROMPTFOO_MAX_EVAL_TIME_MS ; \
-	cd $(PROMPTFOO_DIR) && $(PROMPTFOO_BIN) eval -c $(PROMPTFOO_CONFIG) $(PROMPTFOO_EVAL_FLAGS)
-
-eval-quality-ollama-8b: ## Step 5: Run evals against local Ollama llama3.1:8b (CI-like settings)
-	AI_MR_COMMENT_OLLAMA_ENDPOINT="$(LOCAL_OLLAMA_ENDPOINT)" \
-	AI_MR_COMMENT_OLLAMA_TIMEOUT_MS="$(LOCAL_OLLAMA_TIMEOUT_MS)" \
-	AMC_EVAL_PROVIDER=ollama \
-	AMC_EVAL_MODEL="$(LOCAL_OLLAMA_MODEL)" \
-	PROMPTFOO_MAX_CONCURRENCY=1 \
-	PROMPTFOO_EVAL_TIMEOUT_MS="$(LOCAL_OLLAMA_TIMEOUT_MS)" \
-	$(MAKE) eval-quality
-
-eval-quality-commit: build eval-quality-deps ## Run commit-message quality evals on curated git diffs
-	AMC_BIN="$$(pwd)/dist/$(APP)" ; \
-	PROMPTFOO_EVAL_TIMEOUT_MS="$(PROMPTFOO_EVAL_TIMEOUT_MS)" ; \
-	PROMPTFOO_MAX_EVAL_TIME_MS="$(PROMPTFOO_MAX_EVAL_TIME_MS)" ; \
-	export AMC_BIN ; \
-	export PROMPTFOO_EVAL_TIMEOUT_MS ; \
-	export PROMPTFOO_MAX_EVAL_TIME_MS ; \
-	cd $(PROMPTFOO_DIR) && $(PROMPTFOO_BIN) eval -c $(PROMPTFOO_COMMIT_CONFIG) $(PROMPTFOO_COMMON_FLAGS) --output $(PROMPTFOO_COMMIT_OUTPUT)
-
-eval-quality-pr: build eval-quality-deps ## Run PR title/description quality evals on curated git diffs
-	AMC_BIN="$$(pwd)/dist/$(APP)" ; \
-	PROMPTFOO_EVAL_TIMEOUT_MS="$(PROMPTFOO_EVAL_TIMEOUT_MS)" ; \
-	PROMPTFOO_MAX_EVAL_TIME_MS="$(PROMPTFOO_MAX_EVAL_TIME_MS)" ; \
-	export AMC_BIN ; \
-	export PROMPTFOO_EVAL_TIMEOUT_MS ; \
-	export PROMPTFOO_MAX_EVAL_TIME_MS ; \
-	cd $(PROMPTFOO_DIR) && $(PROMPTFOO_BIN) eval -c $(PROMPTFOO_PR_CONFIG) $(PROMPTFOO_COMMON_FLAGS) --output $(PROMPTFOO_PR_OUTPUT)
-
-eval-quality-writing: eval-quality-commit eval-quality-pr ## Run commit + PR writing quality evals
-
-eval-quality-writing-ollama-8b: ## Run writing quality evals against local Ollama llama3.1:8b
-	AI_MR_COMMENT_OLLAMA_ENDPOINT="$(LOCAL_OLLAMA_ENDPOINT)" \
-	AI_MR_COMMENT_OLLAMA_TIMEOUT_MS="$(LOCAL_OLLAMA_TIMEOUT_MS)" \
-	AMC_EVAL_PROVIDER=ollama \
-	AMC_EVAL_MODEL="$(LOCAL_OLLAMA_MODEL)" \
-	AMC_EVAL_TEMPLATE=default \
-	PROMPTFOO_MAX_CONCURRENCY=1 \
-	PROMPTFOO_EVAL_TIMEOUT_MS="$(LOCAL_OLLAMA_TIMEOUT_MS)" \
-	$(MAKE) eval-quality-writing
-
-local-ollama-8b-ci: ## Run step 4 + 5 locally with CI-like Ollama settings
+local-ollama-8b-ci: ## Run Ollama integration tests locally with CI-like settings
 	$(MAKE) test-integration-ollama-8b
-	$(MAKE) eval-quality-ollama-8b
-
-eval-quality-view: eval-quality-deps ## Open the latest promptfoo eval report
-	cd $(PROMPTFOO_DIR) && $(PROMPTFOO_BIN) view
 
 test-fuzz: ## Run fuzz tests (30s per target)
 	go test -fuzz=FuzzSplitDiffByFile -fuzztime=30s .
@@ -267,15 +198,15 @@ PROFILE_DIR ?= dist/profiles
 
 profile-cpu: ## CPU profile of unit tests (opens pprof tool — requires graphviz for svg)
 	@mkdir -p $(PROFILE_DIR)
-	go test -cpuprofile=$(PROFILE_DIR)/cpu.prof -run='^$$' -bench=. $$(go list ./... | grep -vE '/evals(/|$$)') 2>/dev/null || \
-	  go test -cpuprofile=$(PROFILE_DIR)/cpu.prof $$(go list ./... | grep -vE '/evals(/|$$)')
+	go test -cpuprofile=$(PROFILE_DIR)/cpu.prof -run='^$$' -bench=. ./... 2>/dev/null || \
+	  go test -cpuprofile=$(PROFILE_DIR)/cpu.prof ./...
 	@echo "CPU profile written to $(PROFILE_DIR)/cpu.prof"
 	@echo "Inspect with:  go tool pprof $(PROFILE_DIR)/cpu.prof"
 	@echo "  (top, web, list <func>, png > cpu.png)"
 
 profile-mem: ## Memory (heap) profile of unit tests
 	@mkdir -p $(PROFILE_DIR)
-	go test -memprofile=$(PROFILE_DIR)/mem.prof -memprofilerate=1 $$(go list ./... | grep -vE '/evals(/|$$)')
+	go test -memprofile=$(PROFILE_DIR)/mem.prof -memprofilerate=1 ./...
 	@echo "Memory profile written to $(PROFILE_DIR)/mem.prof"
 	@echo "Inspect with:  go tool pprof $(PROFILE_DIR)/mem.prof"
 
@@ -287,7 +218,7 @@ profile-bench: ## Run benchmarks and capture both CPU and memory profiles
 	  -benchmem \
 	  -cpuprofile=$(PROFILE_DIR)/bench-cpu.prof \
 	  -memprofile=$(PROFILE_DIR)/bench-mem.prof \
-	  $$(go list ./... | grep -vE '/evals(/|$$)')
+	  ./...
 	@echo "Benchmark profiles written to $(PROFILE_DIR)/"
 	@echo "CPU:  go tool pprof $(PROFILE_DIR)/bench-cpu.prof"
 	@echo "Mem:  go tool pprof $(PROFILE_DIR)/bench-mem.prof"
