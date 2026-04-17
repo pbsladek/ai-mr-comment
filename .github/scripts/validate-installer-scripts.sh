@@ -6,5 +6,4 @@ bash -n .github/scripts/generate-release-manifest.sh
 bash -n .github/scripts/upload-release-assets.sh
 bash -n .github/scripts/verify-release-assets.sh
 bash -n .github/scripts/write-release-summary.sh
-bash -n evals/providers/run-ai-mr-comment.sh
 bash scripts/install_test.sh
