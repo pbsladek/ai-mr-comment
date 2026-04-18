@@ -211,17 +211,16 @@ func TestGeminiCLIArgs_WithModel(t *testing.T) {
 func TestCodexCLIArgs_NoModel(t *testing.T) {
 	cfg := &Config{}
 	args := codexCLIArgs(cfg, "the-prompt")
-	assertArgOrder(t, args, "-q", "the-prompt")
-	if containsFlag(args, "--model") {
-		t.Error("expected no --model flag when model is empty")
+	assertArgOrder(t, args, "exec", "the-prompt")
+	if containsFlag(args, "-m") {
+		t.Error("expected no -m flag when model is empty")
 	}
 }
 
 func TestCodexCLIArgs_WithModel(t *testing.T) {
 	cfg := &Config{CodexCLIModel: "o4-mini"}
 	args := codexCLIArgs(cfg, "the-prompt")
-	assertArgOrder(t, args, "--model", "o4-mini", "-q", "the-prompt")
-	assertFlagBeforePrompt(t, args, "--model", "-q")
+	assertArgOrder(t, args, "exec", "-m", "o4-mini", "the-prompt")
 }
 
 // --- findClaudeBinary ---
