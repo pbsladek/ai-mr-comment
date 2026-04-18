@@ -284,7 +284,13 @@ func execCLI(ctx context.Context, binary string, args []string) (string, error) 
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", cliExecError(ctx, filepath.Base(binary), err, stderr.String())
+		// Some CLIs (e.g. claude) write errors to stdout instead of stderr.
+		// Surface stdout content in the error when stderr is empty.
+		combined := stderr.String()
+		if strings.TrimSpace(combined) == "" {
+			combined = string(out)
+		}
+		return "", cliExecError(ctx, filepath.Base(binary), err, combined)
 	}
 	result := strings.TrimSpace(string(out))
 	if result == "" {
@@ -412,11 +418,11 @@ func findCodexBinary(cfg *Config) (string, error) {
 }
 
 func codexCLIArgs(cfg *Config, prompt string) []string {
-	var args []string
+	args := []string{"exec"}
 	if cfg.CodexCLIModel != "" {
-		args = append(args, "--model", cfg.CodexCLIModel)
+		args = append(args, "-m", cfg.CodexCLIModel)
 	}
-	return append(args, "-q", prompt)
+	return append(args, prompt)
 }
 
 func callCodexCLI(ctx context.Context, cfg *Config, systemPrompt, diffContent string) (string, error) {

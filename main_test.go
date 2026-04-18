@@ -3189,6 +3189,107 @@ func TestValidateProviderConfig_CLIProvidersAccepted(t *testing.T) {
 	}
 }
 
+func TestMaskSecret(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"", "(not set)"},
+		{"ab", "****"},
+		{"abcd", "****"},
+		{"abcde", "abcd****"},
+		{"sk-ant-abc123", "sk-a****"},
+	}
+	for _, tc := range cases {
+		if got := maskSecret(tc.in); got != tc.want {
+			t.Errorf("maskSecret(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestCheckCmd_Success(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "dummy-key")
+	var capturedPrompt string
+	chatFn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
+		capturedPrompt = systemPrompt
+		return "OK", nil
+	}
+	cmd := newRootCmd(chatFn)
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"check", "--provider=anthropic"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "OK") {
+		t.Errorf("expected OK in output, got: %s", out)
+	}
+	if !strings.Contains(capturedPrompt, "OK") {
+		t.Errorf("expected ping prompt to contain 'OK', got: %q", capturedPrompt)
+	}
+}
+
+func TestCheckCmd_APIError(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "dummy-key")
+	chatFn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
+		return "", errors.New("connection refused")
+	}
+	cmd := newRootCmd(chatFn)
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"check", "--provider=anthropic"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "check failed") {
+		t.Errorf("expected 'check failed' in error, got: %v", err)
+	}
+	if !strings.Contains(buf.String(), "FAIL") {
+		t.Errorf("expected FAIL in output, got: %s", buf.String())
+	}
+}
+
+func TestCheckCmd_MissingAPIKey(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"check", "--provider=anthropic"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing API key, got nil")
+	}
+	if !strings.Contains(err.Error(), "config error") {
+		t.Errorf("expected 'config error', got: %v", err)
+	}
+}
+
+func TestCheckCmd_PrintsProviderInfo(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-testkey")
+	chatFn := func(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
+		return "OK", nil
+	}
+	cmd := newRootCmd(chatFn)
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"check", "--provider=openai"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "openai") {
+		t.Errorf("expected provider name in output, got: %s", out)
+	}
+	if !strings.Contains(out, "sk-t****") {
+		t.Errorf("expected masked API key in output, got: %s", out)
+	}
+}
+
 func TestValidateProviderConfig_UnknownProviderRejected(t *testing.T) {
 	cfg := &Config{Provider: "bogus"}
 	err := validateProviderConfig(cfg)

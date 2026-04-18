@@ -855,6 +855,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 
 	rootCmd.AddCommand(newInitConfigCmd())
 	rootCmd.AddCommand(newModelsCmd())
+	rootCmd.AddCommand(newCheckCmd(chatFn))
 	rootCmd.AddCommand(newQuickCommitCmd(chatFn))
 	rootCmd.AddCommand(newChangelogCmd(chatFn))
 	rootCmd.AddCommand(newGenAliasesCmd())
@@ -1248,7 +1249,7 @@ func newModelsCmd() *cobra.Command {
 // AI commit message, commits, and pushes — all in one step.
 func newQuickCommitCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
 	var provider, modelOverride, format, profileName string
-	var dryRun, noPush, breaking, multiLine, emoji, noConventional, postFlag bool
+	var dryRun, noPush, breaking, multiLine, emoji, noConventional, postFlag, verbose bool
 	var chaos, haiku, roast, fortune bool
 	var qcMonday, qcJira, qcEmoji, qcSassy, qcTechnical bool
 	var qcIntern, qcShakespeare, qcManager, qcYoda, qcExcuse bool
@@ -1273,6 +1274,9 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			}
 			if cmd.Flags().Changed("model") {
 				setModelOverride(cfg, modelOverride)
+			}
+			if verbose {
+				cfg.DebugWriter = cmd.ErrOrStderr()
 			}
 			if cfgErr := validateProviderConfig(cfg); cfgErr != nil {
 				return cfgErr
@@ -1576,6 +1580,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 	cmd.Flags().BoolVar(&qcYoda, "yoda", false, "Generate the commit description in Yoda's inverted syntax")
 	cmd.Flags().BoolVar(&qcExcuse, "excuse", false, "Generate a technically accurate commit message with a built-in excuse")
 	cmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate (defined in ~/.ai-mr-comment.toml under [profile.<name>])")
+	cmd.Flags().BoolVar(&verbose, "verbose", false, "Print debug info (provider, model, prompt size, timing) to stderr")
 	return cmd
 }
 
@@ -1585,6 +1590,114 @@ var providerSecrets = map[string]string{
 	"openai":    "OPENAI_API_KEY",
 	"anthropic": "ANTHROPIC_API_KEY",
 	"gemini":    "GEMINI_API_KEY",
+}
+
+// newCheckCmd returns a command that validates the configured provider is reachable
+// by sending a minimal live ping and reporting the result.
+func newCheckCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
+	var provider, modelOverride, profileName string
+
+	cmd := &cobra.Command{
+		Use:   "check",
+		Short: "Validate AI provider access with a live ping",
+		Long: `Loads your configuration, prints the resolved settings, and sends a
+minimal request to confirm the provider API or CLI is reachable and responding.
+
+Examples:
+  ai-mr-comment check
+  ai-mr-comment check --provider anthropic
+  ai-mr-comment check --profile fast`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfigForProfile(profileName)
+			if err != nil {
+				return err
+			}
+			if cmd.Flags().Changed("provider") {
+				cfg.Provider = ApiProvider(provider)
+			}
+			if cmd.Flags().Changed("model") {
+				setModelOverride(cfg, modelOverride)
+			}
+
+			out := cmd.OutOrStdout()
+
+			// Print resolved config.
+			_, _ = fmt.Fprintf(out, "Provider : %s\n", cfg.Provider)
+			_, _ = fmt.Fprintf(out, "Model    : %s\n", getModelName(cfg))
+			switch cfg.Provider {
+			case OpenAI:
+				_, _ = fmt.Fprintf(out, "Endpoint : %s\n", cfg.OpenAIEndpoint)
+				_, _ = fmt.Fprintf(out, "API key  : %s\n", maskSecret(cfg.OpenAIAPIKey))
+			case Anthropic:
+				_, _ = fmt.Fprintf(out, "Endpoint : %s\n", cfg.AnthropicEndpoint)
+				_, _ = fmt.Fprintf(out, "API key  : %s\n", maskSecret(cfg.AnthropicAPIKey))
+			case Gemini:
+				_, _ = fmt.Fprintf(out, "API key  : %s\n", maskSecret(cfg.GeminiAPIKey))
+			case Ollama:
+				_, _ = fmt.Fprintf(out, "Endpoint : %s\n", cfg.OllamaEndpoint)
+			case ClaudeCLI:
+				binary, binErr := findClaudeBinary(cfg)
+				if binErr != nil {
+					_, _ = fmt.Fprintf(out, "Binary   : (not found: %v)\n", binErr)
+				} else {
+					_, _ = fmt.Fprintf(out, "Binary   : %s\n", binary)
+				}
+			case GeminiCLI:
+				binary, binErr := findGeminiCLIBinary(cfg)
+				if binErr != nil {
+					_, _ = fmt.Fprintf(out, "Binary   : (not found: %v)\n", binErr)
+				} else {
+					_, _ = fmt.Fprintf(out, "Binary   : %s\n", binary)
+				}
+			case CodexCLI:
+				binary, binErr := findCodexBinary(cfg)
+				if binErr != nil {
+					_, _ = fmt.Fprintf(out, "Binary   : (not found: %v)\n", binErr)
+				} else {
+					_, _ = fmt.Fprintf(out, "Binary   : %s\n", binary)
+				}
+			}
+			_, _ = fmt.Fprintln(out)
+
+			// Validate config before attempting the live call.
+			if cfgErr := validateProviderConfig(cfg); cfgErr != nil {
+				return fmt.Errorf("config error: %w", cfgErr)
+			}
+
+			_, _ = fmt.Fprintln(out, "Sending ping...")
+			start := time.Now()
+			const pingPrompt = `Reply with the single word: OK`
+			reply, callErr := chatFn(cmd.Context(), cfg, cfg.Provider, pingPrompt, "")
+			elapsed := time.Since(start)
+
+			if callErr != nil {
+				_, _ = fmt.Fprintf(out, "FAIL (%dms): %v\n", elapsed.Milliseconds(), callErr)
+				return fmt.Errorf("check failed: %w", callErr)
+			}
+
+			reply = strings.TrimSpace(reply)
+			_, _ = fmt.Fprintf(out, "OK (%dms)\n", elapsed.Milliseconds())
+			_, _ = fmt.Fprintf(out, "Response : %s\n", reply)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&provider, "provider", "", "AI provider to check (overrides config)")
+	cmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this check")
+	cmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate")
+	return cmd
+}
+
+// maskSecret returns the first 4 characters of s followed by "****", or
+// "(not set)" when s is empty.
+func maskSecret(s string) string {
+	if s == "" {
+		return "(not set)"
+	}
+	if len(s) <= 4 {
+		return "****"
+	}
+	return s[:4] + "****"
 }
 
 // newGenWorkflowCmd returns a command that generates a GitHub Actions workflow
