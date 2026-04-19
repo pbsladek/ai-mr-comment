@@ -1592,10 +1592,47 @@ var providerSecrets = map[string]string{
 	"gemini":    "GEMINI_API_KEY",
 }
 
+// allProviders is the ordered list used by check --all.
+var allProviders = []ApiProvider{OpenAI, Anthropic, Gemini, Ollama, ClaudeCLI, GeminiCLI, CodexCLI}
+
+const checkPingPrompt = `Reply with the single word: OK`
+
+// pingResult holds the outcome of a single provider ping.
+type pingResult struct {
+	provider ApiProvider
+	model    string
+	elapsed  time.Duration
+	err      error
+	skipped  bool // true when credentials/binary are absent — not worth pinging
+	skipMsg  string
+}
+
+// pingProvider sends a minimal prompt to one provider and returns the result.
+func pingProvider(ctx context.Context, cfg *Config, provider ApiProvider, chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) pingResult {
+	provCfg := *cfg
+	provCfg.Provider = provider
+
+	// Pre-flight: skip providers whose credentials/binary are clearly absent
+	// so we don't waste time on a doomed network call.
+	if err := validateProviderConfig(&provCfg); err != nil {
+		return pingResult{provider: provider, model: getModelName(&provCfg), skipped: true, skipMsg: err.Error()}
+	}
+
+	start := time.Now()
+	_, err := chatFn(ctx, &provCfg, provider, checkPingPrompt, "")
+	return pingResult{
+		provider: provider,
+		model:    getModelName(&provCfg),
+		elapsed:  time.Since(start),
+		err:      err,
+	}
+}
+
 // newCheckCmd returns a command that validates the configured provider is reachable
 // by sending a minimal live ping and reporting the result.
 func newCheckCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
 	var provider, modelOverride, profileName string
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:   "check",
@@ -1603,23 +1640,31 @@ func newCheckCmd(chatFn func(context.Context, *Config, ApiProvider, string, stri
 		Long: `Loads your configuration, prints the resolved settings, and sends a
 minimal request to confirm the provider API or CLI is reachable and responding.
 
+Use --all to ping every provider in parallel and print a summary table.
+
 Examples:
   ai-mr-comment check
   ai-mr-comment check --provider anthropic
+  ai-mr-comment check --all
   ai-mr-comment check --profile fast`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfigForProfile(profileName)
 			if err != nil {
 				return err
 			}
+
+			out := cmd.OutOrStdout()
+
+			if all {
+				return runCheckAll(cmd.Context(), cfg, chatFn, out)
+			}
+
 			if cmd.Flags().Changed("provider") {
 				cfg.Provider = ApiProvider(provider)
 			}
 			if cmd.Flags().Changed("model") {
 				setModelOverride(cfg, modelOverride)
 			}
-
-			out := cmd.OutOrStdout()
 
 			// Print resolved config.
 			_, _ = fmt.Fprintf(out, "Provider : %s\n", cfg.Provider)
@@ -1666,8 +1711,7 @@ Examples:
 
 			_, _ = fmt.Fprintln(out, "Sending ping...")
 			start := time.Now()
-			const pingPrompt = `Reply with the single word: OK`
-			reply, callErr := chatFn(cmd.Context(), cfg, cfg.Provider, pingPrompt, "")
+			reply, callErr := chatFn(cmd.Context(), cfg, cfg.Provider, checkPingPrompt, "")
 			elapsed := time.Since(start)
 
 			if callErr != nil {
@@ -1685,7 +1729,78 @@ Examples:
 	cmd.Flags().StringVar(&provider, "provider", "", "AI provider to check (overrides config)")
 	cmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this check")
 	cmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate")
+	cmd.Flags().BoolVar(&all, "all", false, "Ping every provider in parallel and print a summary table")
 	return cmd
+}
+
+// runCheckAll pings all providers concurrently and prints a summary table.
+// Returns an error if any configured (non-skipped) provider fails.
+func runCheckAll(ctx context.Context, cfg *Config, chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error), out io.Writer) error {
+	_, _ = fmt.Fprintln(out, "Pinging all providers...")
+	_, _ = fmt.Fprintln(out)
+
+	type indexedResult struct {
+		idx int
+		pingResult
+	}
+
+	results := make([]pingResult, len(allProviders))
+	ch := make(chan indexedResult, len(allProviders))
+
+	for i, p := range allProviders {
+		i, p := i, p
+		go func() {
+			ch <- indexedResult{idx: i, pingResult: pingProvider(ctx, cfg, p, chatFn)}
+		}()
+	}
+	for range allProviders {
+		r := <-ch
+		results[r.idx] = r.pingResult
+	}
+
+	// Print aligned table.
+	const colProvider = 12
+	const colModel = 24
+	_, _ = fmt.Fprintf(out, "%-*s  %-*s  %s\n", colProvider, "PROVIDER", colModel, "MODEL", "STATUS")
+	_, _ = fmt.Fprintf(out, "%s  %s  %s\n", strings.Repeat("-", colProvider), strings.Repeat("-", colModel), strings.Repeat("-", 20))
+
+	var anyFailed bool
+	for _, r := range results {
+		var status string
+		switch {
+		case r.skipped:
+			status = "SKIP — " + firstLine(r.skipMsg)
+		case r.err != nil:
+			anyFailed = true
+			status = fmt.Sprintf("FAIL (%dms) — %s", r.elapsed.Milliseconds(), firstLine(r.err.Error()))
+		default:
+			status = fmt.Sprintf("OK   (%dms)", r.elapsed.Milliseconds())
+		}
+		_, _ = fmt.Fprintf(out, "%-*s  %-*s  %s\n", colProvider, r.provider, colModel, r.model, status)
+	}
+	if anyFailed {
+		_, _ = fmt.Fprintf(out, "  tip: run 'check --provider <name>' for full error details\n")
+	}
+
+	_, _ = fmt.Fprintln(out)
+	if anyFailed {
+		return errors.New("one or more providers failed — see table above")
+	}
+	return nil
+}
+
+// firstLine returns the text up to the first newline, trimmed, and truncated
+// to maxLen runes with "…" appended when exceeded.
+func firstLine(s string) string {
+	const maxLen = 72
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	s = strings.TrimSpace(s)
+	if len([]rune(s)) > maxLen {
+		return string([]rune(s)[:maxLen]) + "…"
+	}
+	return s
 }
 
 // maskSecret returns the first 4 characters of s followed by "****", or
