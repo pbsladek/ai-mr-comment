@@ -3290,6 +3290,124 @@ func TestCheckCmd_PrintsProviderInfo(t *testing.T) {
 	}
 }
 
+func TestCheckAll_AllPass(t *testing.T) {
+	// Set all API keys so no provider is skipped.
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("ANTHROPIC_API_KEY", "ant-test")
+	t.Setenv("GEMINI_API_KEY", "gem-test")
+
+	chatFn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "OK", nil
+	}
+	cmd := newRootCmd(chatFn)
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"check", "--all"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	for _, p := range allProviders {
+		if !strings.Contains(out, string(p)) {
+			t.Errorf("expected provider %q in output", p)
+		}
+	}
+	if strings.Contains(out, "FAIL") {
+		t.Errorf("expected no FAIL in output, got:\n%s", out)
+	}
+}
+
+func TestCheckAll_SomeFail(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("ANTHROPIC_API_KEY", "ant-test")
+	t.Setenv("GEMINI_API_KEY", "gem-test")
+
+	chatFn := func(_ context.Context, _ *Config, p ApiProvider, _, _ string) (string, error) {
+		if p == Anthropic {
+			return "", errors.New("connection refused")
+		}
+		return "OK", nil
+	}
+	cmd := newRootCmd(chatFn)
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"check", "--all"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when a provider fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "one or more providers failed") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "FAIL") {
+		t.Errorf("expected FAIL in output, got:\n%s", buf.String())
+	}
+}
+
+func TestCheckAll_SkipsUnconfigured(t *testing.T) {
+	// Clear all keys — every API provider should be skipped, not failed.
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+
+	called := false
+	chatFn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		called = true
+		return "OK", nil
+	}
+	cmd := newRootCmd(chatFn)
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"check", "--all"})
+	// CLI providers (claude-cli, gemini-cli, codex-cli) may or may not be present
+	// on the test machine, so we only assert API providers are skipped, not failed.
+	_ = cmd.Execute()
+	out := buf.String()
+	for _, p := range []ApiProvider{OpenAI, Anthropic, Gemini} {
+		if !strings.Contains(out, "SKIP") {
+			t.Errorf("expected SKIP for provider %q when key is unset, got:\n%s", p, out)
+		}
+	}
+	_ = called // CLI providers may still be called if binaries exist
+}
+
+func TestCheckAll_TableColumns(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+
+	chatFn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "OK", nil
+	}
+	cmd := newRootCmd(chatFn)
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"check", "--all"})
+	_ = cmd.Execute()
+	out := buf.String()
+	// Header row must be present.
+	if !strings.Contains(out, "PROVIDER") || !strings.Contains(out, "MODEL") || !strings.Contains(out, "STATUS") {
+		t.Errorf("expected table header in output, got:\n%s", out)
+	}
+}
+
+func TestPingProvider_SkipWhenKeyMissing(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	cfg, _ := loadConfigForProfile("")
+	chatFn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		t.Fatal("chatFn must not be called when provider is skipped")
+		return "", nil
+	}
+	r := pingProvider(context.Background(), cfg, Anthropic, chatFn)
+	if !r.skipped {
+		t.Errorf("expected skipped=true when API key is missing")
+	}
+}
+
 func TestValidateProviderConfig_UnknownProviderRejected(t *testing.T) {
 	cfg := &Config{Provider: "bogus"}
 	err := validateProviderConfig(cfg)
