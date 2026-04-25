@@ -576,15 +576,22 @@ func getMRDiffWithClient(ctx context.Context, gl *gogitlab.Client, mrURL string)
 		return "", wrapGitLabAuthError("fetching GitLab MR metadata", err)
 	}
 
-	// Fetch the raw unified diff via MR diffs.
-	changes, _, err := gl.MergeRequests.ListMergeRequestDiffs(projectPath, iid, nil, gogitlab.WithContext(ctx))
-	if err != nil {
-		return "", wrapGitLabAuthError("fetching GitLab MR diff", err)
-	}
-
 	var diffBuilder strings.Builder
-	for _, c := range changes {
-		diffBuilder.WriteString(c.Diff)
+	opts := &gogitlab.ListMergeRequestDiffsOptions{
+		ListOptions: gogitlab.ListOptions{PerPage: 100},
+	}
+	for {
+		changes, resp, err := gl.MergeRequests.ListMergeRequestDiffs(projectPath, iid, opts, gogitlab.WithContext(ctx))
+		if err != nil {
+			return "", wrapGitLabAuthError("fetching GitLab MR diff", err)
+		}
+		for _, c := range changes {
+			diffBuilder.WriteString(c.Diff)
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
 	}
 
 	return formatPRContent(mr.Title, mr.Description, diffBuilder.String()), nil

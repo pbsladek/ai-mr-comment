@@ -92,6 +92,7 @@ brew upgrade ai-mr-comment
 ### Other Platforms
 
 Download the latest binary for your OS from the [Releases](https://github.com/pbsladek/ai-mr-comment/releases) page.
+Release archives are published for Linux, macOS, and Windows on both x86_64 and arm64.
 
 For Linux/macOS script installation, download and inspect `scripts/install.sh` from the [repository](https://github.com/pbsladek/ai-mr-comment), then run it directly. The script verifies the downloaded archive against the release `checksums.txt` (and optionally the cosign signature) before installing.
 
@@ -119,6 +120,7 @@ make fetch-tags build
 
 No Go toolchain required. The image includes git so all diff and commit commands work.
 Published image: `pwbsladek/ai-mr-comment` on Docker Hub.
+Release images are published as multi-arch Linux manifests for amd64 and arm64.
 FIPS variant tag: `pwbsladek/ai-mr-comment:<version>-fips`.
 
 If you build locally, log in to DHI first (base images are pulled from `dhi.io`):
@@ -130,6 +132,9 @@ docker login dhi.io
 ```bash
 # Build the image
 make docker-build
+
+# Scan for fixable critical/high CVEs
+make docker-scout
 
 # Run against the current repo diff (mounts PWD, passes API keys from env)
 make docker-run ARGS="--provider openai"
@@ -352,6 +357,10 @@ ai-mr-comment --model gpt-4o
 # Generate comment for a specific commit range
 ai-mr-comment --commit "HEAD~3..HEAD"
 
+# Pipe a diff through stdin
+git diff | ai-mr-comment --file=- --plain
+gh pr diff 42 | ai-mr-comment --quiet
+
 # Generate a comment from a GitHub PR URL (no local checkout needed)
 ai-mr-comment --pr https://github.com/owner/repo/pull/42
 
@@ -403,6 +412,10 @@ ai-mr-comment --verbose
 # Show token and cost estimation without calling the API
 ai-mr-comment --debug
 
+# Print the exact prompt/request for agent debugging without calling the API
+git diff | ai-mr-comment --file=- --print-prompt
+git diff | ai-mr-comment --file=- --print-request | jq .
+
 # Override the system prompt for a single run (inline)
 ai-mr-comment --system-prompt="Focus only on security vulnerabilities."
 
@@ -442,6 +455,50 @@ ai-mr-comment --profile fast
 ai-mr-comment --profile anthropic --title
 ```
 
+### Agent and Pipe Integration
+
+`ai-mr-comment` can be used as a Unix-style filter:
+
+```bash
+git diff | ai-mr-comment --file=- --plain
+git show HEAD | ai-mr-comment commit-message --file=-
+gh pr diff 42 | ai-mr-comment review --quiet
+git diff | ai-mr-comment verdict --file=-
+```
+
+For structured agent input, pass JSON on stdin:
+
+```bash
+printf '%s' '{
+  "title": "Add auth flow",
+  "description": "Implements token refresh",
+  "branch": "feat/AUTH-123-refresh",
+  "diff": "diff --git a/auth.go b/auth.go\n+..."
+}' | ai-mr-comment review --input=json --quiet
+```
+
+Agent-oriented commands:
+
+```bash
+ai-mr-comment review --file=-
+ai-mr-comment title --file=-
+ai-mr-comment commit-message --file=-
+ai-mr-comment verdict --file=-
+ai-mr-comment estimate --file=-
+```
+
+Machine-friendly output modes:
+
+```bash
+ai-mr-comment --quiet
+ai-mr-comment --plain
+ai-mr-comment --stream=jsonl
+ai-mr-comment --print-prompt
+ai-mr-comment --print-request
+```
+
+Exit codes are stable for automation: `0` success/pass, `1` tool or runtime error, `2` AI verdict fail, `3` no diff/input, `4` invalid usage.
+
 ### Options
 
 - `--pr <URL>`: GitHub PR or GitLab MR URL — fetches diff and metadata remotely, no local checkout needed. Works with `github.com`, GitHub Enterprise, `gitlab.com`, and self-hosted GitLab. Mutually exclusive with `--staged`, `--commit`, and `--file`.
@@ -452,12 +509,18 @@ ai-mr-comment --profile anthropic --title
 - `--title`: Generate a concise MR/PR title alongside the comment; printed as a distinct `── Title ──` section in text mode. When `--format=json` is used, title is always generated automatically (no need for `--title`). Mutually exclusive with `--commit-msg`.
 - `--commit-msg`: Generate a single-line git commit message instead of a full MR/PR description. Output is clean text or `{"commit_message":"..."}` in JSON mode. Mutually exclusive with `--title`.
 - `--multi-line`: Generate a multi-line commit message (subject + blank line + markdown body) when used with `--commit-msg` or `quick-commit`. GitHub and GitLab use this format to pre-fill the PR/MR title and description automatically.
-- `--exit-code`: Exit with code 2 when the AI detects critical issues (bugs, security vulnerabilities, data loss risks). Exit 0 = pass, exit 2 = AI-flagged fail, exit 1 = tool error. Mutually exclusive with `--commit-msg`.
+- `--exit-code`: Exit with code 2 when the AI detects critical issues (bugs, security vulnerabilities, data loss risks). Mutually exclusive with `--commit-msg`.
 - `--post`: Post the generated comment back to the GitHub PR or GitLab MR via API (requires `--pr`). Uses the same token as diff fetching.
-- `--file <FILE>`: Read diff from file instead of git
+- `--file <FILE>`: Read diff from file instead of git. Use `--file=-` to read from stdin.
 - `--output <FILE>`: Write output to file instead of stdout — **suppresses all terminal output**. Writes JSON when `--format=json` is set; writes the commit message when `--commit-msg` is set.
 - `--clipboard <WHAT>`: Copy to system clipboard — `title`, `description` (or `comment`), `commit-msg`, or `all` (title + description separated by a blank line)
 - `--format <FORMAT>`: Output format — `text` (default) or `json`
+- `--input <FORMAT>`: Input format — `text` (default) or `json` for structured agent input (`title`, `description`, `branch`, `diff`)
+- `--quiet`: Force strict JSON output on stdout for agents and scripts
+- `--plain`, `--no-decorate`: Suppress text section headers and decorative separators
+- `--stream=jsonl`: Emit JSON Lines events (`start`, `token`, `done`) instead of decorated text
+- `--print-prompt`: Print the resolved system prompt and exit without calling the provider
+- `--print-request`: Print the resolved provider request as JSON and exit without calling the provider
 - `--provider <PROVIDER>`: Provider (`openai`, `anthropic`, `gemini`, `ollama`, `claude-cli`, `gemini-cli`, `codex-cli`)
 - `--model <NAME>`: Override the model for this run (e.g. `gpt-4o`, `claude-opus-4-6`, `gemini-2.5-flash`)
 - `-t, --template <NAME>`: Template style — `default`, `conventional`, `technical`, `user-focused`, `emoji`, `sassy`, `monday`, `jira`, `commit`, `commit-emoji`, `commit-conventional`, `chaos`, `haiku`, `roast`, `intern`, `shakespeare`, `manager`, `yoda`, `excuse` (`commit`, `commit-emoji`, and `commit-conventional` require `--commit-msg`; style templates cannot be combined with `--commit-msg`)

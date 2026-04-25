@@ -40,12 +40,15 @@ func runChangelog(cmd *cobra.Command, a changelogArgs, chatFn func(context.Conte
 	if cfgErr := validateProviderConfig(cfg); cfgErr != nil {
 		return cfgErr
 	}
+	if cancel := applyRequestTimeout(cmd, cfg); cancel != nil {
+		defer cancel()
+	}
 
 	if a.format != "text" && a.format != "json" {
 		return fmt.Errorf("unsupported format %q: must be text or json", a.format)
 	}
 
-	diffContent, err := resolveDiff(a.commit, a.diffFilePath)
+	diffContent, err := resolveDiff(cmd, a.commit, a.diffFilePath)
 	if err != nil {
 		return err
 	}
@@ -78,11 +81,13 @@ func runChangelog(cmd *cobra.Command, a changelogArgs, chatFn func(context.Conte
 }
 
 // resolveDiff obtains diff content from a file path, commit range, or working tree.
-func resolveDiff(commit, diffFilePath string) (string, error) {
+func resolveDiff(cmd *cobra.Command, commit, diffFilePath string) (string, error) {
 	var diffContent string
 	var err error
 	if diffFilePath != "" {
-		diffContent, err = readDiffFromFile(diffFilePath)
+		diffContent, err = readCommandInput(cmd, diffFilePath)
+	} else if commandStdinIsPiped(cmd) {
+		diffContent, err = readCommandInput(cmd, "-")
 	} else {
 		if !isGitRepo() {
 			return "", fmt.Errorf("not a git repository. Run from inside a git repo or use --file to provide a diff")

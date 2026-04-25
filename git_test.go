@@ -504,6 +504,39 @@ func TestGetMRDiff(t *testing.T) {
 	}
 }
 
+func TestGetMRDiff_PaginatesDiffs(t *testing.T) {
+	page1Diff := "diff --git a/a.go b/a.go\n+one\n"
+	page2Diff := "diff --git a/b.go b/b.go\n+two\n"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/mygroup%2Fmyproject/merge_requests/5", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"title": "My MR Title", "description": "MR description"})
+	})
+	mux.HandleFunc("/api/v4/projects/mygroup%2Fmyproject/merge_requests/5/diffs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("page") {
+		case "", "1":
+			w.Header().Set("X-Next-Page", "2")
+			_ = json.NewEncoder(w).Encode([]map[string]string{{"diff": page1Diff}})
+		case "2":
+			_ = json.NewEncoder(w).Encode([]map[string]string{{"diff": page2Diff}})
+		default:
+			t.Errorf("unexpected page %q", r.URL.Query().Get("page"))
+			http.Error(w, "unexpected page", http.StatusBadRequest)
+		}
+	})
+
+	gl := newTestGitLabClient(t, mux)
+	result, err := getMRDiffWithClient(context.Background(), gl, "https://gitlab.com/mygroup/myproject/-/merge_requests/5")
+	if err != nil {
+		t.Fatalf("getMRDiff: unexpected error: %v", err)
+	}
+	if !strings.Contains(result, page1Diff) || !strings.Contains(result, page2Diff) {
+		t.Fatalf("expected both paginated diffs, got: %q", result)
+	}
+}
+
 func TestGetMRDiff_InvalidURL(t *testing.T) {
 	gl, _ := gogitlab.NewClient("")
 	_, err := getMRDiffWithClient(context.Background(), gl, "https://notgitlab.com/g/p/-/merge_requests/1")

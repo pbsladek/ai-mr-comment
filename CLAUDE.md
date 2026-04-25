@@ -6,8 +6,8 @@ A command-line tool written in Go that generates professional MR/PR comments bas
 
 - This project uses **Go 1.26**.
 - The Dockerfile uses hardened images pinned by digest:
-  - `dhi.io/golang:1.26-debian13-dev@sha256:7c7ee6a2db0fa9a332ba1c96f2cc11b53dc7535a899ce66e45391db4dfa26350` (builder)
-  - `dhi.io/debian-base:trixie-debian13-dev@sha256:2166e2eaef0651c9ad21de6ab5a34fda12541d89bccf7bcb0a94afceb1b1541b` (runtime)
+  - `dhi.io/golang:1.26-debian13-dev@sha256:086c893153f92793f3a1541793cd4a8e8b23bfd4ccaf70c8f4261f496080fb0e` (builder)
+  - `dhi.io/debian-base:trixie-debian13-dev@sha256:9415967aa0ed8adea8b5c048994259d1982026dca143d0303c7bbe0e11ed67d3` (runtime)
   - FIPS builds set `GOFIPS140=v1.0.0` at build time.
   Keep Go version in sync with `go.mod`.
 
