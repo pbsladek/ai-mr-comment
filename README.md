@@ -92,6 +92,7 @@ brew upgrade ai-mr-comment
 ### Other Platforms
 
 Download the latest binary for your OS from the [Releases](https://github.com/pbsladek/ai-mr-comment/releases) page.
+Release archives are published for Linux, macOS, and Windows on both x86_64 and arm64.
 
 For Linux/macOS script installation, download and inspect `scripts/install.sh` from the [repository](https://github.com/pbsladek/ai-mr-comment), then run it directly. The script verifies the downloaded archive against the release `checksums.txt` (and optionally the cosign signature) before installing.
 
@@ -119,6 +120,7 @@ make fetch-tags build
 
 No Go toolchain required. The image includes git so all diff and commit commands work.
 Published image: `pwbsladek/ai-mr-comment` on Docker Hub.
+Release images are published as multi-arch Linux manifests for amd64 and arm64.
 FIPS variant tag: `pwbsladek/ai-mr-comment:<version>-fips`.
 
 If you build locally, log in to DHI first (base images are pulled from `dhi.io`):

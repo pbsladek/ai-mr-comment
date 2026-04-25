@@ -7,7 +7,7 @@ COMMIT       ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 COMMIT_FULL  ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 LDFLAGS      := -ldflags="-s -w -X 'main.Version=$(VERSION)' -X 'main.Commit=$(COMMIT)' -X 'main.CommitFull=$(COMMIT_FULL)'"
 BUILD_DIR := dist
-PLATFORMS := linux/amd64 darwin/amd64 darwin/arm64 windows/amd64
+PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
 # Maximum allowed binary size in bytes for linux/amd64 release build (35 MB)
 # Current baseline ~23.4 MB; gRPC+protobuf from generative-ai-go dominate.

@@ -50,16 +50,27 @@ for attempt in $(seq 1 "${max_attempts}"); do
     fi
   done
 
-  archive_count=0
-  for asset in "${assets[@]}"; do
-    if [[ "${asset}" =~ ^ai-mr-comment_.*\.(tar\.gz|zip)$ ]]; then
-      archive_count=$((archive_count + 1))
+  required_archives=(
+    "ai-mr-comment_Linux_x86_64.tar.gz"
+    "ai-mr-comment_Linux_arm64.tar.gz"
+    "ai-mr-comment_Darwin_x86_64.tar.gz"
+    "ai-mr-comment_Darwin_arm64.tar.gz"
+    "ai-mr-comment_Windows_x86_64.zip"
+    "ai-mr-comment_Windows_arm64.zip"
+  )
+
+  for name in "${required_archives[@]}"; do
+    found="false"
+    for asset in "${assets[@]}"; do
+      if [ "${asset}" = "${name}" ]; then
+        found="true"
+        break
+      fi
+    done
+    if [ "${found}" != "true" ]; then
+      missing+=("${name}")
     fi
   done
-
-  if [ "${archive_count}" -lt 4 ]; then
-    missing+=("at least 4 build archives (found ${archive_count})")
-  fi
 
   if [ "${#missing[@]}" -eq 0 ]; then
     echo "Release ${tag} asset check passed."

@@ -51,6 +51,7 @@ func TestReleaseWorkflowScansImagesBeforePublish(t *testing.T) {
 	workflow := readRepoFile(t, ".github/workflows/release.yml")
 
 	required := []string{
+		"platforms: linux/amd64,linux/arm64",
 		"Build Docker image for vulnerability scan",
 		"Build Docker FIPS image for vulnerability scan",
 		"uses: docker/scout-action@v1.18.2",
@@ -68,6 +69,39 @@ func TestReleaseWorkflowScansImagesBeforePublish(t *testing.T) {
 
 	assertBefore(t, workflow, "Scan Docker image vulnerabilities", "Build and push Docker image")
 	assertBefore(t, workflow, "Scan Docker FIPS image vulnerabilities", "Build and push Docker FIPS image")
+}
+
+func TestReleaseArtifactsCoverOSAndArchitectureMatrix(t *testing.T) {
+	goreleaser := readRepoFile(t, ".goreleaser.yaml")
+	makefile := readRepoFile(t, "Makefile")
+	verifyScript := readRepoFile(t, ".github/scripts/verify-release-assets.sh")
+
+	for _, want := range []string{"- linux", "- windows", "- darwin", "- amd64", "- arm64"} {
+		if !strings.Contains(goreleaser, want) {
+			t.Fatalf(".goreleaser.yaml missing %q", want)
+		}
+	}
+
+	if !strings.Contains(makefile, "PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64") {
+		t.Fatal("Makefile release matrix must include linux, darwin, and windows for amd64 and arm64")
+	}
+
+	requiredArchives := []string{
+		"ai-mr-comment_Linux_x86_64.tar.gz",
+		"ai-mr-comment_Linux_arm64.tar.gz",
+		"ai-mr-comment_Darwin_x86_64.tar.gz",
+		"ai-mr-comment_Darwin_arm64.tar.gz",
+		"ai-mr-comment_Windows_x86_64.zip",
+		"ai-mr-comment_Windows_arm64.zip",
+	}
+	for _, want := range requiredArchives {
+		if !strings.Contains(verifyScript, want) {
+			t.Fatalf("release asset verifier missing %q", want)
+		}
+	}
+	if strings.Contains(verifyScript, "at least 4 build archives") {
+		t.Fatal("release asset verifier still allows the old four-archive minimum")
+	}
 }
 
 func assertBefore(t *testing.T, haystack, first, second string) {
