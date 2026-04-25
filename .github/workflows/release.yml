@@ -147,6 +147,32 @@ jobs:
           IMAGE: pwbsladek/ai-mr-comment
         run: .github/scripts/compute-docker-tags.sh "${TAG}" "${IMAGE}"
 
+      - name: Build Docker image for vulnerability scan
+        if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: pwbsladek/ai-mr-comment:scan
+          build-args: |
+            VERSION=${{ needs.validate.outputs.tag }}
+            COMMIT=${{ needs.validate.outputs.tag_commit_short }}
+            COMMIT_FULL=${{ needs.validate.outputs.tag_commit }}
+            CREATED=${{ github.run_started_at }}
+
+      - name: Scan Docker image vulnerabilities
+        if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
+        uses: docker/scout-action@v1.18.2
+        with:
+          command: cves
+          image: local://pwbsladek/ai-mr-comment:scan
+          only-fixed: true
+          only-severities: critical,high
+          exit-code: true
+
       - name: Build and push Docker image
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
         id: docker_build
@@ -238,6 +264,33 @@ jobs:
           TAG: ${{ needs.validate.outputs.tag }}
           IMAGE: pwbsladek/ai-mr-comment
         run: .github/scripts/compute-docker-tags.sh "${TAG}" "${IMAGE}" "-fips"
+
+      - name: Build Docker FIPS image for vulnerability scan
+        if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: pwbsladek/ai-mr-comment:scan-fips
+          build-args: |
+            VERSION=${{ needs.validate.outputs.tag }}
+            COMMIT=${{ needs.validate.outputs.tag_commit_short }}
+            COMMIT_FULL=${{ needs.validate.outputs.tag_commit }}
+            CREATED=${{ github.run_started_at }}
+            GOFIPS140=v1.0.0
+
+      - name: Scan Docker FIPS image vulnerabilities
+        if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
+        uses: docker/scout-action@v1.18.2
+        with:
+          command: cves
+          image: local://pwbsladek/ai-mr-comment:scan-fips
+          only-fixed: true
+          only-severities: critical,high
+          exit-code: true
 
       - name: Build and push Docker FIPS image
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}

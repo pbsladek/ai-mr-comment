@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"strings"
@@ -185,6 +187,468 @@ func TestNewRootCmd_OutputToFile(t *testing.T) {
 	}
 }
 
+func TestNewRootCmd_CustomTemplateFlagUsesTemplateFile(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	tmp := t.TempDir()
+	if err := os.Mkdir(tmp+"/templates", 0o755); err != nil {
+		t.Fatalf("failed to create templates dir: %v", err)
+	}
+	if err := os.WriteFile(tmp+"/templates/custom.tmpl", []byte("custom review prompt"), 0o644); err != nil {
+		t.Fatalf("failed to write custom template: %v", err)
+	}
+	diffPath := tmp + "/change.diff"
+	if err := os.WriteFile(diffPath, []byte("diff --git a/a.txt b/a.txt\n+++ b/a.txt\n+hello\n"), 0o644); err != nil {
+		t.Fatalf("failed to write diff: %v", err)
+	}
+	t.Chdir(tmp)
+
+	var capturedPrompt string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, systemPrompt, _ string) (string, error) {
+		capturedPrompt = systemPrompt
+		return "mocked comment", nil
+	}
+
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--template=custom", "--file=" + diffPath, "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected custom template to be accepted, got %v", err)
+	}
+	if capturedPrompt != "custom review prompt" {
+		t.Fatalf("expected custom prompt, got %q", capturedPrompt)
+	}
+}
+
+func TestRootCmd_FileDashReadsStdin(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedDiff string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, diffContent string) (string, error) {
+		capturedDiff = diffContent
+		return "pipe review", nil
+	}
+
+	var out strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--file=-", "--provider=openai", "--plain"})
+	cmd.SetIn(strings.NewReader("diff --git a/a b/a\n+from stdin\n"))
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !strings.Contains(capturedDiff, "+from stdin") {
+		t.Fatalf("expected stdin diff to reach chat function, got %q", capturedDiff)
+	}
+	if strings.TrimSpace(out.String()) != "pipe review" {
+		t.Fatalf("expected plain review output, got %q", out.String())
+	}
+}
+
+func TestRootCmd_ImplicitPipeReadsStdin(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedDiff string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, diffContent string) (string, error) {
+		capturedDiff = diffContent
+		return "implicit pipe review", nil
+	}
+
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--provider=openai", "--plain"})
+	cmd.SetIn(strings.NewReader("diff --git a/a b/a\n+implicit stdin\n"))
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !strings.Contains(capturedDiff, "+implicit stdin") {
+		t.Fatalf("expected implicit stdin diff, got %q", capturedDiff)
+	}
+	if strings.HasPrefix(capturedDiff, "Branch: ") {
+		t.Fatalf("stdin diffs should not receive local branch prefix, got %q", capturedDiff)
+	}
+}
+
+func TestRootCmd_JSONInputMode(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedDiff string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, diffContent string) (string, error) {
+		capturedDiff = diffContent
+		return "json input review", nil
+	}
+
+	input := `{"title":"Add API","description":"Adds an endpoint","branch":"feat/API-1","diff":"diff --git a/api.go b/api.go\n+handler\n"}`
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--input=json", "--provider=openai", "--plain"})
+	cmd.SetIn(strings.NewReader(input))
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	for _, want := range []string{"Branch: feat/API-1", "PR Title: Add API", "PR Description: Adds an endpoint", "+handler"} {
+		if !strings.Contains(capturedDiff, want) {
+			t.Fatalf("expected JSON input to include %q, got %q", want, capturedDiff)
+		}
+	}
+}
+
+func TestRootCmd_QuietForcesStrictJSON(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, systemPrompt, _ string) (string, error) {
+		if systemPrompt == titlePrompt {
+			return "Generated title", nil
+		}
+		return "quiet review", nil
+	}
+
+	var out strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--quiet", "--file=-", "--provider=openai"})
+	cmd.SetIn(strings.NewReader("diff --git a/a b/a\n+quiet\n"))
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if strings.Contains(out.String(), "──") {
+		t.Fatalf("quiet output must not include text decorations, got %q", out.String())
+	}
+	var payload struct {
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Provider    string `json:"provider"`
+		DiffSource  string `json:"diff_source"`
+	}
+	if err := json.NewDecoder(strings.NewReader(out.String())).Decode(&payload); err != nil {
+		t.Fatalf("expected JSON output, got %v: %s", err, out.String())
+	}
+	if payload.Title != "Generated title" || payload.Description != "quiet review" || payload.Provider != "openai" || payload.DiffSource != "stdin" {
+		t.Fatalf("unexpected quiet payload: %+v", payload)
+	}
+}
+
+func TestRootCmd_PrintPromptAndRequestDoNotCallProvider(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	called := false
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		called = true
+		return "", nil
+	}
+
+	var promptOut strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--print-prompt", "--file=-", "--provider=openai"})
+	cmd.SetIn(strings.NewReader("diff --git a/a b/a\n+prompt\n"))
+	cmd.SetOut(&promptOut)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if called {
+		t.Fatal("provider should not be called for --print-prompt")
+	}
+	if !strings.Contains(promptOut.String(), "MR/PR") && !strings.Contains(strings.ToLower(promptOut.String()), "pull request") {
+		t.Fatalf("expected resolved prompt text, got %q", promptOut.String())
+	}
+
+	var requestOut strings.Builder
+	cmd = newRootCmd(fn)
+	cmd.SetArgs([]string{"--print-request", "--file=-", "--provider=openai"})
+	cmd.SetIn(strings.NewReader("diff --git a/a b/a\n+request\n"))
+	cmd.SetOut(&requestOut)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	var request struct {
+		Provider   string `json:"provider"`
+		Diff       string `json:"diff"`
+		DiffSource string `json:"diff_source"`
+	}
+	if err := json.NewDecoder(strings.NewReader(requestOut.String())).Decode(&request); err != nil {
+		t.Fatalf("expected request JSON, got %v: %s", err, requestOut.String())
+	}
+	if request.Provider != "openai" || request.DiffSource != "stdin" || !strings.Contains(request.Diff, "+request") {
+		t.Fatalf("unexpected request payload: %+v", request)
+	}
+}
+
+func TestRootCmd_JSONLStream(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "streamed review", nil
+	}
+
+	var out strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--stream=jsonl", "--file=-", "--provider=openai"})
+	cmd.SetIn(strings.NewReader("diff --git a/a b/a\n+stream\n"))
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 JSONL events, got %d: %q", len(lines), out.String())
+	}
+	var events []map[string]any
+	for _, line := range lines {
+		var event map[string]any
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("invalid JSONL line %q: %v", line, err)
+		}
+		events = append(events, event)
+	}
+	if events[0]["type"] != "start" || events[1]["type"] != "token" || events[2]["type"] != "done" {
+		t.Fatalf("unexpected event types: %#v", events)
+	}
+	if events[1]["text"] != "streamed review" {
+		t.Fatalf("expected token text, got %#v", events[1])
+	}
+}
+
+func TestAgentSubcommandsSupportPipes(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	tests := []struct {
+		name string
+		args []string
+		fn   func(context.Context, *Config, ApiProvider, string, string) (string, error)
+		want string
+	}{
+		{
+			name: "review",
+			args: []string{"review", "--file=-", "--provider=openai", "--plain"},
+			fn: func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+				return "review body", nil
+			},
+			want: "review body",
+		},
+		{
+			name: "title",
+			args: []string{"title", "--file=-", "--provider=openai"},
+			fn: func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+				if prompt != titlePrompt {
+					t.Fatalf("title subcommand used wrong prompt")
+				}
+				return "Only title", nil
+			},
+			want: "Only title",
+		},
+		{
+			name: "commit-message",
+			args: []string{"commit-message", "--file=-", "--provider=openai"},
+			fn: func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+				return "fix: pipe commit", nil
+			},
+			want: "fix: pipe commit",
+		},
+		{
+			name: "estimate",
+			args: []string{"estimate", "--file=-", "--provider=openai"},
+			fn: func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+				t.Fatalf("estimate subcommand should not call provider")
+				return "", nil
+			},
+			want: "Token & Cost Estimation:",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var out strings.Builder
+			cmd := newRootCmd(tc.fn)
+			cmd.SetArgs(tc.args)
+			cmd.SetIn(strings.NewReader("diff --git a/a b/a\n+subcommand\n"))
+			cmd.SetOut(&out)
+			cmd.SetErr(io.Discard)
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+			if !strings.Contains(out.String(), tc.want) {
+				t.Fatalf("expected output to contain %q, got %q", tc.want, out.String())
+			}
+		})
+	}
+}
+
+func TestAgentVerdictSubcommandReturnsExitCode(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "VERDICT: FAIL\nbad", nil
+	}
+
+	var out strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"verdict", "--file=-", "--provider=openai"})
+	cmd.SetIn(strings.NewReader("diff --git a/a b/a\n+bad\n"))
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	var exitErr exitCodeError
+	if !errors.As(err, &exitErr) || exitErr != 2 {
+		t.Fatalf("expected exit code 2, got %T %v", err, err)
+	}
+	if strings.TrimSpace(out.String()) != "FAIL" {
+		t.Fatalf("expected verdict-only output, got %q", out.String())
+	}
+}
+
+func TestRootCmd_ExitCodeContracts(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--format=xml", "--file=-", "--provider=openai"})
+	cmd.SetIn(strings.NewReader("diff --git a/a b/a\n+x\n"))
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	err := cmd.Execute()
+	var coded codedError
+	if !errors.As(err, &coded) || coded.ExitCode() != 4 {
+		t.Fatalf("expected invalid usage exit code 4, got %T %v", err, err)
+	}
+
+	cmd = newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"--file=-", "--provider=openai"})
+	cmd.SetIn(strings.NewReader("   \n"))
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	err = cmd.Execute()
+	if !errors.As(err, &coded) || coded.ExitCode() != 3 {
+		t.Fatalf("expected no-input exit code 3, got %T %v", err, err)
+	}
+}
+
+func TestE2E_PipeDiffToQuietJSONReview(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, diffContent string) (string, error) {
+		if prompt == titlePrompt {
+			return "Pipe title", nil
+		}
+		if !strings.Contains(diffContent, "+e2e") {
+			t.Fatalf("expected piped diff content, got %q", diffContent)
+		}
+		return "Pipe description", nil
+	}
+
+	var out strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--quiet", "--provider=openai"})
+	cmd.SetIn(strings.NewReader("diff --git a/e2e.go b/e2e.go\n+e2e\n"))
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(out.String()), &payload); err != nil {
+		t.Fatalf("expected JSON payload, got %v: %s", err, out.String())
+	}
+	if payload["title"] != "Pipe title" || payload["description"] != "Pipe description" || payload["diff_source"] != "stdin" {
+		t.Fatalf("unexpected e2e payload: %#v", payload)
+	}
+}
+
+func TestE2E_JSONInputToCommitMessageSubcommand(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedDiff string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, diffContent string) (string, error) {
+		capturedDiff = diffContent
+		return "feat: accept structured input", nil
+	}
+
+	var out strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"commit-message", "--input=json", "--provider=openai"})
+	cmd.SetIn(strings.NewReader(`{"branch":"feat/PIPE-9","diff":"diff --git a/a b/a\n+json e2e\n"}`))
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.TrimSpace(out.String()) != "feat: accept structured input" {
+		t.Fatalf("unexpected commit-message output: %q", out.String())
+	}
+	if !strings.Contains(capturedDiff, "Branch: feat/PIPE-9") || !strings.Contains(capturedDiff, "+json e2e") {
+		t.Fatalf("structured input did not reach provider as expected: %q", capturedDiff)
+	}
+}
+
+func TestChangelog_FileDashReadsStdin(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	var capturedDiff string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, diffContent string) (string, error) {
+		capturedDiff = diffContent
+		return "### Changed\n- Piped changelog.", nil
+	}
+
+	var out strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"changelog", "--file=-", "--provider=openai"})
+	cmd.SetIn(strings.NewReader("diff --git a/a b/a\n+changelog pipe\n"))
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(capturedDiff, "+changelog pipe") {
+		t.Fatalf("expected changelog stdin diff, got %q", capturedDiff)
+	}
+	if !strings.Contains(out.String(), "Piped changelog") {
+		t.Fatalf("expected changelog output, got %q", out.String())
+	}
+}
+
 func TestNewRootCmd_FileNotFound(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "dummy")
 	cmd := newRootCmd(dummyChatFn)
@@ -340,22 +804,22 @@ func TestDefaultAnthropicEndpointHasTrailingSlash(t *testing.T) {
 	}
 }
 
-func TestNewRootCmd_TemplateFlag(t *testing.T) {
+func TestNewRootCmd_UnknownTemplateFallsBackToDefault(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "dummy")
 	cmd := newRootCmd(dummyChatFn)
 	cmd.SetArgs([]string{"--file=testdata/diff.txt", "--provider=openai", "--template=nonexistent"})
 
+	var errBuf strings.Builder
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
 	cmd.SetOut(io.Discard)
-	cmd.SetErr(io.Discard)
+	cmd.SetErr(&errBuf)
 
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error for unknown template, got nil")
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected unknown template to fall back to default, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "unknown template") {
-		t.Errorf("expected unknown template error, got: %v", err)
+	if !strings.Contains(errBuf.String(), "falling back to default") {
+		t.Fatalf("expected fallback warning, got %q", errBuf.String())
 	}
 }
 
@@ -1532,6 +1996,75 @@ func TestQuickCommit_DryRun(t *testing.T) {
 	}
 }
 
+func TestQuickCommit_InvalidFormatRejected(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	called := false
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		called = true
+		return "chore: update config", nil
+	}
+
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--dry-run", "--format=xml", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "unsupported format") {
+		t.Fatalf("expected unsupported format error, got %v", err)
+	}
+	if called {
+		t.Fatal("chat function should not be called for invalid format")
+	}
+}
+
+func TestQuickCommit_JSONIncludesProviderAndModel(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	skipIfDetachedHead(t)
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "chore: update config", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--chaos", "--dry-run", "--format=json", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var result struct {
+		CommitMessage string `json:"commit_message"`
+		Provider      string `json:"provider"`
+		Model         string `json:"model"`
+	}
+	if err := json.NewDecoder(strings.NewReader(buf.String())).Decode(&result); err != nil {
+		t.Fatalf("invalid JSON output: %v\nraw: %s", err, buf.String())
+	}
+	if result.CommitMessage != "chore: update config" {
+		t.Fatalf("expected commit message, got %q", result.CommitMessage)
+	}
+	if result.Provider != "openai" {
+		t.Fatalf("expected provider openai, got %q", result.Provider)
+	}
+	if result.Model == "" {
+		t.Fatal("expected model in JSON output")
+	}
+}
+
 // TestQuickCommit_DryRun_BranchPrefix verifies that the branch name is
 // prepended to the diff content passed to the AI.
 func TestQuickCommit_DryRun_BranchPrefix(t *testing.T) {
@@ -1839,71 +2372,51 @@ func TestExitCodeFlag_MutualExclusion(t *testing.T) {
 	}
 }
 
-// TestExitCodeFlag_Fail verifies that the process exits with code 2 when the AI
-// returns VERDICT: FAIL. Uses the subprocess test pattern to observe os.Exit.
+// TestExitCodeFlag_Fail verifies that the command returns a typed exit-code
+// error when the AI returns VERDICT: FAIL.
 func TestExitCodeFlag_Fail(t *testing.T) {
-	if os.Getenv("AI_MR_EXIT_CODE_SUBPROCESS") == "1" {
-		// Running as subprocess: execute the logic that calls os.Exit(2).
-		fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
-			return "VERDICT: FAIL\nbad code detected", nil
-		}
-		t.Setenv("OPENAI_API_KEY", "dummy")
-		cmd := newRootCmd(fn)
-		cmd.SetArgs([]string{"--exit-code", "--file=testdata/simple.diff", "--provider=openai"})
-		cmd.SetOut(io.Discard)
-		cmd.SetErr(io.Discard)
-		cmd.SilenceUsage = true
-		cmd.SilenceErrors = true
-		_ = cmd.Execute()
-		// If os.Exit(2) is not called, we fall through and exit 0 — test will catch this.
-		return
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "VERDICT: FAIL\nbad code detected", nil
 	}
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--exit-code", "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
 
-	proc := exec.Command(os.Args[0], "-test.run=TestExitCodeFlag_Fail", "-test.v")
-	proc.Env = append(os.Environ(), "AI_MR_EXIT_CODE_SUBPROCESS=1")
-	err := proc.Run()
-	if err == nil {
-		t.Fatal("expected process to exit with non-zero code, got nil")
+	err := cmd.Execute()
+	var exitErr exitCodeError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected exitCodeError, got %T: %v", err, err)
 	}
-	exitErr, ok := err.(*exec.ExitError)
-	if !ok {
-		t.Fatalf("expected *exec.ExitError, got %T: %v", err, err)
-	}
-	if exitErr.ExitCode() != 2 {
-		t.Errorf("expected exit code 2, got %d", exitErr.ExitCode())
+	if exitErr != 2 {
+		t.Errorf("expected exit code 2, got %d", exitErr)
 	}
 }
 
 // TestExitCodeFlag_MissingVerdictFailsClosed verifies missing verdict lines are
-// treated as FAIL and exit with code 2 when --exit-code is set.
+// treated as FAIL and return exit code 2 when --exit-code is set.
 func TestExitCodeFlag_MissingVerdictFailsClosed(t *testing.T) {
-	if os.Getenv("AI_MR_EXIT_CODE_SUBPROCESS_MISSING_VERDICT") == "1" {
-		fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
-			return "review body without verdict", nil
-		}
-		t.Setenv("OPENAI_API_KEY", "dummy")
-		cmd := newRootCmd(fn)
-		cmd.SetArgs([]string{"--exit-code", "--file=testdata/simple.diff", "--provider=openai"})
-		cmd.SetOut(io.Discard)
-		cmd.SetErr(io.Discard)
-		cmd.SilenceUsage = true
-		cmd.SilenceErrors = true
-		_ = cmd.Execute()
-		return
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "review body without verdict", nil
 	}
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--exit-code", "--file=testdata/simple.diff", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
 
-	proc := exec.Command(os.Args[0], "-test.run=TestExitCodeFlag_MissingVerdictFailsClosed", "-test.v")
-	proc.Env = append(os.Environ(), "AI_MR_EXIT_CODE_SUBPROCESS_MISSING_VERDICT=1")
-	err := proc.Run()
-	if err == nil {
-		t.Fatal("expected process to exit with non-zero code, got nil")
+	err := cmd.Execute()
+	var exitErr exitCodeError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected exitCodeError, got %T: %v", err, err)
 	}
-	exitErr, ok := err.(*exec.ExitError)
-	if !ok {
-		t.Fatalf("expected *exec.ExitError, got %T: %v", err, err)
-	}
-	if exitErr.ExitCode() != 2 {
-		t.Errorf("expected exit code 2, got %d", exitErr.ExitCode())
+	if exitErr != 2 {
+		t.Errorf("expected exit code 2, got %d", exitErr)
 	}
 }
 
@@ -1926,6 +2439,71 @@ func TestPostFlag_RequiresPR(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--post requires --pr") {
 		t.Errorf("expected '--post requires --pr' error, got: %v", err)
+	}
+}
+
+func TestPostFlag_OutputStillPosts(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	const rawDiff = "diff --git a/foo.go b/foo.go\n+++ b/foo.go\n+fmt.Println(\"hello\")\n"
+	var postedBody string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v3/repos/owner/repo/pulls/42", func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.Header.Get("Accept"), "diff") {
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte(rawDiff))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"title": "My PR", "body": "Body"})
+	})
+	mux.HandleFunc("/api/v3/repos/owner/repo/issues/42/comments", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		var payload struct {
+			Body string `json:"body"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("failed to decode posted body: %v", err)
+		}
+		postedBody = payload.Body
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":1}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	if err := os.WriteFile(tmpHome+"/.ai-mr-comment.toml", []byte(fmt.Sprintf("github_base_url = %q\n", srv.URL)), 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	outFile := t.TempDir() + "/review.txt"
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "review body", nil
+	}
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--pr=" + srv.URL + "/owner/repo/pull/42", "--post", "--output=" + outFile, "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("expected output file: %v", err)
+	}
+	if string(data) != "review body" {
+		t.Fatalf("expected output file to contain review body, got %q", string(data))
+	}
+	if postedBody != "review body" {
+		t.Fatalf("expected posted body, got %q", postedBody)
 	}
 }
 

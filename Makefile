@@ -14,7 +14,7 @@ PLATFORMS := linux/amd64 darwin/amd64 darwin/arm64 windows/amd64
 # Raise this ceiling deliberately if you add large deps; shrink it to lock in gains.
 MAX_BINARY_BYTES := 36700160
 
-.PHONY: all clean build fetch-tags release test test-cover test-integration test-integration-ollama test-integration-ollama-8b test-fuzz lint lint-shell test-run quick-commit run-debug changelog gen-aliases install install-completion-bash install-completion-zsh check-size help docker-build docker-build-fips docker-run docker-run-fips docker-quick-commit profile-cpu profile-mem profile-bench
+.PHONY: all clean build fetch-tags release test test-cover test-integration test-integration-ollama test-integration-ollama-8b test-fuzz lint lint-shell test-run quick-commit run-debug changelog gen-aliases install install-completion-bash install-completion-zsh check-size help docker-build docker-build-fips docker-scout docker-scout-fips docker-run docker-run-fips docker-quick-commit profile-cpu profile-mem profile-bench
 
 all: build
 
@@ -178,6 +178,12 @@ docker-build-fips: ## Build the FIPS Docker image (IMAGE=name TAG=tag-fips)
 		--build-arg COMMIT_FULL=$(COMMIT_FULL) \
 		--build-arg GOFIPS140=v1.0.0 \
 		-t $(DOCKER_IMAGE):$(DOCKER_TAG)-fips .
+
+docker-scout: docker-build ## Scan Docker image for fixable critical/high CVEs
+	docker scout cves --only-fixed --only-severity critical,high --exit-code local://$(DOCKER_IMAGE):$(DOCKER_TAG)
+
+docker-scout-fips: docker-build-fips ## Scan FIPS Docker image for fixable critical/high CVEs
+	docker scout cves --only-fixed --only-severity critical,high --exit-code local://$(DOCKER_IMAGE):$(DOCKER_TAG)-fips
 
 docker-run: docker-build ## Build image and run with current repo mounted (ARGS="--provider openai")
 	docker run $(DOCKER_RUN_FLAGS) \

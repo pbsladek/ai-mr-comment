@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
@@ -45,11 +46,12 @@ type Config struct {
 	CodexCLIModel  string `mapstructure:"codex_cli_model"`
 	CodexCLIPath   string `mapstructure:"codex_cli_path"`
 
-	OpenAIEndpoint    string      `mapstructure:"openai_endpoint"`
-	AnthropicEndpoint string      `mapstructure:"anthropic_endpoint"`
-	OllamaEndpoint    string      `mapstructure:"ollama_endpoint"`
-	Provider          ApiProvider `mapstructure:"provider"`
-	Template          string      `mapstructure:"template"`
+	OpenAIEndpoint    string        `mapstructure:"openai_endpoint"`
+	AnthropicEndpoint string        `mapstructure:"anthropic_endpoint"`
+	OllamaEndpoint    string        `mapstructure:"ollama_endpoint"`
+	Provider          ApiProvider   `mapstructure:"provider"`
+	Template          string        `mapstructure:"template"`
+	RequestTimeout    time.Duration `mapstructure:"request_timeout"`
 
 	// DebugWriter is the output destination for verbose debug messages.
 	// Nil when verbose mode is disabled. Set by the CLI after config load; never read from TOML.
@@ -115,7 +117,7 @@ func loadConfigWith(v *viper.Viper, profile string) (*Config, error) {
 	v.SetDefault("openai_endpoint", "https://api.openai.com/v1/")
 	v.SetDefault("anthropic_model", "claude-sonnet-4-6")
 	v.SetDefault("anthropic_endpoint", "https://api.anthropic.com/")
-	v.SetDefault("ollama_model", "llama3")
+	v.SetDefault("ollama_model", "llama3.2")
 	v.SetDefault("ollama_endpoint", "http://localhost:11434/api/generate")
 	v.SetDefault("gemini_model", "gemini-2.5-flash")
 	v.SetDefault("claude_cli_model", "claude-sonnet-4-6")
@@ -125,6 +127,7 @@ func loadConfigWith(v *viper.Viper, profile string) (*Config, error) {
 	v.SetDefault("codex_cli_model", "")
 	v.SetDefault("codex_cli_path", "")
 	v.SetDefault("template", "default")
+	v.SetDefault("request_timeout", "0s")
 
 	if err := v.ReadInConfig(); err != nil {
 		var configParseError viper.ConfigParseError

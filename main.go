@@ -61,9 +61,47 @@ var debugWriterMu sync.Mutex
 
 func main() {
 	if err := newRootCmd(chatCompletions).Execute(); err != nil {
+		var exitErr interface{ ExitCode() int }
+		if errors.As(err, &exitErr) {
+			os.Exit(exitErr.ExitCode())
+		}
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+type exitCodeError int
+
+func (e exitCodeError) Error() string {
+	return fmt.Sprintf("exit code %d", int(e))
+}
+
+func (e exitCodeError) ExitCode() int {
+	return int(e)
+}
+
+type codedError struct {
+	code int
+	err  error
+}
+
+func (e codedError) Error() string {
+	return e.err.Error()
+}
+
+func (e codedError) Unwrap() error {
+	return e.err
+}
+
+func (e codedError) ExitCode() int {
+	return e.code
+}
+
+func withExitCode(code int, err error) error {
+	if err == nil {
+		return nil
+	}
+	return codedError{code: code, err: err}
 }
 
 // parseVerdict extracts the VERDICT line prepended by the AI when --exit-code is
@@ -252,11 +290,80 @@ func normalizeCommitBody(raw string) string {
 	return subject
 }
 
+type agentInput struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Diff        string `json:"diff"`
+	Branch      string `json:"branch"`
+}
+
+func commandStdinIsPiped(cmd *cobra.Command) bool {
+	in := cmd.InOrStdin()
+	f, ok := in.(*os.File)
+	if !ok {
+		return true
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice == 0
+}
+
+func readCommandInput(cmd *cobra.Command, path string) (string, error) {
+	if path != "" && path != "-" {
+		return readDiffFromFile(path)
+	}
+	b, err := io.ReadAll(cmd.InOrStdin())
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func decodeAgentInput(raw string) (string, error) {
+	var in agentInput
+	if err := json.Unmarshal([]byte(raw), &in); err != nil {
+		return "", fmt.Errorf("invalid JSON input: %w", err)
+	}
+	if strings.TrimSpace(in.Diff) == "" {
+		return "", errors.New("invalid JSON input: diff is required")
+	}
+	var sb strings.Builder
+	if strings.TrimSpace(in.Branch) != "" {
+		sb.WriteString("Branch: ")
+		sb.WriteString(strings.TrimSpace(in.Branch))
+		sb.WriteString("\n\n")
+	}
+	if strings.TrimSpace(in.Title) != "" {
+		sb.WriteString("PR Title: ")
+		sb.WriteString(strings.TrimSpace(in.Title))
+		sb.WriteByte('\n')
+	}
+	if strings.TrimSpace(in.Description) != "" {
+		sb.WriteString("PR Description: ")
+		sb.WriteString(strings.TrimSpace(in.Description))
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString(in.Diff)
+	return sb.String(), nil
+}
+
+func encodeJSONLine(w io.Writer, typ string, fields map[string]any) error {
+	if fields == nil {
+		fields = map[string]any{}
+	}
+	fields["type"] = typ
+	return json.NewEncoder(w).Encode(fields)
+}
+
 // newRootCmd builds the root cobra command, wiring flags to the provided chatFn.
 // Accepting chatFn as a parameter allows tests to inject a mock without real API calls.
 func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
 	var commit, diffFilePath, outputPath, provider, modelOverride, templateName, format, prURL, clipboardFlag, systemPromptFlag, profileName string
+	var inputFormat, streamMode string
 	var debug, staged, smartChunk, generateTitle, generateCommitMsg, multiLine, verbose, exitCodeFlag, postFlag, estimate, autoYes, versionFlag bool
+	var quiet, plain, printPrompt, printRequest, verdictOnly, titleOnly bool
 	var mrChaos, mrHaiku, mrRoast bool
 	var mrIntern, mrShakespeare, mrManager, mrYoda, mrExcuse bool
 	var exclude []string
@@ -300,45 +407,25 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			if cfgErr := validateProviderConfig(cfg); cfgErr != nil {
 				return cfgErr
 			}
+			if cancel := applyRequestTimeout(cmd, cfg); cancel != nil {
+				defer cancel()
+			}
+			if quiet {
+				format = "json"
+			}
 			if staged && commit != "" {
-				return errors.New("--staged and --commit are mutually exclusive")
+				return withExitCode(4, errors.New("--staged and --commit are mutually exclusive"))
 			}
 			if prURL != "" && (staged || commit != "" || diffFilePath != "") {
-				return errors.New("--pr cannot be combined with --staged, --commit, or --file")
+				return withExitCode(4, errors.New("--pr cannot be combined with --staged, --commit, or --file"))
 			}
 			if multiLine && !generateCommitMsg {
-				return errors.New("--multi-line requires --commit-msg")
+				return withExitCode(4, errors.New("--multi-line requires --commit-msg"))
 			}
-			// validTemplates is the explicit allowlist of user-facing --template values.
-			// Internal prompts (internal-commit-msg, internal-quick-commit-*, etc.) are
-			// not listed here and cannot be selected via --template.
-			validTemplates := map[string]bool{
-				"default":             true,
-				"conventional":        true,
-				"technical":           true,
-				"user-focused":        true,
-				"emoji":               true,
-				"sassy":               true,
-				"monday":              true,
-				"jira":                true,
-				"commit":              true,
-				"commit-emoji":        true,
-				"commit-conventional": true,
-				"chaos":               true,
-				"haiku":               true,
-				"roast":               true,
-				"intern":              true,
-				"shakespeare":         true,
-				"manager":             true,
-				"yoda":                true,
-				"excuse":              true,
-			}
-			if !validTemplates[templateName] {
-				return fmt.Errorf("unknown template %q — valid templates: default, conventional, technical, user-focused, emoji, sassy, monday, jira, commit, commit-emoji, commit-conventional, chaos, haiku, roast, intern, shakespeare, manager, yoda, excuse", templateName)
-			}
+			effectiveTemplate := cfg.Template
 			commitOnlyTemplates := map[string]bool{"commit": true, "commit-emoji": true, "commit-conventional": true}
-			if commitOnlyTemplates[templateName] && !generateCommitMsg {
-				return fmt.Errorf("--template %s requires --commit-msg", templateName)
+			if commitOnlyTemplates[effectiveTemplate] && !generateCommitMsg {
+				return fmt.Errorf("--template %s requires --commit-msg", effectiveTemplate)
 			}
 			mrOnlyTemplates := map[string]bool{
 				"technical": true, "user-focused": true, "emoji": true, "sassy": true,
@@ -346,20 +433,23 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				"chaos": true, "haiku": true, "roast": true, "intern": true,
 				"shakespeare": true, "manager": true, "yoda": true, "excuse": true,
 			}
-			if mrOnlyTemplates[templateName] && generateCommitMsg {
-				return fmt.Errorf("--template %s cannot be combined with --commit-msg", templateName)
+			if mrOnlyTemplates[effectiveTemplate] && generateCommitMsg {
+				return fmt.Errorf("--template %s cannot be combined with --commit-msg", effectiveTemplate)
 			}
 			if generateCommitMsg && generateTitle {
-				return errors.New("--commit-msg and --title cannot be used together")
+				return withExitCode(4, errors.New("--commit-msg and --title cannot be used together"))
+			}
+			if titleOnly && generateCommitMsg {
+				return withExitCode(4, errors.New("--title-only cannot be used with --commit-msg"))
 			}
 			if exitCodeFlag && generateCommitMsg {
-				return errors.New("--exit-code cannot be used with --commit-msg")
+				return withExitCode(4, errors.New("--exit-code cannot be used with --commit-msg"))
 			}
 			if postFlag && prURL == "" {
-				return errors.New("--post requires --pr to specify a GitHub PR or GitLab MR URL")
+				return withExitCode(4, errors.New("--post requires --pr to specify a GitHub PR or GitLab MR URL"))
 			}
 			if cmd.Flags().Changed("system-prompt") && cmd.Flags().Changed("template") {
-				return errors.New("--system-prompt and --template are mutually exclusive")
+				return withExitCode(4, errors.New("--system-prompt and --template are mutually exclusive"))
 			}
 			mrStyleFlags := []bool{mrChaos, mrHaiku, mrRoast, mrIntern, mrShakespeare, mrManager, mrYoda, mrExcuse}
 			funStyleCount := 0
@@ -369,24 +459,46 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				}
 			}
 			if funStyleCount > 1 {
-				return errors.New("--chaos, --haiku, --roast, --intern, --shakespeare, --manager, --yoda, and --excuse are mutually exclusive")
+				return withExitCode(4, errors.New("--chaos, --haiku, --roast, --intern, --shakespeare, --manager, --yoda, and --excuse are mutually exclusive"))
 			}
 			if funStyleCount > 0 && (cmd.Flags().Changed("template") || cmd.Flags().Changed("system-prompt")) {
-				return errors.New("style flags cannot be combined with --template or --system-prompt")
+				return withExitCode(4, errors.New("style flags cannot be combined with --template or --system-prompt"))
 			}
 			if funStyleCount > 0 && generateCommitMsg {
-				return errors.New("style flags cannot be combined with --commit-msg")
+				return withExitCode(4, errors.New("style flags cannot be combined with --commit-msg"))
 			}
 
 			if format != "text" && format != "json" {
-				return fmt.Errorf("unsupported format %q: must be text or json", format)
+				return withExitCode(4, fmt.Errorf("unsupported format %q: must be text or json", format))
+			}
+			if inputFormat == "" {
+				inputFormat = "text"
+			}
+			if inputFormat != "text" && inputFormat != "json" {
+				return withExitCode(4, fmt.Errorf("unsupported input format %q: must be text or json", inputFormat))
+			}
+			if streamMode != "" && streamMode != "jsonl" {
+				return withExitCode(4, fmt.Errorf("unsupported stream mode %q: must be jsonl", streamMode))
+			}
+			if streamMode == "jsonl" && outputPath != "" {
+				return withExitCode(4, errors.New("--stream=jsonl cannot be combined with --output"))
 			}
 
 			var diffContent string
 			var diffSource string
 			diffFetchStart := time.Now()
 			err = nil
-			if prURL != "" {
+			if inputFormat == "json" {
+				if prURL != "" || staged || commit != "" {
+					return withExitCode(4, errors.New("--input=json cannot be combined with --pr, --staged, or --commit"))
+				}
+				diffSource = "json"
+				var rawInput string
+				rawInput, err = readCommandInput(cmd, diffFilePath)
+				if err == nil {
+					diffContent, err = decodeAgentInput(rawInput)
+				}
+			} else if prURL != "" {
 				switch {
 				case isGitHubURL(prURL):
 					diffSource = "github-pr: " + prURL
@@ -398,8 +510,15 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 					return fmt.Errorf("unsupported URL %q: must be a GitHub PR (/pull/) or GitLab MR (/-/merge_requests/) URL", prURL)
 				}
 			} else if diffFilePath != "" {
-				diffSource = "file: " + diffFilePath
-				diffContent, err = readDiffFromFile(diffFilePath)
+				if diffFilePath == "-" {
+					diffSource = "stdin"
+				} else {
+					diffSource = "file: " + diffFilePath
+				}
+				diffContent, err = readCommandInput(cmd, diffFilePath)
+			} else if commandStdinIsPiped(cmd) {
+				diffSource = "stdin"
+				diffContent, err = readCommandInput(cmd, "-")
 			} else {
 				if !isGitRepo() {
 					return fmt.Errorf("not a git repository. Run from inside a git repo or use --file to provide a diff")
@@ -420,9 +539,9 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			}
 			if strings.TrimSpace(diffContent) == "" {
 				if staged {
-					return fmt.Errorf("no staged changes found. Stage your changes with 'git add' first")
+					return withExitCode(3, fmt.Errorf("no staged changes found. Stage your changes with 'git add' first"))
 				}
-				return fmt.Errorf("no diff found. Make sure you have uncommitted changes or specify a commit range with --commit")
+				return withExitCode(3, fmt.Errorf("no diff found. Make sure you have uncommitted changes or specify a commit range with --commit"))
 			}
 			debugLog(cfg, "diff: source=%s bytes=%d", diffSource, len(diffContent))
 
@@ -430,7 +549,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			// This lets the AI and templates reference the branch/ticket number
 			// (e.g. "feat/ABC-123-add-login") for linking in systems like Jira.
 			// Skipped for --file and --pr since those have no local branch context.
-			if prURL == "" && diffFilePath == "" {
+			if prURL == "" && diffFilePath == "" && diffSource != "stdin" && diffSource != "json" {
 				if branch, branchErr := getCurrentBranch(); branchErr == nil && branch != "" {
 					diffContent = "Branch: " + branch + "\n\n" + diffContent
 					debugLog(cfg, "branch: name=%s", branch)
@@ -446,11 +565,12 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			diffLines := strings.Split(diffContent, "\n")
 			rawLines := len(diffLines)
 			diffContent = truncateDiff(diffLines, 4000)
+			diffTruncated := rawLines > 4000
 			debugLog(cfg, "diff: lines before truncation=%d after=%d (max=4000)", rawLines, strings.Count(diffContent, "\n")+1)
 
 			systemPrompt, templateErr := NewPromptTemplate(cfg.Template)
 			if templateErr != nil {
-				_, _ = fmt.Fprintln(os.Stderr, "Warning:", templateErr)
+				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Warning:", templateErr)
 			}
 			templateSource := "embedded"
 			if cfg.Template != "default" {
@@ -507,6 +627,33 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				systemPrompt = exitCodePreamble + systemPrompt
 			}
 
+			if printPrompt {
+				_, _ = fmt.Fprint(out, systemPrompt)
+				if !strings.HasSuffix(systemPrompt, "\n") {
+					_, _ = fmt.Fprintln(out)
+				}
+				return nil
+			}
+
+			if printRequest {
+				request := struct {
+					Provider     string `json:"provider"`
+					Model        string `json:"model"`
+					SystemPrompt string `json:"system_prompt"`
+					Diff         string `json:"diff"`
+					DiffSource   string `json:"diff_source"`
+					Template     string `json:"template"`
+				}{
+					Provider:     string(cfg.Provider),
+					Model:        getModelName(cfg),
+					SystemPrompt: systemPrompt,
+					Diff:         diffContent,
+					DiffSource:   diffSource,
+					Template:     cfg.Template,
+				}
+				return json.NewEncoder(out).Encode(request)
+			}
+
 			if debug {
 				showCostEstimate(cmd.Context(), cfg, systemPrompt, diffContent, out)
 				return nil
@@ -527,7 +674,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			// text format is selected, smart-chunk is off, and no output file is set.
 			// All other paths use the buffered chatFn to get the full response first.
 			isTTY := term.IsTerminal(int(os.Stdout.Fd()))
-			shouldStream := isTTY && format == "text" && !smartChunk && outputPath == ""
+			shouldStream := isTTY && format == "text" && streamMode == "" && !smartChunk && outputPath == ""
 			debugLog(cfg, "streaming: tty=%v format=%s smart-chunk=%v output-file=%q → enabled=%v",
 				isTTY, format, smartChunk, outputPath, shouldStream)
 			// streamedOK is set to true only when streaming completes successfully.
@@ -537,13 +684,24 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			var comment string
 			var title string
 			var commitMessage string
-			if generateCommitMsg {
+			if titleOnly {
+				title, err = timedCall(cfg, "title", func() (string, error) {
+					return chatFn(cmd.Context(), cfg, cfg.Provider, titlePrompt, diffContent)
+				})
+				if err != nil {
+					if cfg.Provider == Ollama && strings.Contains(err.Error(), "connection refused") {
+						return fmt.Errorf("failed to connect to Ollama at %s.\nMake sure Ollama is running (try 'ollama serve') or check your configuration", cfg.OllamaEndpoint)
+					}
+					return err
+				}
+				title = strings.TrimSpace(title)
+			} else if generateCommitMsg {
 				// Skip description generation; produce only a commit message.
 				debugLog(cfg, "commit-msg: generating commit message with separate API call (multi-line=%v)", multiLine)
 				prompt := commitMsgPrompt
 				if multiLine {
 					prompt = commitMsgBodyPrompt
-				} else if commitOnlyTemplates[templateName] {
+				} else if commitOnlyTemplates[effectiveTemplate] {
 					prompt = systemPrompt
 				}
 				commitMessage, err = timedCall(cfg, "commit-msg", func() (string, error) {
@@ -643,7 +801,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 					})
 				}
 			}
-			if !generateCommitMsg && err != nil {
+			if !generateCommitMsg && !titleOnly && err != nil {
 				if cfg.Provider == Ollama && strings.Contains(err.Error(), "connection refused") {
 					return fmt.Errorf("failed to connect to Ollama at %s.\nMake sure Ollama is running (try 'ollama serve') or check your configuration", cfg.OllamaEndpoint)
 				}
@@ -655,7 +813,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			// Skip title generation entirely when --commit-msg is active.
 			// NOTE: title may already be set above by the parallel path; this block
 			// only runs for the streaming case where the comment was written token-by-token.
-			if (generateTitle || format == "json") && !generateCommitMsg && title == "" {
+			if (generateTitle || format == "json") && !generateCommitMsg && !titleOnly && title == "" {
 				debugLog(cfg, "title: generating title after stream")
 				title, err = timedCall(cfg, "title", func() (string, error) {
 					return chatFn(cmd.Context(), cfg, cfg.Provider, titlePrompt, diffContent)
@@ -700,13 +858,25 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				Verdict       string `json:"verdict,omitempty"`
 				Provider      string `json:"provider"`
 				Model         string `json:"model"`
+				DiffSource    string `json:"diff_source,omitempty"`
+				Truncated     bool   `json:"truncated,omitempty"`
 			}
 			var payload outputJSON
-			if generateCommitMsg {
+			if titleOnly {
+				payload = outputJSON{
+					Title:      title,
+					Provider:   string(cfg.Provider),
+					Model:      getModelName(cfg),
+					DiffSource: diffSource,
+					Truncated:  diffTruncated,
+				}
+			} else if generateCommitMsg {
 				payload = outputJSON{
 					CommitMessage: commitMessage,
 					Provider:      string(cfg.Provider),
 					Model:         getModelName(cfg),
+					DiffSource:    diffSource,
+					Truncated:     diffTruncated,
 				}
 			} else {
 				payload = outputJSON{
@@ -716,16 +886,71 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 					Verdict:     verdict,
 					Provider:    string(cfg.Provider),
 					Model:       getModelName(cfg),
+					DiffSource:  diffSource,
+					Truncated:   diffTruncated,
 				}
 			}
 
-			if format == "json" {
+			if verdictOnly {
+				if format == "json" {
+					if err := json.NewEncoder(out).Encode(struct {
+						Verdict    string `json:"verdict"`
+						Provider   string `json:"provider"`
+						Model      string `json:"model"`
+						DiffSource string `json:"diff_source,omitempty"`
+						Truncated  bool   `json:"truncated,omitempty"`
+					}{
+						Verdict:    verdict,
+						Provider:   string(cfg.Provider),
+						Model:      getModelName(cfg),
+						DiffSource: diffSource,
+						Truncated:  diffTruncated,
+					}); err != nil {
+						return err
+					}
+				} else {
+					_, _ = fmt.Fprintln(out, verdict)
+				}
+			} else if streamMode == "jsonl" {
+				if err := encodeJSONLine(out, "start", map[string]any{
+					"provider":    string(cfg.Provider),
+					"model":       getModelName(cfg),
+					"diff_source": diffSource,
+					"truncated":   diffTruncated,
+				}); err != nil {
+					return err
+				}
+				if titleOnly {
+					if err := encodeJSONLine(out, "token", map[string]any{"text": title}); err != nil {
+						return err
+					}
+				} else if generateCommitMsg {
+					if err := encodeJSONLine(out, "token", map[string]any{"text": commitMessage}); err != nil {
+						return err
+					}
+				} else {
+					if err := encodeJSONLine(out, "token", map[string]any{"text": comment}); err != nil {
+						return err
+					}
+				}
+				if err := encodeJSONLine(out, "done", map[string]any{"result": payload}); err != nil {
+					return err
+				}
+			} else if format == "json" {
 				if err := json.NewEncoder(out).Encode(payload); err != nil {
 					return err
 				}
+			} else if titleOnly {
+				_, _ = fmt.Fprintln(out, title)
 			} else if generateCommitMsg {
 				// --commit-msg text output: just the message, no headers, clean for shell piping.
 				_, _ = fmt.Fprintln(out, commitMessage)
+			} else if plain {
+				if title != "" {
+					_, _ = fmt.Fprintln(out, title)
+					_, _ = fmt.Fprintln(out)
+				}
+				_, _ = fmt.Fprintln(out, comment)
 			} else if streamedOK {
 				// Streaming succeeded: body was already written token-by-token.
 				_, _ = fmt.Fprintln(out)
@@ -784,12 +1009,16 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 						return encErr
 					}
 					fileContent = buf.Bytes()
+				} else if titleOnly {
+					fileContent = []byte(title + "\n")
 				} else if generateCommitMsg {
 					fileContent = []byte(commitMessage + "\n")
 				} else {
 					fileContent = []byte(comment)
 				}
-				return os.WriteFile(outputPath, fileContent, 0600)
+				if err := os.WriteFile(outputPath, fileContent, 0600); err != nil {
+					return err
+				}
 			}
 
 			// --post: publish the generated comment back to the GitHub PR or GitLab MR.
@@ -814,7 +1043,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 
 			// --exit-code: non-zero exit when AI verdict is FAIL.
 			if exitCodeFlag && verdict == "FAIL" {
-				os.Exit(2)
+				return exitCodeError(2)
 			}
 			return nil
 		},
@@ -833,6 +1062,17 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().StringVar(&clipboardFlag, "clipboard", "", "Copy to clipboard: title, description, or all")
 	rootCmd.Flags().StringArrayVar(&exclude, "exclude", nil, "Exclude files matching pattern (e.g. vendor/**, *.sum). Can be repeated.")
 	rootCmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")
+	rootCmd.Flags().StringVar(&inputFormat, "input", "text", "Input format: text or json")
+	rootCmd.Flags().StringVar(&streamMode, "stream", "", "Structured stream mode: jsonl")
+	rootCmd.Flags().BoolVar(&quiet, "quiet", false, "Machine mode: emit JSON on stdout and route diagnostics to stderr")
+	rootCmd.Flags().BoolVar(&plain, "plain", false, "Suppress text section headers and decorations")
+	rootCmd.Flags().BoolVar(&plain, "no-decorate", false, "Alias for --plain")
+	rootCmd.Flags().BoolVar(&printPrompt, "print-prompt", false, "Print the resolved system prompt and exit without calling the provider")
+	rootCmd.Flags().BoolVar(&printRequest, "print-request", false, "Print the resolved provider request as JSON and exit without calling the provider")
+	rootCmd.Flags().BoolVar(&verdictOnly, "verdict-only", false, "Print only the parsed verdict when used with --exit-code")
+	_ = rootCmd.Flags().MarkHidden("verdict-only")
+	rootCmd.Flags().BoolVar(&titleOnly, "title-only", false, "Print only a generated title")
+	_ = rootCmd.Flags().MarkHidden("title-only")
 	rootCmd.Flags().BoolVar(&smartChunk, "smart-chunk", false, "Split large diffs by file, summarize each, then combine")
 	rootCmd.Flags().BoolVar(&generateTitle, "title", false, "Generate a concise MR/PR title in addition to the comment")
 	rootCmd.Flags().BoolVar(&generateCommitMsg, "commit-msg", false, "Generate a git commit message instead of a full MR/PR description")
@@ -858,6 +1098,11 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.AddCommand(newCheckCmd(chatFn))
 	rootCmd.AddCommand(newQuickCommitCmd(chatFn))
 	rootCmd.AddCommand(newChangelogCmd(chatFn))
+	rootCmd.AddCommand(newAgentAliasCmd("review", "Generate a review from a diff", nil, chatFn))
+	rootCmd.AddCommand(newAgentAliasCmd("title", "Generate only a PR/MR title", []string{"--title-only", "--plain"}, chatFn))
+	rootCmd.AddCommand(newAgentAliasCmd("commit-message", "Generate only a commit message", []string{"--commit-msg"}, chatFn))
+	rootCmd.AddCommand(newAgentAliasCmd("verdict", "Generate only a PASS/FAIL verdict", []string{"--exit-code", "--verdict-only", "--plain"}, chatFn))
+	rootCmd.AddCommand(newAgentAliasCmd("estimate", "Estimate prompt tokens and input cost", []string{"--debug"}, chatFn))
 	rootCmd.AddCommand(newGenAliasesCmd())
 	rootCmd.AddCommand(newGenWorkflowCmd())
 
@@ -885,6 +1130,29 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	return rootCmd
 }
 
+func newAgentAliasCmd(name, short string, prefix []string, chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
+	return &cobra.Command{
+		Use:                name,
+		Short:              short,
+		DisableFlagParsing: true,
+		SilenceErrors:      true,
+		SilenceUsage:       true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root := newRootCmd(chatFn)
+			root.SetIn(cmd.InOrStdin())
+			root.SetOut(cmd.OutOrStdout())
+			root.SetErr(cmd.ErrOrStderr())
+			root.SilenceErrors = true
+			root.SilenceUsage = true
+			translated := make([]string, 0, len(prefix)+len(args))
+			translated = append(translated, prefix...)
+			translated = append(translated, args...)
+			root.SetArgs(translated)
+			return root.Execute()
+		},
+	}
+}
+
 // defaultConfigTOML is the template written by the init-config subcommand.
 // It documents every supported key with its default value.
 const defaultConfigTOML = `# ai-mr-comment configuration
@@ -897,6 +1165,10 @@ provider = "anthropic"
 # Built-in options: default | conventional | technical | user-focused | emoji | sassy | monday
 # You can also create custom templates in ~/.config/ai-mr-comment/templates/<name>.tmpl
 template = "default"
+
+# Optional timeout for network/CLI provider calls. Use Go duration syntax, e.g. "2m" or "30s".
+# "0s" disables the timeout and preserves the provider/client default behavior.
+request_timeout = "0s"
 
 # --- OpenAI ---
 # openai_api_key = ""   # or set OPENAI_API_KEY env var
@@ -1069,6 +1341,15 @@ func validateProviderConfig(cfg *Config) error {
 	}
 	// Delegate API key validation to validateAPIKey (same check used by chatCompletions).
 	return validateAPIKey(cfg.Provider, cfg)
+}
+
+func applyRequestTimeout(cmd *cobra.Command, cfg *Config) context.CancelFunc {
+	if cfg.RequestTimeout <= 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), cfg.RequestTimeout)
+	cmd.SetContext(ctx)
+	return cancel
 }
 
 // debugLog writes a formatted debug message to cfg.DebugWriter when verbose mode is enabled.
@@ -1281,6 +1562,12 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			if cfgErr := validateProviderConfig(cfg); cfgErr != nil {
 				return cfgErr
 			}
+			if cancel := applyRequestTimeout(cmd, cfg); cancel != nil {
+				defer cancel()
+			}
+			if format != "text" && format != "json" {
+				return fmt.Errorf("unsupported format %q: must be text or json", format)
+			}
 			if postFlag && dryRun {
 				return errors.New("--post cannot be combined with --dry-run")
 			}
@@ -1434,7 +1721,13 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			if format == "json" {
 				if err := json.NewEncoder(out).Encode(struct {
 					CommitMessage string `json:"commit_message"`
-				}{CommitMessage: jsonMsg}); err != nil {
+					Provider      string `json:"provider"`
+					Model         string `json:"model"`
+				}{
+					CommitMessage: jsonMsg,
+					Provider:      string(cfg.Provider),
+					Model:         getModelName(cfg),
+				}); err != nil {
 					return err
 				}
 			} else {
@@ -1656,6 +1949,9 @@ Examples:
 			out := cmd.OutOrStdout()
 
 			if all {
+				if cancel := applyRequestTimeout(cmd, cfg); cancel != nil {
+					defer cancel()
+				}
 				return runCheckAll(cmd.Context(), cfg, chatFn, out)
 			}
 
@@ -1707,6 +2003,9 @@ Examples:
 			// Validate config before attempting the live call.
 			if cfgErr := validateProviderConfig(cfg); cfgErr != nil {
 				return fmt.Errorf("config error: %w", cfgErr)
+			}
+			if cancel := applyRequestTimeout(cmd, cfg); cancel != nil {
+				defer cancel()
 			}
 
 			_, _ = fmt.Fprintln(out, "Sending ping...")

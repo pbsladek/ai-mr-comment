@@ -1,8 +1,11 @@
 # syntax=docker/dockerfile:1
 
-FROM dhi.io/golang:1.26-debian13-dev@sha256:7c7ee6a2db0fa9a332ba1c96f2cc11b53dc7535a899ce66e45391db4dfa26350 AS builder
+FROM dhi.io/golang:1.26-debian13-dev@sha256:086c893153f92793f3a1541793cd4a8e8b23bfd4ccaf70c8f4261f496080fb0e AS builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    apt-get install -y --no-install-recommends git ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
 
@@ -20,7 +23,7 @@ RUN CGO_ENABLED=0 GOFIPS140=${GOFIPS140} go build \
       -ldflags="-s -w -X 'main.Version=${VERSION}' -X 'main.Commit=${COMMIT}' -X 'main.CommitFull=${COMMIT_FULL}'" \
       -o /out/ai-mr-comment .
 
-FROM dhi.io/debian-base:trixie-debian13-dev@sha256:2166e2eaef0651c9ad21de6ab5a34fda12541d89bccf7bcb0a94afceb1b1541b
+FROM dhi.io/debian-base:trixie-debian13-dev@sha256:9415967aa0ed8adea8b5c048994259d1982026dca143d0303c7bbe0e11ed67d3
 
 ARG VERSION=dev
 ARG COMMIT_FULL=unknown
@@ -39,6 +42,7 @@ LABEL org.opencontainers.image.title="ai-mr-comment" \
       org.opencontainers.image.base.name="dhi.io/debian-base:trixie-debian13-dev"
 
 RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
     apt-get install -y --no-install-recommends git ca-certificates && \
     rm -rf /var/lib/apt/lists/* && \
     sed -i '/^nonroot:/d' /etc/passwd && \

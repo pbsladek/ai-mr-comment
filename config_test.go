@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -62,6 +63,30 @@ func TestLoadConfig_DefaultsWhenMissingFile(t *testing.T) {
 	}
 	if cfg.AnthropicModel != "claude-sonnet-4-6" {
 		t.Errorf("expected Anthropic model claude-sonnet-4-6, got %v", cfg.AnthropicModel)
+	}
+	if cfg.OllamaModel != "llama3.2" {
+		t.Errorf("expected Ollama model llama3.2, got %v", cfg.OllamaModel)
+	}
+	if cfg.RequestTimeout != 0 {
+		t.Errorf("expected request timeout 0, got %v", cfg.RequestTimeout)
+	}
+}
+
+func TestLoadConfig_RequestTimeout(t *testing.T) {
+	v := viper.New()
+	v.SetConfigType("toml")
+	configPath := filepath.Join(t.TempDir(), ".ai-mr-comment.toml")
+	v.SetConfigFile(configPath)
+	if err := os.WriteFile(configPath, []byte(`request_timeout = "45s"`), 0o644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	cfg, err := loadConfigWith(v, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.RequestTimeout != 45*time.Second {
+		t.Fatalf("expected 45s timeout, got %v", cfg.RequestTimeout)
 	}
 }
 
