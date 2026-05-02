@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -20,8 +21,10 @@ type changelogArgs struct {
 	format           string
 	systemPromptFlag string
 	profile          string
+	preset           string
 	estimate         bool
 	autoYes          bool
+	dryRun           bool
 }
 
 // runChangelog executes the changelog generation logic.
@@ -30,6 +33,10 @@ func runChangelog(cmd *cobra.Command, a changelogArgs, chatFn func(context.Conte
 	if err != nil {
 		return err
 	}
+	presetPromptSuffix, err := applyChangelogPreset(cmd, a.preset, cfg, &a.format)
+	if err != nil {
+		return withExitCode(4, err)
+	}
 	if cmd.Flags().Changed("provider") {
 		cfg.Provider = ApiProvider(a.provider)
 	}
@@ -37,8 +44,13 @@ func runChangelog(cmd *cobra.Command, a changelogArgs, chatFn func(context.Conte
 		setModelOverride(cfg, a.modelOverride)
 	}
 
-	if cfgErr := validateProviderConfig(cfg); cfgErr != nil {
-		return cfgErr
+	if !isSupportedProvider(cfg.Provider) {
+		return fmt.Errorf("unsupported provider: %s", cfg.Provider)
+	}
+	if !a.dryRun {
+		if cfgErr := validateProviderConfig(cfg); cfgErr != nil {
+			return cfgErr
+		}
 	}
 	if cancel := applyRequestTimeout(cmd, cfg); cancel != nil {
 		defer cancel()
@@ -47,16 +59,27 @@ func runChangelog(cmd *cobra.Command, a changelogArgs, chatFn func(context.Conte
 	if a.format != "text" && a.format != "json" {
 		return fmt.Errorf("unsupported format %q: must be text or json", a.format)
 	}
+	if a.dryRun && a.estimate {
+		return withExitCode(4, errors.New("changelog --dry-run cannot be combined with --estimate"))
+	}
 
 	diffContent, err := resolveDiff(cmd, a.commit, a.diffFilePath)
 	if err != nil {
 		return err
 	}
+	rawSummary := summarizeDiff(diffContent, "changelog", getModelName(cfg), len(strings.Split(diffContent, "\n")) > 4000)
 	diffContent = processDiff(diffContent, 4000)
 
 	prompt, err := resolveChangelogPrompt(a.systemPromptFlag)
 	if err != nil {
 		return err
+	}
+	if presetPromptSuffix != "" && a.systemPromptFlag == "" {
+		prompt += presetPromptSuffix
+	}
+
+	if a.dryRun {
+		return writeChangelogDryRun(cmd, cfg, a, rawSummary, prompt)
 	}
 
 	if a.estimate {
@@ -78,6 +101,44 @@ func runChangelog(cmd *cobra.Command, a changelogArgs, chatFn func(context.Conte
 	entry = strings.TrimSpace(entry)
 
 	return writeChangelogOutput(cmd, cfg, a.outputPath, a.format, entry)
+}
+
+func writeChangelogDryRun(cmd *cobra.Command, cfg *Config, a changelogArgs, summary diffSummary, prompt string) error {
+	out := cmd.OutOrStdout()
+	if a.format == "json" {
+		return json.NewEncoder(out).Encode(struct {
+			DryRun            bool        `json:"dry_run"`
+			Provider          string      `json:"provider"`
+			Model             string      `json:"model"`
+			Preset            string      `json:"preset,omitempty"`
+			Summary           diffSummary `json:"summary"`
+			WouldCallProvider bool        `json:"would_call_provider"`
+			WouldWriteOutput  bool        `json:"would_write_output"`
+			PromptBytes       int         `json:"prompt_bytes"`
+		}{
+			DryRun:            true,
+			Provider:          string(cfg.Provider),
+			Model:             getModelName(cfg),
+			Preset:            a.preset,
+			Summary:           summary,
+			WouldCallProvider: true,
+			WouldWriteOutput:  a.outputPath != "",
+			PromptBytes:       len(prompt),
+		})
+	}
+	_, _ = fmt.Fprintln(out, "Dry run: no provider call or file write will be performed.")
+	_, _ = fmt.Fprintf(out, "- Provider: %s\n", cfg.Provider)
+	_, _ = fmt.Fprintf(out, "- Model: %s\n", getModelName(cfg))
+	if a.preset != "" {
+		_, _ = fmt.Fprintf(out, "- Preset: %s\n", a.preset)
+	}
+	_, _ = fmt.Fprintf(out, "- Files: %d\n", summary.FileCount)
+	_, _ = fmt.Fprintf(out, "- Additions: %d\n", summary.Additions)
+	_, _ = fmt.Fprintf(out, "- Deletions: %d\n", summary.Deletions)
+	if a.outputPath != "" {
+		_, _ = fmt.Fprintf(out, "- Would write output: %s\n", a.outputPath)
+	}
+	return nil
 }
 
 // resolveDiff obtains diff content from a file path, commit range, or working tree.
@@ -188,8 +249,14 @@ Examples:
 	cmd.Flags().StringVar(&a.modelOverride, "model", "", "Override the model for this run")
 	cmd.Flags().StringVar(&a.format, "format", "text", "Output format: text or json")
 	cmd.Flags().StringVar(&a.systemPromptFlag, "system-prompt", "", `Override the system prompt for this run. Use @path to read from a file (e.g. --system-prompt=@notes.txt).`)
+	cmd.Flags().StringVar(&a.preset, "preset", "", "Preset defaults: ci, local-fast, security, release-notes")
 	cmd.Flags().BoolVar(&a.estimate, "estimate", false, "Show token/cost estimate and prompt for confirmation before calling the API")
 	cmd.Flags().BoolVarP(&a.autoYes, "yes", "y", false, "Auto-confirm the cost estimate prompt (use with --estimate)")
+	cmd.Flags().BoolVar(&a.dryRun, "dry-run", false, "Print what would happen without calling the provider or writing files")
 	cmd.Flags().StringVar(&a.profile, "profile", "", "Named config profile to activate (defined in ~/.ai-mr-comment.toml under [profile.<name>])")
+	_ = cmd.RegisterFlagCompletionFunc("provider", completeValues(providerNames))
+	_ = cmd.RegisterFlagCompletionFunc("format", completeValues([]string{"text", "json"}))
+	_ = cmd.RegisterFlagCompletionFunc("preset", completeValues(presetNames))
+	_ = cmd.RegisterFlagCompletionFunc("profile", completeProfiles)
 	return cmd
 }

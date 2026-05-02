@@ -537,6 +537,41 @@ func TestGetMRDiff_PaginatesDiffs(t *testing.T) {
 	}
 }
 
+func TestGetMRDiff_AddsGitLabFileMetadata(t *testing.T) {
+	rawDiff := "@@ -1 +1 @@\n-old\n+new\n"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/mygroup%2Fmyproject/merge_requests/5", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"title": "My MR Title", "description": "MR description"})
+	})
+	mux.HandleFunc("/api/v4/projects/mygroup%2Fmyproject/merge_requests/5/diffs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
+			"old_path":     "old name.go",
+			"new_path":     "new name.go",
+			"renamed_file": true,
+			"diff":         rawDiff,
+		}})
+	})
+
+	gl := newTestGitLabClient(t, mux)
+	result, err := getMRDiffWithClient(context.Background(), gl, "https://gitlab.com/mygroup/myproject/-/merge_requests/5")
+	if err != nil {
+		t.Fatalf("getMRDiff: unexpected error: %v", err)
+	}
+	if !strings.Contains(result, `diff --git "a/old name.go" "b/new name.go"`) {
+		t.Fatalf("expected synthetic diff --git metadata, got: %q", result)
+	}
+	if !strings.Contains(result, `--- "a/old name.go"`) || !strings.Contains(result, `+++ "b/new name.go"`) {
+		t.Fatalf("expected synthetic file headers, got: %q", result)
+	}
+	summary := summarizeDiff(result, "gitlab", "model", false)
+	if summary.FileCount != 1 || summary.Files[0].Path != "new name.go" {
+		t.Fatalf("expected GitLab metadata to summarize new path, got %+v", summary.Files)
+	}
+}
+
 func TestGetMRDiff_InvalidURL(t *testing.T) {
 	gl, _ := gogitlab.NewClient("")
 	_, err := getMRDiffWithClient(context.Background(), gl, "https://notgitlab.com/g/p/-/merge_requests/1")
@@ -834,6 +869,36 @@ func TestPostGitHubPRComment_APIError(t *testing.T) {
 	}
 }
 
+func TestUpdateGitHubPRMetadata(t *testing.T) {
+	var received struct {
+		Title string `json:"title"`
+		Body  string `json:"body"`
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/owner/repo/pulls/42", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"number": 42, "title": received.Title, "body": received.Body})
+	})
+
+	gh := newTestGitHubClient(t, mux)
+	title := "feat: update title"
+	body := "Updated PR body"
+	if err := updateGitHubPRMetadataWithClient(context.Background(), gh, "https://github.com/owner/repo/pull/42", &title, &body); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if received.Title != title || received.Body != body {
+		t.Fatalf("unexpected metadata payload: %+v", received)
+	}
+}
+
 // TestPostGitLabMRNote verifies that postGitLabMRNoteWithClient sends a POST
 // to the correct GitLab Notes endpoint with the expected body.
 func TestPostGitLabMRNote(t *testing.T) {
@@ -881,6 +946,74 @@ func TestPostGitLabMRNote_APIError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "posting GitLab MR note") {
 		t.Errorf("expected error to mention 'posting GitLab MR note', got: %v", err)
+	}
+}
+
+func TestUpdateGitLabMRMetadata(t *testing.T) {
+	var received struct {
+		Title       string `json:"title"`
+		Description string `json:"description"`
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/mygroup%2Fmyproject/merge_requests/5", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"iid": 5, "title": received.Title, "description": received.Description})
+	})
+
+	gl := newTestGitLabClient(t, mux)
+	title := "feat: update title"
+	description := "Updated MR description"
+	if err := updateGitLabMRMetadataWithClient(context.Background(), gl, "https://gitlab.com/mygroup/myproject/-/merge_requests/5", &title, &description); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if received.Title != title || received.Description != description {
+		t.Fatalf("unexpected metadata payload: %+v", received)
+	}
+}
+
+func TestUpsertGitLabMRNoteUpdatesManagedNote(t *testing.T) {
+	var updatedBody string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/mygroup%2Fmyproject/merge_requests/5/notes", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 7, "body": managedCommentMarker + "\nold"}})
+	})
+	mux.HandleFunc("/api/v4/projects/mygroup%2Fmyproject/merge_requests/5/notes/7", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var payload struct {
+			Body string `json:"body"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		updatedBody = payload.Body
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": 7, "body": payload.Body})
+	})
+
+	gl := newTestGitLabClient(t, mux)
+	body := managedCommentMarker + "\nnew body"
+	if err := upsertGitLabMRNoteWithClient(context.Background(), gl, "https://gitlab.com/mygroup/myproject/-/merge_requests/5", managedCommentMarker, body); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if updatedBody != body {
+		t.Fatalf("expected note update body %q, got %q", body, updatedBody)
 	}
 }
 

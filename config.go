@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"time"
 
 	"github.com/go-viper/mapstructure/v2"
@@ -90,6 +91,28 @@ func loadConfigForProfile(profile string) (*Config, error) {
 	_ = v.BindEnv("gitlab_base_url", "GITLAB_BASE_URL")
 
 	return loadConfigWith(v, profile)
+}
+
+func listConfigProfiles() []string {
+	v := viper.New()
+	v.SetConfigName(".ai-mr-comment")
+	v.SetConfigType("toml")
+	v.AddConfigPath(".")
+	v.AddConfigPath("$HOME")
+	if err := v.ReadInConfig(); err != nil {
+		return nil
+	}
+	sub := v.Sub("profile")
+	if sub == nil {
+		return nil
+	}
+	settings := sub.AllSettings()
+	profiles := make([]string, 0, len(settings))
+	for name := range settings {
+		profiles = append(profiles, name)
+	}
+	sort.Strings(profiles)
+	return profiles
 }
 
 // applyProfile overlays values from [profile.<name>] in v onto the base config.

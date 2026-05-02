@@ -10,9 +10,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -357,12 +360,351 @@ func encodeJSONLine(w io.Writer, typ string, fields map[string]any) error {
 	return json.NewEncoder(w).Encode(fields)
 }
 
+type diffFileSummary struct {
+	Path      string `json:"path"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+	Binary    bool   `json:"binary,omitempty"`
+}
+
+type diffSummary struct {
+	Source     string            `json:"source"`
+	Files      []diffFileSummary `json:"files"`
+	FileCount  int               `json:"file_count"`
+	Additions  int               `json:"additions"`
+	Deletions  int               `json:"deletions"`
+	Lines      int               `json:"lines"`
+	Bytes      int               `json:"bytes"`
+	Truncated  bool              `json:"truncated"`
+	TokenModel string            `json:"token_model,omitempty"`
+}
+
+func summarizeDiff(diffContent, source, model string, truncated bool) diffSummary {
+	summary := diffSummary{
+		Source:     source,
+		Lines:      strings.Count(diffContent, "\n") + 1,
+		Bytes:      len(diffContent),
+		Truncated:  truncated,
+		TokenModel: model,
+	}
+	current := -1
+	oldPath := ""
+	binaryPatch := false
+	for _, line := range strings.Split(diffContent, "\n") {
+		if strings.HasPrefix(line, "diff --git ") {
+			if _, path, ok := parseDiffGitPaths(line); ok {
+				summary.Files = append(summary.Files, diffFileSummary{Path: path})
+				current = len(summary.Files) - 1
+			}
+			oldPath = ""
+			binaryPatch = false
+			continue
+		}
+		if strings.HasPrefix(line, "Binary files ") {
+			if current >= 0 {
+				summary.Files[current].Binary = true
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "GIT binary patch") {
+			if current >= 0 {
+				summary.Files[current].Binary = true
+			}
+			binaryPatch = true
+			continue
+		}
+		if binaryPatch {
+			continue
+		}
+		if strings.HasPrefix(line, "--- ") {
+			path := cleanDiffPath(strings.TrimPrefix(line, "--- "))
+			if path != "/dev/null" {
+				oldPath = path
+			}
+			if current == -1 && path != "/dev/null" {
+				summary.Files = append(summary.Files, diffFileSummary{Path: path})
+				current = len(summary.Files) - 1
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "+++ ") {
+			path := cleanDiffPath(strings.TrimPrefix(line, "+++ "))
+			if path == "/dev/null" {
+				path = oldPath
+			}
+			if current == -1 {
+				if path == "" {
+					path = "/dev/null"
+				}
+				summary.Files = append(summary.Files, diffFileSummary{Path: path})
+				current = len(summary.Files) - 1
+				continue
+			}
+			if path != "" && path != "/dev/null" {
+				summary.Files[current].Path = path
+			} else if summary.Files[current].Path == "/dev/null" && oldPath != "" {
+				summary.Files[current].Path = oldPath
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++ ") {
+			summary.Additions++
+			if current >= 0 {
+				summary.Files[current].Additions++
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "--- ") {
+			summary.Deletions++
+			if current >= 0 {
+				summary.Files[current].Deletions++
+			}
+		}
+	}
+	if len(summary.Files) == 0 && strings.TrimSpace(diffContent) != "" {
+		summary.Files = append(summary.Files, diffFileSummary{Path: "(input)"})
+	}
+	summary.FileCount = len(summary.Files)
+	return summary
+}
+
+func parseDiffGitPaths(line string) (oldPath, newPath string, ok bool) {
+	rest := strings.TrimSpace(strings.TrimPrefix(line, "diff --git "))
+	first, rest, ok := nextDiffPathToken(rest)
+	if !ok {
+		return "", "", false
+	}
+	second, _, ok := nextDiffPathToken(rest)
+	if !ok {
+		return "", "", false
+	}
+	return cleanDiffPath(first), cleanDiffPath(second), true
+}
+
+func nextDiffPathToken(s string) (token, rest string, ok bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", "", false
+	}
+	if s[0] != '"' {
+		if strings.HasPrefix(s, "a/") {
+			if idx := strings.LastIndex(s, " b/"); idx > 0 {
+				return s[:idx], s[idx+1:], true
+			}
+		}
+		if idx := strings.IndexByte(s, ' '); idx >= 0 {
+			return s[:idx], s[idx+1:], true
+		}
+		return s, "", true
+	}
+	escaped := false
+	for i := 1; i < len(s); i++ {
+		switch {
+		case escaped:
+			escaped = false
+		case s[i] == '\\':
+			escaped = true
+		case s[i] == '"':
+			return s[:i+1], s[i+1:], true
+		}
+	}
+	return "", "", false
+}
+
+func cleanDiffPath(path string) string {
+	path = strings.TrimSpace(path)
+	if unquoted, err := strconv.Unquote(path); err == nil {
+		path = unquoted
+	}
+	switch {
+	case strings.HasPrefix(path, "a/"):
+		path = strings.TrimPrefix(path, "a/")
+	case strings.HasPrefix(path, "b/"):
+		path = strings.TrimPrefix(path, "b/")
+	}
+	return path
+}
+
+func sanitizeRemoteURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.User == nil {
+		return raw
+	}
+	u.User = nil
+	return u.String()
+}
+
+func writeDiffSummary(cmd *cobra.Command, summary diffSummary, format string, changedFilesOnly bool) error {
+	out := cmd.OutOrStdout()
+	content, err := renderDiffSummary(summary, format, changedFilesOnly)
+	if err != nil {
+		return err
+	}
+	_, err = out.Write(content)
+	return err
+}
+
+func renderDiffSummary(summary diffSummary, format string, changedFilesOnly bool) ([]byte, error) {
+	var buf bytes.Buffer
+	if format == "json" {
+		if changedFilesOnly {
+			files := make([]string, 0, len(summary.Files))
+			for _, f := range summary.Files {
+				files = append(files, f.Path)
+			}
+			err := json.NewEncoder(&buf).Encode(struct {
+				Source string   `json:"source"`
+				Files  []string `json:"files"`
+			}{Source: summary.Source, Files: files})
+			return buf.Bytes(), err
+		}
+		err := json.NewEncoder(&buf).Encode(summary)
+		return buf.Bytes(), err
+	}
+	if changedFilesOnly {
+		for _, f := range summary.Files {
+			_, _ = fmt.Fprintln(&buf, f.Path)
+		}
+		return buf.Bytes(), nil
+	}
+	_, _ = fmt.Fprintf(&buf, "Diff summary\n")
+	_, _ = fmt.Fprintf(&buf, "- Source: %s\n", summary.Source)
+	_, _ = fmt.Fprintf(&buf, "- Files: %d\n", summary.FileCount)
+	_, _ = fmt.Fprintf(&buf, "- Lines: %d\n", summary.Lines)
+	_, _ = fmt.Fprintf(&buf, "- Bytes: %d\n", summary.Bytes)
+	_, _ = fmt.Fprintf(&buf, "- Additions: %d\n", summary.Additions)
+	_, _ = fmt.Fprintf(&buf, "- Deletions: %d\n", summary.Deletions)
+	_, _ = fmt.Fprintf(&buf, "- Truncated: %v\n", summary.Truncated)
+	_, _ = fmt.Fprintln(&buf, "\nChanged files:")
+	for _, f := range summary.Files {
+		if f.Binary {
+			_, _ = fmt.Fprintf(&buf, "- %s (binary)\n", f.Path)
+		} else {
+			_, _ = fmt.Fprintf(&buf, "- %s (+%d/-%d)\n", f.Path, f.Additions, f.Deletions)
+		}
+	}
+	return buf.Bytes(), nil
+}
+
+func writeDiffSummaryToFile(path string, summary diffSummary, format string, changedFilesOnly bool) error {
+	content, err := renderDiffSummary(summary, format, changedFilesOnly)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, content, 0600)
+}
+
+var presetNames = []string{"ci", "local-fast", "security", "release-notes"}
+var providerNames = []string{"openai", "anthropic", "gemini", "ollama", "claude-cli", "gemini-cli", "codex-cli"}
+var templateNames = []string{"default", "conventional", "technical", "user-focused", "emoji", "sassy", "monday", "jira", "commit", "commit-emoji", "commit-conventional", "chaos", "haiku", "roast", "intern", "shakespeare", "manager", "yoda", "excuse"}
+
+func completeValues(values []string) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+	return func(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		matches := make([]string, 0, len(values))
+		for _, value := range values {
+			if strings.HasPrefix(value, toComplete) {
+				matches = append(matches, value)
+			}
+		}
+		return matches, cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
+func completeProfiles(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	profiles := listConfigProfiles()
+	matches := make([]string, 0, len(profiles))
+	for _, profile := range profiles {
+		if strings.HasPrefix(profile, toComplete) {
+			matches = append(matches, profile)
+		}
+	}
+	return matches, cobra.ShellCompDirectiveNoFileComp
+}
+
+func applyRootPreset(cmd *cobra.Command, name string, cfg *Config, format *string, exitCodeFlag, plain, generateTitle *bool) (promptSuffix string, err error) {
+	switch name {
+	case "":
+		return "", nil
+	case "ci":
+		if !cmd.Flags().Changed("format") {
+			*format = "json"
+		}
+		if !cmd.Flags().Changed("exit-code") {
+			*exitCodeFlag = true
+		}
+		if !cmd.Flags().Changed("template") {
+			cfg.Template = "technical"
+		}
+	case "local-fast":
+		if !cmd.Flags().Changed("provider") {
+			cfg.Provider = Ollama
+		}
+		if !cmd.Flags().Changed("model") {
+			cfg.OllamaModel = "llama3.2"
+		}
+		if !cmd.Flags().Changed("plain") && !cmd.Flags().Changed("no-decorate") {
+			*plain = true
+		}
+	case "security":
+		if !cmd.Flags().Changed("template") {
+			cfg.Template = "technical"
+		}
+		promptSuffix = "\n\nFocus especially on security vulnerabilities, unsafe defaults, credential exposure, injection risks, authorization bugs, and data handling issues."
+	case "release-notes":
+		if !cmd.Flags().Changed("template") {
+			cfg.Template = "user-focused"
+		}
+		if !cmd.Flags().Changed("title") {
+			*generateTitle = true
+		}
+	default:
+		return "", fmt.Errorf("unknown preset %q: choose from %s", name, strings.Join(presetNames, ", "))
+	}
+	return promptSuffix, nil
+}
+
+func applyChangelogPreset(cmd *cobra.Command, name string, cfg *Config, format *string) (promptSuffix string, err error) {
+	switch name {
+	case "":
+		return "", nil
+	case "ci":
+		if !cmd.Flags().Changed("format") {
+			*format = "json"
+		}
+	case "local-fast":
+		if !cmd.Flags().Changed("provider") {
+			cfg.Provider = Ollama
+		}
+		if !cmd.Flags().Changed("model") {
+			cfg.OllamaModel = "llama3.2"
+		}
+	case "security":
+		promptSuffix = "\n\nCall out security-relevant changes, mitigations, and user-visible risk reductions clearly."
+	case "release-notes":
+		// The changelog command is already release-note oriented.
+	default:
+		return "", fmt.Errorf("unknown preset %q: choose from %s", name, strings.Join(presetNames, ", "))
+	}
+	return promptSuffix, nil
+}
+
+func isSupportedProvider(provider ApiProvider) bool {
+	switch provider {
+	case OpenAI, Anthropic, Gemini, Ollama, ClaudeCLI, GeminiCLI, CodexCLI:
+		return true
+	default:
+		return false
+	}
+}
+
 // newRootCmd builds the root cobra command, wiring flags to the provided chatFn.
 // Accepting chatFn as a parameter allows tests to inject a mock without real API calls.
 func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
-	var commit, diffFilePath, outputPath, provider, modelOverride, templateName, format, prURL, clipboardFlag, systemPromptFlag, profileName string
+	var commit, diffFilePath, outputPath, provider, modelOverride, templateName, format, prURL, clipboardFlag, systemPromptFlag, profileName, presetName string
 	var inputFormat, streamMode string
-	var debug, staged, smartChunk, generateTitle, generateCommitMsg, multiLine, verbose, exitCodeFlag, postFlag, estimate, autoYes, versionFlag bool
+	var debug, staged, smartChunk, generateTitle, generateCommitMsg, multiLine, verbose, exitCodeFlag, postFlag, estimate, autoYes, versionFlag, dryRun bool
+	var updateTitleFlag, updateDescriptionFlag bool
+	var changedFilesOnly, summaryOnly bool
 	var quiet, plain, printPrompt, printRequest, verdictOnly, titleOnly bool
 	var mrChaos, mrHaiku, mrRoast bool
 	var mrIntern, mrShakespeare, mrManager, mrYoda, mrExcuse bool
@@ -382,6 +724,10 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			cfg, err := loadConfigForProfile(profileName)
 			if err != nil {
 				return err
+			}
+			presetPromptSuffix, err := applyRootPreset(cmd, presetName, cfg, &format, &exitCodeFlag, &plain, &generateTitle)
+			if err != nil {
+				return withExitCode(4, err)
 			}
 			if cmd.Flags().Changed("provider") {
 				cfg.Provider = ApiProvider(provider)
@@ -404,8 +750,26 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			}
 			debugLog(cfg, "config: file=%s provider=%s model=%s template=%s", configFile, cfg.Provider, getModelName(cfg), cfg.Template)
 
-			if cfgErr := validateProviderConfig(cfg); cfgErr != nil {
-				return cfgErr
+			if !isSupportedProvider(cfg.Provider) {
+				return errors.New("unsupported provider: " + string(cfg.Provider))
+			}
+			if postFlag && prURL == "" && !dryRun {
+				return withExitCode(4, errors.New("--post requires --pr to specify a GitHub PR or GitLab MR URL"))
+			}
+			if (updateTitleFlag || updateDescriptionFlag) && prURL == "" && !dryRun {
+				return withExitCode(4, errors.New("--update-title and --update-description require --pr to specify a GitHub PR or GitLab MR URL"))
+			}
+			if (updateTitleFlag || updateDescriptionFlag) && generateCommitMsg {
+				return withExitCode(4, errors.New("--update-title and --update-description cannot be used with --commit-msg"))
+			}
+			if updateDescriptionFlag && titleOnly {
+				return withExitCode(4, errors.New("--update-description cannot be used with --title-only"))
+			}
+			metadataOnly := dryRun || changedFilesOnly || summaryOnly || debug || printPrompt || printRequest
+			if !metadataOnly {
+				if cfgErr := validateProviderConfig(cfg); cfgErr != nil {
+					return cfgErr
+				}
 			}
 			if cancel := applyRequestTimeout(cmd, cfg); cancel != nil {
 				defer cancel()
@@ -445,8 +809,17 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			if exitCodeFlag && generateCommitMsg {
 				return withExitCode(4, errors.New("--exit-code cannot be used with --commit-msg"))
 			}
-			if postFlag && prURL == "" {
+			if postFlag && prURL == "" && !dryRun {
 				return withExitCode(4, errors.New("--post requires --pr to specify a GitHub PR or GitLab MR URL"))
+			}
+			if (updateTitleFlag || updateDescriptionFlag) && prURL == "" && !dryRun {
+				return withExitCode(4, errors.New("--update-title and --update-description require --pr to specify a GitHub PR or GitLab MR URL"))
+			}
+			if (updateTitleFlag || updateDescriptionFlag) && generateCommitMsg {
+				return withExitCode(4, errors.New("--update-title and --update-description cannot be used with --commit-msg"))
+			}
+			if updateDescriptionFlag && titleOnly {
+				return withExitCode(4, errors.New("--update-description cannot be used with --title-only"))
 			}
 			if cmd.Flags().Changed("system-prompt") && cmd.Flags().Changed("template") {
 				return withExitCode(4, errors.New("--system-prompt and --template are mutually exclusive"))
@@ -482,6 +855,15 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			}
 			if streamMode == "jsonl" && outputPath != "" {
 				return withExitCode(4, errors.New("--stream=jsonl cannot be combined with --output"))
+			}
+			if dryRun && streamMode == "jsonl" {
+				return withExitCode(4, errors.New("--dry-run cannot be combined with --stream=jsonl"))
+			}
+			if dryRun && (debug || estimate || printPrompt || printRequest || changedFilesOnly || summaryOnly) {
+				return withExitCode(4, errors.New("--dry-run cannot be combined with --debug, --estimate, --print-prompt, --print-request, --changed-files, or --summary-only"))
+			}
+			if (changedFilesOnly || summaryOnly) && (postFlag || clipboardFlag != "") {
+				return withExitCode(4, errors.New("--changed-files and --summary-only cannot be combined with --post or --clipboard"))
 			}
 
 			var diffContent string
@@ -558,15 +940,24 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 
 			out := cmd.OutOrStdout()
 			// When writing to a file, suppress all text output to the terminal.
-			if outputPath != "" {
+			if outputPath != "" && !dryRun && !changedFilesOnly && !summaryOnly {
 				out = io.Discard
 			}
-			// Split once; reuse the slice for line-count logging and truncation.
+			// Summarize the raw diff before truncating so metadata-only modes do
+			// not hide files that appear after the generation line limit.
 			diffLines := strings.Split(diffContent, "\n")
 			rawLines := len(diffLines)
-			diffContent = truncateDiff(diffLines, 4000)
 			diffTruncated := rawLines > 4000
+			summary := summarizeDiff(diffContent, diffSource, getModelName(cfg), diffTruncated)
+			diffContent = truncateDiff(diffLines, 4000)
 			debugLog(cfg, "diff: lines before truncation=%d after=%d (max=4000)", rawLines, strings.Count(diffContent, "\n")+1)
+
+			if changedFilesOnly || summaryOnly {
+				if outputPath != "" {
+					return writeDiffSummaryToFile(outputPath, summary, format, changedFilesOnly && !summaryOnly)
+				}
+				return writeDiffSummary(cmd, summary, format, changedFilesOnly && !summaryOnly)
+			}
 
 			systemPrompt, templateErr := NewPromptTemplate(cfg.Template)
 			if templateErr != nil {
@@ -619,6 +1010,9 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				systemPrompt = mrExcusePrompt
 				debugLog(cfg, "style: excuse mode enabled")
 			}
+			if presetPromptSuffix != "" && systemPromptFlag == "" {
+				systemPrompt += presetPromptSuffix
+			}
 
 			// When --exit-code is set, prepend a verdict instruction so the AI starts
 			// its response with "VERDICT: PASS" or "VERDICT: FAIL".
@@ -643,6 +1037,8 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 					Diff         string `json:"diff"`
 					DiffSource   string `json:"diff_source"`
 					Template     string `json:"template"`
+					Preset       string `json:"preset,omitempty"`
+					Truncated    bool   `json:"truncated"`
 				}{
 					Provider:     string(cfg.Provider),
 					Model:        getModelName(cfg),
@@ -650,8 +1046,90 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 					Diff:         diffContent,
 					DiffSource:   diffSource,
 					Template:     cfg.Template,
+					Preset:       presetName,
+					Truncated:    diffTruncated,
 				}
 				return json.NewEncoder(out).Encode(request)
+			}
+
+			if dryRun {
+				plan := struct {
+					DryRun              bool        `json:"dry_run"`
+					Provider            string      `json:"provider"`
+					Model               string      `json:"model"`
+					Template            string      `json:"template"`
+					Preset              string      `json:"preset,omitempty"`
+					DiffSource          string      `json:"diff_source"`
+					Summary             diffSummary `json:"summary"`
+					WouldCallProvider   bool        `json:"would_call_provider"`
+					WouldWriteOutput    bool        `json:"would_write_output"`
+					WouldCopyClipboard  bool        `json:"would_copy_clipboard"`
+					WouldPostComment    bool        `json:"would_post_comment"`
+					WouldUpdateTitle    bool        `json:"would_update_title"`
+					WouldUpdateBody     bool        `json:"would_update_description"`
+					MissingPostTarget   bool        `json:"missing_post_target,omitempty"`
+					MissingUpdateTarget bool        `json:"missing_update_target,omitempty"`
+					PostTarget          string      `json:"post_target,omitempty"`
+				}{
+					DryRun:              true,
+					Provider:            string(cfg.Provider),
+					Model:               getModelName(cfg),
+					Template:            cfg.Template,
+					Preset:              presetName,
+					DiffSource:          diffSource,
+					Summary:             summary,
+					WouldCallProvider:   !((postFlag || updateTitleFlag || updateDescriptionFlag) && prURL == ""),
+					WouldWriteOutput:    outputPath != "",
+					WouldCopyClipboard:  clipboardFlag != "",
+					WouldPostComment:    postFlag,
+					WouldUpdateTitle:    updateTitleFlag,
+					WouldUpdateBody:     updateDescriptionFlag,
+					MissingPostTarget:   postFlag && prURL == "",
+					MissingUpdateTarget: (updateTitleFlag || updateDescriptionFlag) && prURL == "",
+					PostTarget:          prURL,
+				}
+				if format == "json" {
+					return json.NewEncoder(out).Encode(plan)
+				}
+				_, _ = fmt.Fprintln(out, "Dry run: no provider call, file write, clipboard write, PR/MR post, or PR/MR metadata update will be performed.")
+				_, _ = fmt.Fprintf(out, "- Provider: %s\n", plan.Provider)
+				_, _ = fmt.Fprintf(out, "- Model: %s\n", plan.Model)
+				_, _ = fmt.Fprintf(out, "- Template: %s\n", plan.Template)
+				if presetName != "" {
+					_, _ = fmt.Fprintf(out, "- Preset: %s\n", presetName)
+				}
+				_, _ = fmt.Fprintf(out, "- Diff source: %s\n", diffSource)
+				_, _ = fmt.Fprintf(out, "- Files: %d\n", summary.FileCount)
+				_, _ = fmt.Fprintf(out, "- Additions: %d\n", summary.Additions)
+				_, _ = fmt.Fprintf(out, "- Deletions: %d\n", summary.Deletions)
+				if outputPath != "" {
+					_, _ = fmt.Fprintf(out, "- Would write output: %s\n", outputPath)
+				}
+				if clipboardFlag != "" {
+					_, _ = fmt.Fprintf(out, "- Would copy clipboard: %s\n", clipboardFlag)
+				}
+				if postFlag {
+					if prURL == "" {
+						_, _ = fmt.Fprintln(out, "- Would post comment: (missing --pr)")
+					} else {
+						_, _ = fmt.Fprintf(out, "- Would post comment: %s\n", prURL)
+					}
+				}
+				if updateTitleFlag || updateDescriptionFlag {
+					if prURL == "" {
+						_, _ = fmt.Fprintln(out, "- Would update PR/MR metadata: (missing --pr)")
+					} else {
+						fields := []string{}
+						if updateTitleFlag {
+							fields = append(fields, "title")
+						}
+						if updateDescriptionFlag {
+							fields = append(fields, "description")
+						}
+						_, _ = fmt.Fprintf(out, "- Would update PR/MR %s: %s\n", strings.Join(fields, "+"), prURL)
+					}
+				}
+				return nil
 			}
 
 			if debug {
@@ -773,7 +1251,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			} else {
 				// When a title is also needed, run comment and title concurrently to
 				// save one full LLM round-trip of wall-clock time.
-				needsTitle := (generateTitle || format == "json") && !generateCommitMsg
+				needsTitle := (generateTitle || updateTitleFlag || format == "json") && !generateCommitMsg
 				if needsTitle {
 					debugLog(cfg, "title+comment: running in parallel")
 					var parallelComment, parallelTitle string
@@ -813,7 +1291,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			// Skip title generation entirely when --commit-msg is active.
 			// NOTE: title may already be set above by the parallel path; this block
 			// only runs for the streaming case where the comment was written token-by-token.
-			if (generateTitle || format == "json") && !generateCommitMsg && !titleOnly && title == "" {
+			if (generateTitle || updateTitleFlag || format == "json") && !generateCommitMsg && !titleOnly && title == "" {
 				debugLog(cfg, "title: generating title after stream")
 				title, err = timedCall(cfg, "title", func() (string, error) {
 					return chatFn(cmd.Context(), cfg, cfg.Provider, titlePrompt, diffContent)
@@ -1021,6 +1499,36 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 				}
 			}
 
+			if updateTitleFlag || updateDescriptionFlag {
+				var updateTitle *string
+				var updateDescription *string
+				if updateTitleFlag {
+					updateTitle = &title
+				}
+				if updateDescriptionFlag {
+					metadata, metaErr := getRemoteMetadata(cmd.Context(), cfg, prURL)
+					if metaErr != nil {
+						return metaErr
+					}
+					body := mergeManagedSection(metadata.Description, comment)
+					updateDescription = &body
+				}
+				switch {
+				case isGitHubURL(prURL):
+					if err := updateGitHubPRMetadata(cmd.Context(), prURL, cfg.GitHubToken, cfg.GitHubBaseURL, updateTitle, updateDescription); err != nil {
+						return err
+					}
+					_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Updated GitHub PR metadata.")
+				case isGitLabURL(prURL):
+					if err := updateGitLabMRMetadata(cmd.Context(), prURL, cfg.GitLabToken, cfg.GitLabBaseURL, updateTitle, updateDescription); err != nil {
+						return err
+					}
+					_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Updated GitLab MR metadata.")
+				default:
+					return fmt.Errorf("unsupported URL %q: must be a GitHub PR (/pull/) or GitLab MR (/-/merge_requests/) URL", prURL)
+				}
+			}
+
 			// --post: publish the generated comment back to the GitHub PR or GitLab MR.
 			if postFlag {
 				postBody := comment
@@ -1064,6 +1572,10 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")
 	rootCmd.Flags().StringVar(&inputFormat, "input", "text", "Input format: text or json")
 	rootCmd.Flags().StringVar(&streamMode, "stream", "", "Structured stream mode: jsonl")
+	rootCmd.Flags().StringVar(&presetName, "preset", "", "Preset defaults: ci, local-fast, security, release-notes")
+	rootCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print what would happen without calling the provider or writing side effects")
+	rootCmd.Flags().BoolVar(&changedFilesOnly, "changed-files", false, "Print changed file paths and exit without calling the provider")
+	rootCmd.Flags().BoolVar(&summaryOnly, "summary-only", false, "Print diff stats and changed files and exit without calling the provider")
 	rootCmd.Flags().BoolVar(&quiet, "quiet", false, "Machine mode: emit JSON on stdout and route diagnostics to stderr")
 	rootCmd.Flags().BoolVar(&plain, "plain", false, "Suppress text section headers and decorations")
 	rootCmd.Flags().BoolVar(&plain, "no-decorate", false, "Alias for --plain")
@@ -1079,6 +1591,8 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().BoolVar(&multiLine, "multi-line", false, "Generate a multi-line commit message (subject + body) when used with --commit-msg; body pre-fills the PR/MR description")
 	rootCmd.Flags().BoolVar(&exitCodeFlag, "exit-code", false, "Exit with code 2 if the AI detects critical issues in the diff")
 	rootCmd.Flags().BoolVar(&postFlag, "post", false, "Post the generated comment back to the GitHub PR or GitLab MR (requires --pr)")
+	rootCmd.Flags().BoolVar(&updateTitleFlag, "update-title", false, "Update the GitHub PR title or GitLab MR title with the generated title (requires --pr)")
+	rootCmd.Flags().BoolVar(&updateDescriptionFlag, "update-description", false, "Update the GitHub PR body or GitLab MR description with the generated description (requires --pr)")
 	rootCmd.Flags().StringVar(&systemPromptFlag, "system-prompt", "", `Override the system prompt for this run. Use @path to read from a file (e.g. --system-prompt=@review.txt). Mutually exclusive with --template.`)
 	rootCmd.Flags().BoolVar(&estimate, "estimate", false, "Show token/cost estimate and prompt for confirmation before calling the API")
 	rootCmd.Flags().BoolVarP(&autoYes, "yes", "y", false, "Auto-confirm the cost estimate prompt (use with --estimate)")
@@ -1092,11 +1606,21 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().BoolVar(&mrManager, "manager", false, "Generate the MR/PR description in passive-aggressive corporate non-speak")
 	rootCmd.Flags().BoolVar(&mrYoda, "yoda", false, "Generate the MR/PR description in Yoda's inverted syntax")
 	rootCmd.Flags().BoolVar(&mrExcuse, "excuse", false, "Generate a technically accurate MR/PR description with built-in excuses")
+	_ = rootCmd.RegisterFlagCompletionFunc("provider", completeValues(providerNames))
+	_ = rootCmd.RegisterFlagCompletionFunc("template", completeValues(templateNames))
+	_ = rootCmd.RegisterFlagCompletionFunc("preset", completeValues(presetNames))
+	_ = rootCmd.RegisterFlagCompletionFunc("profile", completeProfiles)
+	_ = rootCmd.RegisterFlagCompletionFunc("format", completeValues([]string{"text", "json"}))
+	_ = rootCmd.RegisterFlagCompletionFunc("input", completeValues([]string{"text", "json"}))
+	_ = rootCmd.RegisterFlagCompletionFunc("stream", completeValues([]string{"jsonl"}))
+	_ = rootCmd.RegisterFlagCompletionFunc("clipboard", completeValues([]string{"title", "description", "comment", "commit-msg", "all"}))
 
 	rootCmd.AddCommand(newInitConfigCmd())
 	rootCmd.AddCommand(newModelsCmd())
 	rootCmd.AddCommand(newCheckCmd(chatFn))
+	rootCmd.AddCommand(newDoctorCmd())
 	rootCmd.AddCommand(newQuickCommitCmd(chatFn))
+	rootCmd.AddCommand(newPublishCmd(chatFn))
 	rootCmd.AddCommand(newChangelogCmd(chatFn))
 	rootCmd.AddCommand(newAgentAliasCmd("review", "Generate a review from a diff", nil, chatFn))
 	rootCmd.AddCommand(newAgentAliasCmd("title", "Generate only a PR/MR title", []string{"--title-only", "--plain"}, chatFn))
@@ -1276,6 +1800,7 @@ template = "default"
 // TOML configuration file to the destination path (default: ~/.ai-mr-comment.toml).
 func newInitConfigCmd() *cobra.Command {
 	var outputPath string
+	var dryRun bool
 
 	cmd := &cobra.Command{
 		Use:   "init-config",
@@ -1293,6 +1818,11 @@ models, endpoints, or the default provider.`,
 				dest = home + "/.ai-mr-comment.toml"
 			}
 
+			if dryRun {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Dry run: would write config file to %s\n", dest)
+				return nil
+			}
+
 			if _, err := os.Stat(dest); err == nil {
 				return fmt.Errorf("config file already exists at %s (remove it first or use --output to choose a different path)", dest)
 			}
@@ -1307,6 +1837,7 @@ models, endpoints, or the default provider.`,
 	}
 
 	cmd.Flags().StringVar(&outputPath, "output", "", "Write config to this path instead of ~/.ai-mr-comment.toml")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print destination without writing the config file")
 	return cmd
 }
 
@@ -1333,10 +1864,7 @@ func getModelName(cfg *Config) string {
 }
 
 func validateProviderConfig(cfg *Config) error {
-	switch cfg.Provider {
-	case OpenAI, Anthropic, Gemini, Ollama, ClaudeCLI, GeminiCLI, CodexCLI:
-		// valid
-	default:
+	if !isSupportedProvider(cfg.Provider) {
 		return errors.New("unsupported provider: " + string(cfg.Provider))
 	}
 	// Delegate API key validation to validateAPIKey (same check used by chatCompletions).
@@ -1523,6 +2051,7 @@ func newModelsCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&provider, "provider", "anthropic", "Provider to list models for (openai, anthropic, gemini, ollama, claude-cli, gemini-cli, codex-cli)")
+	_ = cmd.RegisterFlagCompletionFunc("provider", completeValues(providerNames))
 	return cmd
 }
 
@@ -1874,7 +2403,444 @@ remote. Use --dry-run to preview the generated message without committing.`,
 	cmd.Flags().BoolVar(&qcExcuse, "excuse", false, "Generate a technically accurate commit message with a built-in excuse")
 	cmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate (defined in ~/.ai-mr-comment.toml under [profile.<name>])")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Print debug info (provider, model, prompt size, timing) to stderr")
+	_ = cmd.RegisterFlagCompletionFunc("provider", completeValues(providerNames))
+	_ = cmd.RegisterFlagCompletionFunc("format", completeValues([]string{"text", "json"}))
+	_ = cmd.RegisterFlagCompletionFunc("profile", completeProfiles)
 	return cmd
+}
+
+const managedDescriptionStart = "<!-- ai-mr-comment:description:start -->"
+const managedDescriptionEnd = "<!-- ai-mr-comment:description:end -->"
+const managedCommentMarker = "<!-- ai-mr-comment:comment -->"
+
+func newPublishCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
+	var prURL, provider, modelOverride, templateName, profileName, format string
+	var dryRun, noUpdateTitle, noUpdateDescription, replaceDescription, postSummary, autoLabels, draftIfRisky bool
+	var labels, reviewers []string
+
+	cmd := &cobra.Command{
+		Use:   "publish",
+		Short: "Generate and sync PR/MR title, description, labels, reviewers, and managed summary",
+		Long: `Generates a title and description, then synchronizes them to a remote
+GitHub PR or GitLab MR. Pass --pr to target an existing PR/MR, or omit --pr to
+find or create one from the current branch and origin remote.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfigForProfile(profileName)
+			if err != nil {
+				return err
+			}
+			if cmd.Flags().Changed("provider") {
+				cfg.Provider = ApiProvider(provider)
+			}
+			if cmd.Flags().Changed("model") {
+				setModelOverride(cfg, modelOverride)
+			}
+			if cmd.Flags().Changed("template") {
+				cfg.Template = templateName
+			}
+			if !isSupportedProvider(cfg.Provider) {
+				return errors.New("unsupported provider: " + string(cfg.Provider))
+			}
+			if cfgErr := validateProviderConfig(cfg); cfgErr != nil {
+				return cfgErr
+			}
+			if format != "text" && format != "json" {
+				return withExitCode(4, fmt.Errorf("unsupported format %q: must be text or json", format))
+			}
+			if noUpdateTitle && noUpdateDescription && !postSummary && len(labels) == 0 && len(reviewers) == 0 && !autoLabels {
+				return withExitCode(4, errors.New("publish has no remote actions enabled"))
+			}
+			if cancel := applyRequestTimeout(cmd, cfg); cancel != nil {
+				defer cancel()
+			}
+
+			diffContent, targetURL, err := resolvePublishDiff(cmd.Context(), cfg, prURL)
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(diffContent) == "" {
+				return withExitCode(3, errors.New("no diff found to publish"))
+			}
+			summary := summarizeDiff(diffContent, "publish", getModelName(cfg), len(strings.Split(diffContent, "\n")) > 4000)
+			diffContent = processDiff(diffContent, 4000)
+
+			systemPrompt, templateErr := NewPromptTemplate(cfg.Template)
+			if templateErr != nil {
+				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Warning:", templateErr)
+			}
+
+			var title, description string
+			eg, egCtx := errgroup.WithContext(cmd.Context())
+			eg.Go(func() error {
+				var callErr error
+				title, callErr = timedCall(cfg, "publish-title", func() (string, error) {
+					return chatFn(egCtx, cfg, cfg.Provider, titlePrompt, diffContent)
+				})
+				return callErr
+			})
+			eg.Go(func() error {
+				var callErr error
+				description, callErr = timedCall(cfg, "publish-description", func() (string, error) {
+					return chatFn(egCtx, cfg, cfg.Provider, systemPrompt, diffContent)
+				})
+				return callErr
+			})
+			if err := eg.Wait(); err != nil {
+				return err
+			}
+			title = strings.TrimSpace(title)
+			description = strings.TrimSpace(description)
+			if draftIfRisky && publishLooksRisky(description) {
+				title = ensureDraftTitle(title)
+			}
+
+			appliedLabels := cleanStringList(labels)
+			if autoLabels {
+				appliedLabels = cleanStringList(append(appliedLabels, derivePublishLabels(summary, description)...))
+			}
+			reviewers = cleanStringList(reviewers)
+
+			if targetURL == "" {
+				targetURL, err = findOrCreatePublishTarget(cmd.Context(), cfg, title)
+				if err != nil {
+					return err
+				}
+			}
+
+			updateTitle := !noUpdateTitle
+			updateDescription := !noUpdateDescription
+			var updateTitleValue *string
+			var updateDescriptionValue *string
+			if updateTitle {
+				updateTitleValue = &title
+			}
+			if updateDescription {
+				body := description
+				if !replaceDescription {
+					metadata, metaErr := getRemoteMetadata(cmd.Context(), cfg, targetURL)
+					if metaErr != nil {
+						return metaErr
+					}
+					body = mergeManagedSection(metadata.Description, description)
+				}
+				updateDescriptionValue = &body
+			}
+
+			if dryRun {
+				return writePublishDryRun(cmd, cfg, targetURL, title, description, updateTitle, updateDescription, postSummary, appliedLabels, reviewers)
+			}
+
+			if updateTitle || updateDescription {
+				if err := updateRemoteMetadata(cmd.Context(), cfg, targetURL, updateTitleValue, updateDescriptionValue); err != nil {
+					return err
+				}
+			}
+			if postSummary {
+				if err := upsertRemoteManagedComment(cmd.Context(), cfg, targetURL, buildManagedComment(title, description)); err != nil {
+					return err
+				}
+			}
+			if len(appliedLabels) > 0 {
+				if err := addRemoteLabels(cmd.Context(), cfg, targetURL, appliedLabels); err != nil {
+					return err
+				}
+			}
+			if len(reviewers) > 0 {
+				if err := requestRemoteReviewers(cmd.Context(), cfg, targetURL, reviewers); err != nil {
+					return err
+				}
+			}
+
+			if format == "json" {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
+					URL                string   `json:"url"`
+					Title              string   `json:"title"`
+					DescriptionUpdated bool     `json:"description_updated"`
+					CommentUpserted    bool     `json:"comment_upserted"`
+					Labels             []string `json:"labels,omitempty"`
+					Reviewers          []string `json:"reviewers,omitempty"`
+					Provider           string   `json:"provider"`
+					Model              string   `json:"model"`
+				}{
+					URL:                targetURL,
+					Title:              title,
+					DescriptionUpdated: updateDescription,
+					CommentUpserted:    postSummary,
+					Labels:             appliedLabels,
+					Reviewers:          reviewers,
+					Provider:           string(cfg.Provider),
+					Model:              getModelName(cfg),
+				})
+			}
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Published PR/MR metadata: %s\n", targetURL)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&prURL, "pr", "", "GitHub PR or GitLab MR URL; omitted means find or create from the current branch")
+	cmd.Flags().StringVar(&provider, "provider", "openai", "AI provider to use")
+	cmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this run")
+	cmd.Flags().StringVarP(&templateName, "template", "t", "default", "Prompt template to use")
+	cmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate")
+	cmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview planned remote changes without writing them")
+	cmd.Flags().BoolVar(&noUpdateTitle, "no-update-title", false, "Do not update the remote PR/MR title")
+	cmd.Flags().BoolVar(&noUpdateDescription, "no-update-description", false, "Do not update the remote PR/MR description/body")
+	cmd.Flags().BoolVar(&replaceDescription, "replace-description", false, "Replace the full remote description instead of syncing a managed section")
+	cmd.Flags().BoolVar(&postSummary, "post-summary", true, "Create or update a managed PR/MR summary comment")
+	cmd.Flags().BoolVar(&autoLabels, "auto-labels", false, "Apply simple labels inferred from the changed files and generated description")
+	cmd.Flags().StringArrayVar(&labels, "label", nil, "Label to add to the PR/MR; can be repeated or comma-separated")
+	cmd.Flags().StringArrayVar(&reviewers, "reviewer", nil, "Reviewer to request; GitHub uses usernames, GitLab uses numeric user IDs")
+	cmd.Flags().BoolVar(&draftIfRisky, "draft-if-risky", false, "Prefix the title with Draft: when generated text indicates high risk")
+	_ = cmd.RegisterFlagCompletionFunc("provider", completeValues(providerNames))
+	_ = cmd.RegisterFlagCompletionFunc("template", completeValues(templateNames))
+	_ = cmd.RegisterFlagCompletionFunc("profile", completeProfiles)
+	_ = cmd.RegisterFlagCompletionFunc("format", completeValues([]string{"text", "json"}))
+	return cmd
+}
+
+func resolvePublishDiff(ctx context.Context, cfg *Config, prURL string) (diffContent, targetURL string, err error) {
+	if prURL != "" {
+		switch {
+		case isGitHubURL(prURL):
+			diffContent, err = getPRDiff(ctx, prURL, cfg.GitHubToken, cfg.GitHubBaseURL)
+		case isGitLabURL(prURL):
+			diffContent, err = getMRDiff(ctx, prURL, cfg.GitLabToken, cfg.GitLabBaseURL)
+		default:
+			return "", "", fmt.Errorf("unsupported URL %q: must be a GitHub PR (/pull/) or GitLab MR (/-/merge_requests/) URL", prURL)
+		}
+		return diffContent, prURL, err
+	}
+	if !isGitRepo() {
+		return "", "", errors.New("not a git repository. Pass --pr to publish a remote PR/MR without a local checkout")
+	}
+	branch, err := getCurrentBranch()
+	if err != nil {
+		return "", "", fmt.Errorf("could not determine current branch: %w", err)
+	}
+	diffContent, err = getGitDiff("", false, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("reading local diff: %w", err)
+	}
+	if branch != "" {
+		diffContent = "Branch: " + branch + "\n\n" + diffContent
+	}
+	return diffContent, "", nil
+}
+
+func findOrCreatePublishTarget(ctx context.Context, cfg *Config, title string) (string, error) {
+	branch, err := getCurrentBranch()
+	if err != nil {
+		return "", fmt.Errorf("could not determine current branch: %w", err)
+	}
+	if branch == "" {
+		return "", errors.New("cannot publish from detached HEAD without --pr")
+	}
+	remoteURL, err := getRemoteURL()
+	if err != nil {
+		return "", fmt.Errorf("getting remote URL: %w", err)
+	}
+	info, err := parseRemoteInfo(remoteURL)
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case isGitHubHost(info.Host, cfg.GitHubBaseURL):
+		if len(info.PathParts) < 2 {
+			return "", errors.New("could not parse owner/repo from remote URL")
+		}
+		return findOrCreateGitHubPRFromConfig(ctx, cfg, info.PathParts[0], info.PathParts[1], branch, title)
+	case isGitLabHost(info.Host, cfg.GitLabBaseURL):
+		return findOrCreateGitLabMRFromConfig(ctx, cfg, strings.Join(info.PathParts, "/"), branch, title)
+	default:
+		return "", fmt.Errorf("unrecognised remote host %q; set github_base_url or gitlab_base_url in config", info.Host)
+	}
+}
+
+func getRemoteMetadata(ctx context.Context, cfg *Config, targetURL string) (prMetadata, error) {
+	switch {
+	case isGitHubURL(targetURL):
+		return getGitHubPRMetadata(ctx, targetURL, cfg.GitHubToken, cfg.GitHubBaseURL)
+	case isGitLabURL(targetURL):
+		return getGitLabMRMetadata(ctx, targetURL, cfg.GitLabToken, cfg.GitLabBaseURL)
+	default:
+		return prMetadata{}, fmt.Errorf("unsupported PR/MR URL %q", targetURL)
+	}
+}
+
+func updateRemoteMetadata(ctx context.Context, cfg *Config, targetURL string, title, description *string) error {
+	switch {
+	case isGitHubURL(targetURL):
+		return updateGitHubPRMetadata(ctx, targetURL, cfg.GitHubToken, cfg.GitHubBaseURL, title, description)
+	case isGitLabURL(targetURL):
+		return updateGitLabMRMetadata(ctx, targetURL, cfg.GitLabToken, cfg.GitLabBaseURL, title, description)
+	default:
+		return fmt.Errorf("unsupported PR/MR URL %q", targetURL)
+	}
+}
+
+func upsertRemoteManagedComment(ctx context.Context, cfg *Config, targetURL, body string) error {
+	switch {
+	case isGitHubURL(targetURL):
+		return upsertGitHubPRComment(ctx, targetURL, cfg.GitHubToken, cfg.GitHubBaseURL, managedCommentMarker, body)
+	case isGitLabURL(targetURL):
+		return upsertGitLabMRNote(ctx, targetURL, cfg.GitLabToken, cfg.GitLabBaseURL, managedCommentMarker, body)
+	default:
+		return fmt.Errorf("unsupported PR/MR URL %q", targetURL)
+	}
+}
+
+func addRemoteLabels(ctx context.Context, cfg *Config, targetURL string, labels []string) error {
+	switch {
+	case isGitHubURL(targetURL):
+		return addGitHubPRLabels(ctx, targetURL, cfg.GitHubToken, cfg.GitHubBaseURL, labels)
+	case isGitLabURL(targetURL):
+		return addGitLabMRLabels(ctx, targetURL, cfg.GitLabToken, cfg.GitLabBaseURL, labels)
+	default:
+		return fmt.Errorf("unsupported PR/MR URL %q", targetURL)
+	}
+}
+
+func requestRemoteReviewers(ctx context.Context, cfg *Config, targetURL string, reviewers []string) error {
+	switch {
+	case isGitHubURL(targetURL):
+		return requestGitHubPRReviewers(ctx, targetURL, cfg.GitHubToken, cfg.GitHubBaseURL, reviewers)
+	case isGitLabURL(targetURL):
+		return requestGitLabMRReviewers(ctx, targetURL, cfg.GitLabToken, cfg.GitLabBaseURL, reviewers)
+	default:
+		return fmt.Errorf("unsupported PR/MR URL %q", targetURL)
+	}
+}
+
+func mergeManagedSection(existing, generated string) string {
+	block := managedDescriptionStart + "\n" + strings.TrimSpace(generated) + "\n" + managedDescriptionEnd
+	existing = strings.TrimSpace(existing)
+	start := strings.Index(existing, managedDescriptionStart)
+	end := strings.Index(existing, managedDescriptionEnd)
+	if start >= 0 && end > start {
+		end += len(managedDescriptionEnd)
+		before := strings.TrimSpace(existing[:start])
+		after := strings.TrimSpace(existing[end:])
+		parts := []string{}
+		if before != "" {
+			parts = append(parts, before)
+		}
+		parts = append(parts, block)
+		if after != "" {
+			parts = append(parts, after)
+		}
+		return strings.Join(parts, "\n\n")
+	}
+	if existing == "" {
+		return block
+	}
+	return existing + "\n\n" + block
+}
+
+func buildManagedComment(title, description string) string {
+	var b strings.Builder
+	b.WriteString(managedCommentMarker)
+	b.WriteString("\n\n")
+	if strings.TrimSpace(title) != "" {
+		b.WriteString("## ")
+		b.WriteString(strings.TrimSpace(title))
+		b.WriteString("\n\n")
+	}
+	b.WriteString(strings.TrimSpace(description))
+	b.WriteByte('\n')
+	return b.String()
+}
+
+func derivePublishLabels(summary diffSummary, description string) []string {
+	labelSet := map[string]bool{}
+	lowerDescription := strings.ToLower(description)
+	if strings.Contains(lowerDescription, "security") || strings.Contains(lowerDescription, "vulnerab") || strings.Contains(lowerDescription, "credential") {
+		labelSet["security"] = true
+	}
+	if strings.Contains(lowerDescription, "breaking") || strings.Contains(lowerDescription, "migration") {
+		labelSet["breaking-change"] = true
+	}
+	for _, file := range summary.Files {
+		path := strings.ToLower(file.Path)
+		switch {
+		case strings.Contains(path, "test") || strings.HasSuffix(path, "_test.go"):
+			labelSet["tests"] = true
+		case strings.HasPrefix(path, "docs/") || strings.HasSuffix(path, ".md"):
+			labelSet["docs"] = true
+		case strings.Contains(path, "docker") || strings.Contains(path, ".github/workflows") || strings.Contains(path, "ci"):
+			labelSet["ci"] = true
+		case strings.Contains(path, "go.mod") || strings.Contains(path, "go.sum") || strings.Contains(path, "package-lock") || strings.Contains(path, "requirements"):
+			labelSet["dependencies"] = true
+		}
+	}
+	labels := make([]string, 0, len(labelSet))
+	for label := range labelSet {
+		labels = append(labels, label)
+	}
+	sort.Strings(labels)
+	return labels
+}
+
+func publishLooksRisky(description string) bool {
+	lower := strings.ToLower(description)
+	for _, marker := range []string{"breaking", "data loss", "security", "vulnerab", "unsafe", "risk", "fail"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func ensureDraftTitle(title string) string {
+	title = strings.TrimSpace(title)
+	if strings.HasPrefix(strings.ToLower(title), "draft:") {
+		return title
+	}
+	return "Draft: " + title
+}
+
+func writePublishDryRun(cmd *cobra.Command, cfg *Config, targetURL, title, description string, updateTitle, updateDescription, postSummary bool, labels, reviewers []string) error {
+	if cmd.Flag("format").Value.String() == "json" {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
+			DryRun            bool     `json:"dry_run"`
+			URL               string   `json:"url,omitempty"`
+			Title             string   `json:"title"`
+			DescriptionBytes  int      `json:"description_bytes"`
+			WouldUpdateTitle  bool     `json:"would_update_title"`
+			WouldUpdateBody   bool     `json:"would_update_description"`
+			WouldPostSummary  bool     `json:"would_post_summary"`
+			WouldApplyLabels  []string `json:"would_apply_labels,omitempty"`
+			WouldAddReviewers []string `json:"would_add_reviewers,omitempty"`
+			Provider          string   `json:"provider"`
+			Model             string   `json:"model"`
+		}{
+			DryRun:            true,
+			URL:               targetURL,
+			Title:             title,
+			DescriptionBytes:  len(description),
+			WouldUpdateTitle:  updateTitle,
+			WouldUpdateBody:   updateDescription,
+			WouldPostSummary:  postSummary,
+			WouldApplyLabels:  labels,
+			WouldAddReviewers: reviewers,
+			Provider:          string(cfg.Provider),
+			Model:             getModelName(cfg),
+		})
+	}
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Dry run: no PR/MR metadata, comment, label, or reviewer changes will be written.")
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "- Target: %s\n", targetURL)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "- Title: %s\n", title)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "- Description bytes: %d\n", len(description))
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "- Update title: %v\n", updateTitle)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "- Update description: %v\n", updateDescription)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "- Post summary: %v\n", postSummary)
+	if len(labels) > 0 {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "- Labels: %s\n", strings.Join(labels, ", "))
+	}
+	if len(reviewers) > 0 {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "- Reviewers: %s\n", strings.Join(reviewers, ", "))
+	}
+	return nil
 }
 
 // providerSecrets maps each supported AI provider to the conventional GitHub
@@ -2029,7 +2995,150 @@ Examples:
 	cmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this check")
 	cmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate")
 	cmd.Flags().BoolVar(&all, "all", false, "Ping every provider in parallel and print a summary table")
+	_ = cmd.RegisterFlagCompletionFunc("provider", completeValues(providerNames))
+	_ = cmd.RegisterFlagCompletionFunc("profile", completeProfiles)
 	return cmd
+}
+
+func newDoctorCmd() *cobra.Command {
+	var provider, modelOverride, profileName, presetName, format string
+
+	cmd := &cobra.Command{
+		Use:     "doctor",
+		Aliases: []string{"config-dump"},
+		Short:   "Inspect resolved config and local CLI readiness without a live provider call",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfigForProfile(profileName)
+			if err != nil {
+				return err
+			}
+			dummyExitCode := false
+			dummyPlain := false
+			dummyTitle := false
+			if _, presetErr := applyRootPreset(cmd, presetName, cfg, &format, &dummyExitCode, &dummyPlain, &dummyTitle); presetErr != nil {
+				return withExitCode(4, presetErr)
+			}
+			if cmd.Flags().Changed("provider") {
+				cfg.Provider = ApiProvider(provider)
+			}
+			if cmd.Flags().Changed("model") {
+				setModelOverride(cfg, modelOverride)
+			}
+			if !isSupportedProvider(cfg.Provider) {
+				return errors.New("unsupported provider: " + string(cfg.Provider))
+			}
+			if format != "text" && format != "json" {
+				return fmt.Errorf("unsupported format %q: must be text or json", format)
+			}
+
+			type doctorPayload struct {
+				ConfigFile string            `json:"config_file"`
+				Profile    string            `json:"profile,omitempty"`
+				Preset     string            `json:"preset,omitempty"`
+				Provider   string            `json:"provider"`
+				Model      string            `json:"model"`
+				Template   string            `json:"template"`
+				Timeout    string            `json:"request_timeout"`
+				Git        map[string]string `json:"git"`
+				Secrets    map[string]string `json:"secrets"`
+				Binaries   map[string]string `json:"binaries"`
+			}
+
+			gitInfo := map[string]string{"repository": "false"}
+			if isGitRepo() {
+				gitInfo["repository"] = "true"
+				if branch, branchErr := getCurrentBranch(); branchErr == nil && branch != "" {
+					gitInfo["branch"] = branch
+				}
+				if remote, remoteErr := getRemoteURL(); remoteErr == nil && remote != "" {
+					gitInfo["remote"] = sanitizeRemoteURL(remote)
+				}
+			}
+			binaries := map[string]string{}
+			if binary, binErr := findClaudeBinary(cfg); binErr == nil {
+				binaries["claude-cli"] = binary
+			} else {
+				binaries["claude-cli"] = "(not found)"
+			}
+			if binary, binErr := findGeminiCLIBinary(cfg); binErr == nil {
+				binaries["gemini-cli"] = binary
+			} else {
+				binaries["gemini-cli"] = "(not found)"
+			}
+			if binary, binErr := findCodexBinary(cfg); binErr == nil {
+				binaries["codex-cli"] = binary
+			} else {
+				binaries["codex-cli"] = "(not found)"
+			}
+			configFile := cfg.ConfigFile
+			if configFile == "" {
+				configFile = "(none)"
+			}
+			payload := doctorPayload{
+				ConfigFile: configFile,
+				Profile:    profileName,
+				Preset:     presetName,
+				Provider:   string(cfg.Provider),
+				Model:      getModelName(cfg),
+				Template:   cfg.Template,
+				Timeout:    cfg.RequestTimeout.String(),
+				Git:        gitInfo,
+				Secrets: map[string]string{
+					"OPENAI_API_KEY":    secretStatus(cfg.OpenAIAPIKey),
+					"ANTHROPIC_API_KEY": secretStatus(cfg.AnthropicAPIKey),
+					"GEMINI_API_KEY":    secretStatus(cfg.GeminiAPIKey),
+					"GITHUB_TOKEN":      secretStatus(cfg.GitHubToken),
+					"GITLAB_TOKEN":      secretStatus(cfg.GitLabToken),
+				},
+				Binaries: binaries,
+			}
+			out := cmd.OutOrStdout()
+			if format == "json" {
+				return json.NewEncoder(out).Encode(payload)
+			}
+			_, _ = fmt.Fprintf(out, "Config file : %s\n", payload.ConfigFile)
+			if profileName != "" {
+				_, _ = fmt.Fprintf(out, "Profile     : %s\n", profileName)
+			}
+			if presetName != "" {
+				_, _ = fmt.Fprintf(out, "Preset      : %s\n", presetName)
+			}
+			_, _ = fmt.Fprintf(out, "Provider    : %s\n", payload.Provider)
+			_, _ = fmt.Fprintf(out, "Model       : %s\n", payload.Model)
+			_, _ = fmt.Fprintf(out, "Template    : %s\n", payload.Template)
+			_, _ = fmt.Fprintf(out, "Timeout     : %s\n", payload.Timeout)
+			_, _ = fmt.Fprintf(out, "Git repo    : %s\n", payload.Git["repository"])
+			if payload.Git["branch"] != "" {
+				_, _ = fmt.Fprintf(out, "Git branch  : %s\n", payload.Git["branch"])
+			}
+			_, _ = fmt.Fprintln(out, "\nSecrets:")
+			for _, name := range []string{"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GITHUB_TOKEN", "GITLAB_TOKEN"} {
+				_, _ = fmt.Fprintf(out, "- %s: %s\n", name, payload.Secrets[name])
+			}
+			_, _ = fmt.Fprintln(out, "\nCLI binaries:")
+			for _, name := range []string{"claude-cli", "gemini-cli", "codex-cli"} {
+				_, _ = fmt.Fprintf(out, "- %s: %s\n", name, payload.Binaries[name])
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&provider, "provider", "", "AI provider to inspect (overrides config)")
+	cmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for inspection")
+	cmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate")
+	cmd.Flags().StringVar(&presetName, "preset", "", "Preset defaults: ci, local-fast, security, release-notes")
+	cmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")
+	_ = cmd.RegisterFlagCompletionFunc("provider", completeValues(providerNames))
+	_ = cmd.RegisterFlagCompletionFunc("profile", completeProfiles)
+	_ = cmd.RegisterFlagCompletionFunc("preset", completeValues(presetNames))
+	_ = cmd.RegisterFlagCompletionFunc("format", completeValues([]string{"text", "json"}))
+	return cmd
+}
+
+func secretStatus(value string) string {
+	if value == "" {
+		return "missing"
+	}
+	return "set"
 }
 
 // runCheckAll pings all providers concurrently and prints a summary table.
@@ -2118,6 +3227,7 @@ func maskSecret(s string) string {
 // file that automatically runs ai-mr-comment on every pull request.
 func newGenWorkflowCmd() *cobra.Command {
 	var provider, outputPath string
+	var dryRun bool
 
 	cmd := &cobra.Command{
 		Use:   "gen-workflow",
@@ -2171,6 +3281,11 @@ jobs:
 				return nil
 			}
 
+			if dryRun {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Dry run: would write workflow to %s using provider %s and secret %s\n", outputPath, provider, secretName)
+				return nil
+			}
+
 			if err := os.MkdirAll(filepath.Dir(outputPath), 0o750); err != nil {
 				return fmt.Errorf("creating output directory: %w", err)
 			}
@@ -2185,6 +3300,8 @@ jobs:
 
 	cmd.Flags().StringVar(&provider, "provider", "openai", "AI provider to use in the workflow (openai, anthropic, gemini)")
 	cmd.Flags().StringVar(&outputPath, "output", ".github/workflows/ai-review.yml", "Output file path (use - for stdout)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print what would be written without creating files")
+	_ = cmd.RegisterFlagCompletionFunc("provider", completeValues([]string{"openai", "anthropic", "gemini"}))
 	return cmd
 }
 

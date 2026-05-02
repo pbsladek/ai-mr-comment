@@ -45,6 +45,7 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 - **Excuse mode** (`--excuse`) — technically accurate but every section has a built-in justification for why it had to be this way; works on both root cmd and `quick-commit`
 - **CI/CD gate** (`--exit-code`) — exits with code 2 when the AI flags critical issues, enabling pipeline enforcement
 - **Auto-post comments** (`--post`) — publishes the generated comment directly to the GitHub PR or GitLab MR via API
+- **Update remote PR/MR metadata** (`--update-title`, `--update-description`) — writes the generated title and/or description back to GitHub or GitLab
 - **Named config profiles** (`--profile`) — switch between providers/models/templates with a single flag; define profiles in `~/.ai-mr-comment.toml` under `[profile.<name>]`
 - Configuration file support (`~/.ai-mr-comment.toml`)
 - Environment variable configuration
@@ -403,6 +404,9 @@ ai-mr-comment --exit-code --pr https://github.com/owner/repo/pull/42
 # Generate and immediately post the comment back to the PR/MR
 ai-mr-comment --pr https://github.com/owner/repo/pull/42 --post
 
+# Generate and update the actual PR/MR title and description
+ai-mr-comment --pr https://github.com/owner/repo/pull/42 --update-title --update-description
+
 # Save JSON review to a file (for artifact upload in CI)
 ai-mr-comment --format json --output /tmp/review.json --pr https://github.com/owner/repo/pull/42
 
@@ -415,6 +419,23 @@ ai-mr-comment --debug
 # Print the exact prompt/request for agent debugging without calling the API
 git diff | ai-mr-comment --file=- --print-prompt
 git diff | ai-mr-comment --file=- --print-request | jq .
+
+# Preview planned work without calling the provider or writing files
+git diff | ai-mr-comment --dry-run --file=-
+
+# Inspect changed files and diff stats without spending tokens
+ai-mr-comment --changed-files
+ai-mr-comment --summary-only --format=json | jq .
+
+# Inspect resolved config, tokens, git state, and local CLI binaries
+ai-mr-comment doctor
+ai-mr-comment config-dump --format=json | jq .
+
+# Apply a built-in preset
+ai-mr-comment --preset ci --pr https://github.com/owner/repo/pull/42
+ai-mr-comment --preset local-fast --file=-
+ai-mr-comment --preset security
+ai-mr-comment changelog --preset release-notes --commit="v1.2.0..HEAD"
 
 # Override the system prompt for a single run (inline)
 ai-mr-comment --system-prompt="Focus only on security vulnerabilities."
@@ -495,6 +516,8 @@ ai-mr-comment --plain
 ai-mr-comment --stream=jsonl
 ai-mr-comment --print-prompt
 ai-mr-comment --print-request
+ai-mr-comment --dry-run
+ai-mr-comment --summary-only
 ```
 
 Exit codes are stable for automation: `0` success/pass, `1` tool or runtime error, `2` AI verdict fail, `3` no diff/input, `4` invalid usage.
@@ -511,6 +534,11 @@ Exit codes are stable for automation: `0` success/pass, `1` tool or runtime erro
 - `--multi-line`: Generate a multi-line commit message (subject + blank line + markdown body) when used with `--commit-msg` or `quick-commit`. GitHub and GitLab use this format to pre-fill the PR/MR title and description automatically.
 - `--exit-code`: Exit with code 2 when the AI detects critical issues (bugs, security vulnerabilities, data loss risks). Mutually exclusive with `--commit-msg`.
 - `--post`: Post the generated comment back to the GitHub PR or GitLab MR via API (requires `--pr`). Uses the same token as diff fetching.
+- `--update-title`: Update the GitHub PR title or GitLab MR title with the generated title (requires `--pr`). Mutually exclusive with `--commit-msg`.
+- `--update-description`: Update the GitHub PR body or GitLab MR description with the generated description (requires `--pr`). Mutually exclusive with `--commit-msg` and `--title-only`.
+- `--dry-run`: Print the resolved plan and diff stats without calling the provider, writing output files, copying to clipboard, posting comments, or updating PR/MR metadata.
+- `--changed-files`: Print changed file paths and exit without calling the provider.
+- `--summary-only`: Print diff stats and changed files and exit without calling the provider.
 - `--file <FILE>`: Read diff from file instead of git. Use `--file=-` to read from stdin.
 - `--output <FILE>`: Write output to file instead of stdout — **suppresses all terminal output**. Writes JSON when `--format=json` is set; writes the commit message when `--commit-msg` is set.
 - `--clipboard <WHAT>`: Copy to system clipboard — `title`, `description` (or `comment`), `commit-msg`, or `all` (title + description separated by a blank line)
@@ -521,6 +549,7 @@ Exit codes are stable for automation: `0` success/pass, `1` tool or runtime erro
 - `--stream=jsonl`: Emit JSON Lines events (`start`, `token`, `done`) instead of decorated text
 - `--print-prompt`: Print the resolved system prompt and exit without calling the provider
 - `--print-request`: Print the resolved provider request as JSON and exit without calling the provider
+- `--preset <NAME>`: Apply built-in defaults: `ci` (JSON + exit-code + technical), `local-fast` (Ollama + plain), `security` (security-focused technical review), or `release-notes` (user-focused title/description).
 - `--provider <PROVIDER>`: Provider (`openai`, `anthropic`, `gemini`, `ollama`, `claude-cli`, `gemini-cli`, `codex-cli`)
 - `--model <NAME>`: Override the model for this run (e.g. `gpt-4o`, `claude-opus-4-6`, `gemini-2.5-flash`)
 - `-t, --template <NAME>`: Template style — `default`, `conventional`, `technical`, `user-focused`, `emoji`, `sassy`, `monday`, `jira`, `commit`, `commit-emoji`, `commit-conventional`, `chaos`, `haiku`, `roast`, `intern`, `shakespeare`, `manager`, `yoda`, `excuse` (`commit`, `commit-emoji`, and `commit-conventional` require `--commit-msg`; style templates cannot be combined with `--commit-msg`)
@@ -534,9 +563,22 @@ Exit codes are stable for automation: `0` success/pass, `1` tool or runtime erro
 - `--version`: Print version, commit SHA, and repository URL in `key=value` format and exit
 - `-h, --help`: Print help
 
+### Diagnostics
+
+`doctor` and its alias `config-dump` inspect local readiness without making a live provider request:
+
+```bash
+ai-mr-comment doctor
+ai-mr-comment doctor --provider openai
+ai-mr-comment doctor --preset local-fast --format=json
+```
+
+Use `check` when you want a live provider ping.
+
 ### Subcommands
 
 - `quick-commit [flags]`: Stage all changes, generate an AI commit message, commit, and push in one step. See [Quick Commit](#quick-commit) below.
+- `publish [flags]`: Generate and sync a PR/MR title, description, managed summary comment, labels, and reviewers in one step. See [Publish](#publish) below.
 - `changelog [flags]`: Generate a user-facing changelog entry from a commit range or diff file. See [Changelog](#changelog) below.
 - `gen-aliases [--shell bash|zsh] [--output FILE]`: Print `amc` and `amc-*` shell aliases to stdout. See [Shell Aliases](#shell-aliases) below.
 - `models [--provider <NAME>]`: List known model names for a provider.
@@ -802,6 +844,43 @@ Steps performed:
 | `--provider` | Override the AI provider |
 | `--model` | Override the model |
 | `--profile` | Activate a named config profile |
+
+## Publish
+
+`publish` is the one-shot remote PR/MR workflow. It generates a title and description, updates the remote title/body, preserves manual description text by syncing only a managed section, and creates or updates one managed summary comment.
+
+```bash
+# Existing GitHub PR or GitLab MR
+ai-mr-comment publish --pr https://github.com/owner/repo/pull/42
+
+# Add labels, request reviewers, and mark the title as Draft: if the generated text looks risky
+ai-mr-comment publish \
+  --pr https://gitlab.com/group/project/-/merge_requests/5 \
+  --auto-labels \
+  --label=release-notes \
+  --reviewer=12345 \
+  --draft-if-risky
+
+# From a local branch: find an existing PR/MR or create one from origin
+ai-mr-comment publish
+
+# Preview without writing remote changes
+ai-mr-comment publish --pr https://github.com/owner/repo/pull/42 --dry-run --format=json
+```
+
+| Flag | Description |
+|---|---|
+| `--pr` | Existing GitHub PR or GitLab MR URL. If omitted, `publish` uses the current branch and `origin` remote to find or create a PR/MR |
+| `--no-update-title` | Skip updating the remote title |
+| `--no-update-description` | Skip updating the remote PR body / MR description |
+| `--replace-description` | Replace the full description instead of syncing the managed `ai-mr-comment` section |
+| `--post-summary` | Create or update one managed summary comment. Defaults to `true`; use `--post-summary=false` to disable |
+| `--auto-labels` | Apply simple labels inferred from changed files and generated text, such as `docs`, `tests`, `ci`, `dependencies`, or `security` |
+| `--label` | Add an explicit label. Can be repeated or comma-separated |
+| `--reviewer` | Request a reviewer. GitHub uses usernames; GitLab uses numeric user IDs |
+| `--draft-if-risky` | Prefix the generated title with `Draft:` when generated text indicates high risk |
+| `--dry-run` | Generate and print the planned remote changes without writing them |
+| `--format` | `text` (default) or `json` |
 
 ## Changelog
 
