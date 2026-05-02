@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	gogithub "github.com/google/go-github/v68/github"
@@ -586,7 +587,7 @@ func getMRDiffWithClient(ctx context.Context, gl *gogitlab.Client, mrURL string)
 			return "", wrapGitLabAuthError("fetching GitLab MR diff", err)
 		}
 		for _, c := range changes {
-			diffBuilder.WriteString(c.Diff)
+			diffBuilder.WriteString(formatGitLabMRDiff(c))
 		}
 		if resp == nil || resp.NextPage == 0 {
 			break
@@ -595,6 +596,66 @@ func getMRDiffWithClient(ctx context.Context, gl *gogitlab.Client, mrURL string)
 	}
 
 	return formatPRContent(mr.Title, mr.Description, diffBuilder.String()), nil
+}
+
+func formatGitLabMRDiff(c *gogitlab.MergeRequestDiff) string {
+	if c == nil {
+		return ""
+	}
+	diff := ensureTrailingNewline(c.Diff)
+	if strings.HasPrefix(diff, "diff --git ") {
+		return diff
+	}
+
+	oldPath := c.OldPath
+	newPath := c.NewPath
+	if oldPath == "" {
+		oldPath = newPath
+	}
+	if newPath == "" {
+		newPath = oldPath
+	}
+	if oldPath == "" && newPath == "" {
+		return diff
+	}
+
+	var b strings.Builder
+	b.WriteString("diff --git ")
+	b.WriteString(formatGitPathForDiff("a/", oldPath))
+	b.WriteByte(' ')
+	b.WriteString(formatGitPathForDiff("b/", newPath))
+	b.WriteByte('\n')
+	if c.NewFile {
+		b.WriteString("--- /dev/null\n")
+	} else {
+		b.WriteString("--- ")
+		b.WriteString(formatGitPathForDiff("a/", oldPath))
+		b.WriteByte('\n')
+	}
+	if c.DeletedFile {
+		b.WriteString("+++ /dev/null\n")
+	} else {
+		b.WriteString("+++ ")
+		b.WriteString(formatGitPathForDiff("b/", newPath))
+		b.WriteByte('\n')
+	}
+	b.WriteString(diff)
+	return b.String()
+}
+
+func formatGitPathForDiff(prefix, path string) string {
+	path = prefix + path
+	if strings.ContainsAny(path, " \t\n\r\"\\") {
+		return strconv.Quote(path)
+	}
+	return path
+}
+
+func ensureTrailingNewline(s string) string {
+	if s == "" || strings.HasSuffix(s, "\n") {
+		return s
+	}
+	return s + "\n"
 }
 
 // getMRDiff fetches the diff and metadata for a GitLab merge request using the
@@ -641,6 +702,151 @@ func postGitHubPRComment(ctx context.Context, prURL, token, baseURL, body string
 	return postGitHubPRCommentWithClient(ctx, gh, prURL, body)
 }
 
+type prMetadata struct {
+	Title       string
+	Description string
+}
+
+func getGitHubPRMetadataWithClient(ctx context.Context, gh *gogithub.Client, prURL string) (prMetadata, error) {
+	owner, repo, number, err := parsePRURL(prURL)
+	if err != nil {
+		return prMetadata{}, err
+	}
+	pr, _, err := gh.PullRequests.Get(ctx, owner, repo, number)
+	if err != nil {
+		return prMetadata{}, fmt.Errorf("fetching GitHub PR metadata: %w", err)
+	}
+	return prMetadata{Title: pr.GetTitle(), Description: pr.GetBody()}, nil
+}
+
+func getGitHubPRMetadata(ctx context.Context, prURL, token, baseURL string) (prMetadata, error) {
+	resolvedBaseURL, err := resolveGitHubBaseURL(prURL, baseURL)
+	if err != nil {
+		return prMetadata{}, err
+	}
+	gh, err := newGitHubClient(ctx, token, resolvedBaseURL)
+	if err != nil {
+		return prMetadata{}, err
+	}
+	return getGitHubPRMetadataWithClient(ctx, gh, prURL)
+}
+
+// updateGitHubPRMetadataWithClient updates the title and/or body of a GitHub PR.
+// Nil fields are left unchanged.
+func updateGitHubPRMetadataWithClient(ctx context.Context, gh *gogithub.Client, prURL string, title, body *string) error {
+	if title == nil && body == nil {
+		return nil
+	}
+	owner, repo, number, err := parsePRURL(prURL)
+	if err != nil {
+		return err
+	}
+	_, _, err = gh.PullRequests.Edit(ctx, owner, repo, number, &gogithub.PullRequest{
+		Title: title,
+		Body:  body,
+	})
+	if err != nil {
+		return fmt.Errorf("updating GitHub PR metadata: %w", err)
+	}
+	return nil
+}
+
+// updateGitHubPRMetadata updates the title and/or body of the GitHub PR at prURL.
+func updateGitHubPRMetadata(ctx context.Context, prURL, token, baseURL string, title, body *string) error {
+	resolvedBaseURL, err := resolveGitHubBaseURL(prURL, baseURL)
+	if err != nil {
+		return err
+	}
+	gh, err := newGitHubClient(ctx, token, resolvedBaseURL)
+	if err != nil {
+		return err
+	}
+	return updateGitHubPRMetadataWithClient(ctx, gh, prURL, title, body)
+}
+
+func upsertGitHubPRCommentWithClient(ctx context.Context, gh *gogithub.Client, prURL, marker, body string) error {
+	owner, repo, number, err := parsePRURL(prURL)
+	if err != nil {
+		return err
+	}
+	comments, _, err := gh.Issues.ListComments(ctx, owner, repo, number, &gogithub.IssueListCommentsOptions{
+		ListOptions: gogithub.ListOptions{PerPage: 100},
+	})
+	if err != nil {
+		return fmt.Errorf("listing GitHub PR comments: %w", err)
+	}
+	for _, comment := range comments {
+		if strings.Contains(comment.GetBody(), marker) {
+			_, _, err = gh.Issues.EditComment(ctx, owner, repo, comment.GetID(), &gogithub.IssueComment{Body: &body})
+			if err != nil {
+				return fmt.Errorf("updating GitHub PR comment: %w", err)
+			}
+			return nil
+		}
+	}
+	return postGitHubPRCommentWithClient(ctx, gh, prURL, body)
+}
+
+func upsertGitHubPRComment(ctx context.Context, prURL, token, baseURL, marker, body string) error {
+	resolvedBaseURL, err := resolveGitHubBaseURL(prURL, baseURL)
+	if err != nil {
+		return err
+	}
+	gh, err := newGitHubClient(ctx, token, resolvedBaseURL)
+	if err != nil {
+		return err
+	}
+	return upsertGitHubPRCommentWithClient(ctx, gh, prURL, marker, body)
+}
+
+func addGitHubPRLabels(ctx context.Context, prURL, token, baseURL string, labels []string) error {
+	labels = cleanStringList(labels)
+	if len(labels) == 0 {
+		return nil
+	}
+	resolvedBaseURL, err := resolveGitHubBaseURL(prURL, baseURL)
+	if err != nil {
+		return err
+	}
+	gh, err := newGitHubClient(ctx, token, resolvedBaseURL)
+	if err != nil {
+		return err
+	}
+	owner, repo, number, err := parsePRURL(prURL)
+	if err != nil {
+		return err
+	}
+	_, _, err = gh.Issues.AddLabelsToIssue(ctx, owner, repo, number, labels)
+	if err != nil {
+		return fmt.Errorf("adding GitHub PR labels: %w", err)
+	}
+	return nil
+}
+
+func requestGitHubPRReviewers(ctx context.Context, prURL, token, baseURL string, reviewers []string) error {
+	reviewers = cleanStringList(reviewers)
+	if len(reviewers) == 0 {
+		return nil
+	}
+	resolvedBaseURL, err := resolveGitHubBaseURL(prURL, baseURL)
+	if err != nil {
+		return err
+	}
+	gh, err := newGitHubClient(ctx, token, resolvedBaseURL)
+	if err != nil {
+		return err
+	}
+	owner, repo, number, err := parsePRURL(prURL)
+	if err != nil {
+		return err
+	}
+	_, _, err = gh.PullRequests.RequestReviewers(ctx, owner, repo, number, gogithub.ReviewersRequest{Reviewers: reviewers})
+	if err != nil {
+		return fmt.Errorf("requesting GitHub PR reviewers: %w", err)
+	}
+	return nil
+}
+
 // postGitLabMRNoteWithClient posts body as an MR note using the given client.
 // Separated from postGitLabMRNote to allow tests to inject a client pointed
 // at a local httptest server.
@@ -670,6 +876,182 @@ func postGitLabMRNote(ctx context.Context, mrURL, token, baseURL, body string) e
 		return fmt.Errorf("creating GitLab client: %w", err)
 	}
 	return postGitLabMRNoteWithClient(ctx, gl, mrURL, body)
+}
+
+func getGitLabMRMetadataWithClient(ctx context.Context, gl *gogitlab.Client, mrURL string) (prMetadata, error) {
+	namespace, project, iid, err := parseMRURL(mrURL)
+	if err != nil {
+		return prMetadata{}, err
+	}
+	projectPath := namespace + "/" + project
+	mr, _, err := gl.MergeRequests.GetMergeRequest(projectPath, iid, nil, gogitlab.WithContext(ctx))
+	if err != nil {
+		return prMetadata{}, fmt.Errorf("fetching GitLab MR metadata: %w", err)
+	}
+	return prMetadata{Title: mr.Title, Description: mr.Description}, nil
+}
+
+func getGitLabMRMetadata(ctx context.Context, mrURL, token, baseURL string) (prMetadata, error) {
+	resolvedBaseURL, err := resolveGitLabBaseURL(mrURL, baseURL)
+	if err != nil {
+		return prMetadata{}, err
+	}
+	gl, err := newGitLabClient(token, resolvedBaseURL)
+	if err != nil {
+		return prMetadata{}, fmt.Errorf("creating GitLab client: %w", err)
+	}
+	return getGitLabMRMetadataWithClient(ctx, gl, mrURL)
+}
+
+// updateGitLabMRMetadataWithClient updates the title and/or description of a GitLab MR.
+// Nil fields are left unchanged.
+func updateGitLabMRMetadataWithClient(ctx context.Context, gl *gogitlab.Client, mrURL string, title, description *string) error {
+	if title == nil && description == nil {
+		return nil
+	}
+	namespace, project, iid, err := parseMRURL(mrURL)
+	if err != nil {
+		return err
+	}
+	projectPath := namespace + "/" + project
+	_, _, err = gl.MergeRequests.UpdateMergeRequest(projectPath, iid, &gogitlab.UpdateMergeRequestOptions{
+		Title:       title,
+		Description: description,
+	}, gogitlab.WithContext(ctx))
+	if err != nil {
+		return fmt.Errorf("updating GitLab MR metadata: %w", err)
+	}
+	return nil
+}
+
+// updateGitLabMRMetadata updates the title and/or description of the GitLab MR at mrURL.
+func updateGitLabMRMetadata(ctx context.Context, mrURL, token, baseURL string, title, description *string) error {
+	resolvedBaseURL, err := resolveGitLabBaseURL(mrURL, baseURL)
+	if err != nil {
+		return err
+	}
+	gl, err := newGitLabClient(token, resolvedBaseURL)
+	if err != nil {
+		return fmt.Errorf("creating GitLab client: %w", err)
+	}
+	return updateGitLabMRMetadataWithClient(ctx, gl, mrURL, title, description)
+}
+
+func upsertGitLabMRNoteWithClient(ctx context.Context, gl *gogitlab.Client, mrURL, marker, body string) error {
+	namespace, project, iid, err := parseMRURL(mrURL)
+	if err != nil {
+		return err
+	}
+	projectPath := namespace + "/" + project
+	notes, _, err := gl.Notes.ListMergeRequestNotes(projectPath, iid, &gogitlab.ListMergeRequestNotesOptions{
+		ListOptions: gogitlab.ListOptions{PerPage: 100},
+	}, gogitlab.WithContext(ctx))
+	if err != nil {
+		return fmt.Errorf("listing GitLab MR notes: %w", err)
+	}
+	for _, note := range notes {
+		if strings.Contains(note.Body, marker) {
+			_, _, err = gl.Notes.UpdateMergeRequestNote(projectPath, iid, note.ID, &gogitlab.UpdateMergeRequestNoteOptions{
+				Body: &body,
+			}, gogitlab.WithContext(ctx))
+			if err != nil {
+				return fmt.Errorf("updating GitLab MR note: %w", err)
+			}
+			return nil
+		}
+	}
+	return postGitLabMRNoteWithClient(ctx, gl, mrURL, body)
+}
+
+func upsertGitLabMRNote(ctx context.Context, mrURL, token, baseURL, marker, body string) error {
+	resolvedBaseURL, err := resolveGitLabBaseURL(mrURL, baseURL)
+	if err != nil {
+		return err
+	}
+	gl, err := newGitLabClient(token, resolvedBaseURL)
+	if err != nil {
+		return fmt.Errorf("creating GitLab client: %w", err)
+	}
+	return upsertGitLabMRNoteWithClient(ctx, gl, mrURL, marker, body)
+}
+
+func addGitLabMRLabels(ctx context.Context, mrURL, token, baseURL string, labels []string) error {
+	labels = cleanStringList(labels)
+	if len(labels) == 0 {
+		return nil
+	}
+	resolvedBaseURL, err := resolveGitLabBaseURL(mrURL, baseURL)
+	if err != nil {
+		return err
+	}
+	gl, err := newGitLabClient(token, resolvedBaseURL)
+	if err != nil {
+		return fmt.Errorf("creating GitLab client: %w", err)
+	}
+	namespace, project, iid, err := parseMRURL(mrURL)
+	if err != nil {
+		return err
+	}
+	projectPath := namespace + "/" + project
+	labelOptions := gogitlab.LabelOptions(labels)
+	_, _, err = gl.MergeRequests.UpdateMergeRequest(projectPath, iid, &gogitlab.UpdateMergeRequestOptions{
+		AddLabels: &labelOptions,
+	}, gogitlab.WithContext(ctx))
+	if err != nil {
+		return fmt.Errorf("adding GitLab MR labels: %w", err)
+	}
+	return nil
+}
+
+func requestGitLabMRReviewers(ctx context.Context, mrURL, token, baseURL string, reviewers []string) error {
+	reviewers = cleanStringList(reviewers)
+	if len(reviewers) == 0 {
+		return nil
+	}
+	ids := make([]int64, 0, len(reviewers))
+	for _, reviewer := range reviewers {
+		id, err := strconv.ParseInt(reviewer, 10, 64)
+		if err != nil || id <= 0 {
+			return fmt.Errorf("GitLab reviewer %q must be a numeric user ID", reviewer)
+		}
+		ids = append(ids, id)
+	}
+	resolvedBaseURL, err := resolveGitLabBaseURL(mrURL, baseURL)
+	if err != nil {
+		return err
+	}
+	gl, err := newGitLabClient(token, resolvedBaseURL)
+	if err != nil {
+		return fmt.Errorf("creating GitLab client: %w", err)
+	}
+	namespace, project, iid, err := parseMRURL(mrURL)
+	if err != nil {
+		return err
+	}
+	projectPath := namespace + "/" + project
+	_, _, err = gl.MergeRequests.UpdateMergeRequest(projectPath, iid, &gogitlab.UpdateMergeRequestOptions{
+		ReviewerIDs: &ids,
+	}, gogitlab.WithContext(ctx))
+	if err != nil {
+		return fmt.Errorf("requesting GitLab MR reviewers: %w", err)
+	}
+	return nil
+}
+
+func cleanStringList(values []string) []string {
+	cleaned := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		for _, part := range strings.Split(value, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" || seen[part] {
+				continue
+			}
+			seen[part] = true
+			cleaned = append(cleaned, part)
+		}
+	}
+	return cleaned
 }
 
 // formatPRContent builds the combined title + description + diff string that is

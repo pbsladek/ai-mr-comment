@@ -54,7 +54,7 @@ func TestReleaseWorkflowScansImagesBeforePublish(t *testing.T) {
 		"platforms: linux/amd64,linux/arm64",
 		"Build Docker image for vulnerability scan",
 		"Build Docker FIPS image for vulnerability scan",
-		"uses: docker/scout-action@v1.18.2",
+		"uses: docker/scout-action@v1.20.4",
 		"image: local://pwbsladek/ai-mr-comment:scan",
 		"image: local://pwbsladek/ai-mr-comment:scan-fips",
 		"only-fixed: true",

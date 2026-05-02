@@ -2507,6 +2507,229 @@ func TestPostFlag_OutputStillPosts(t *testing.T) {
 	}
 }
 
+func TestUpdatePRMetadataFlags_UpdateGitHubTitleAndDescription(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	const rawDiff = "diff --git a/foo.go b/foo.go\n+++ b/foo.go\n+fmt.Println(\"hello\")\n"
+	var updated struct {
+		Title string `json:"title"`
+		Body  string `json:"body"`
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v3/repos/owner/repo/pulls/42", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.Header.Get("Accept"), "diff"):
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte(rawDiff))
+		case r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{"title": "Old PR", "body": "Old body"})
+		case r.Method == http.MethodPatch:
+			if err := json.NewDecoder(r.Body).Decode(&updated); err != nil {
+				t.Errorf("failed to decode update payload: %v", err)
+				http.Error(w, "bad request", http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"number": 42, "title": updated.Title, "body": updated.Body})
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	if err := os.WriteFile(tmpHome+"/.ai-mr-comment.toml", []byte(fmt.Sprintf("github_base_url = %q\n", srv.URL)), 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		if prompt == titlePrompt {
+			return "feat: Generated title", nil
+		}
+		return "Generated PR description", nil
+	}
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{
+		"--pr=" + srv.URL + "/owner/repo/pull/42",
+		"--update-title",
+		"--update-description",
+		"--provider=openai",
+		"--plain",
+	})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if updated.Title != "feat: Generated title" || !strings.Contains(updated.Body, "Generated PR description") {
+		t.Fatalf("unexpected updated metadata: %+v", updated)
+	}
+}
+
+func TestMergeManagedSectionPreservesManualContent(t *testing.T) {
+	existing := "Manual intro\n\n" + managedDescriptionStart + "\nold generated\n" + managedDescriptionEnd + "\n\nManual footer"
+	got := mergeManagedSection(existing, "new generated")
+	if !strings.Contains(got, "Manual intro") || !strings.Contains(got, "Manual footer") {
+		t.Fatalf("manual content was not preserved: %q", got)
+	}
+	if strings.Contains(got, "old generated") || !strings.Contains(got, "new generated") {
+		t.Fatalf("managed content was not replaced: %q", got)
+	}
+}
+
+func TestPublishCommand_GitHubOneShotSync(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	const rawDiff = "diff --git a/docs/readme.md b/docs/readme.md\n+++ b/docs/readme.md\n+security note\n"
+	var updatedPR struct {
+		Title string `json:"title"`
+		Body  string `json:"body"`
+	}
+	var updatedComment string
+	var labels []string
+	var reviewers struct {
+		Reviewers []string `json:"reviewers"`
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v3/repos/owner/repo/pulls/42", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.Header.Get("Accept"), "diff"):
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte(rawDiff))
+		case r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"title": "Old PR",
+				"body":  "Manual notes\n\n" + managedDescriptionStart + "\nold generated\n" + managedDescriptionEnd,
+			})
+		case r.Method == http.MethodPatch:
+			if err := json.NewDecoder(r.Body).Decode(&updatedPR); err != nil {
+				t.Errorf("failed to decode PR update: %v", err)
+				http.Error(w, "bad request", http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"number": 42, "title": updatedPR.Title, "body": updatedPR.Body})
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/v3/repos/owner/repo/issues/42/comments", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 99, "body": managedCommentMarker + "\nold comment"}})
+	})
+	mux.HandleFunc("/api/v3/repos/owner/repo/issues/comments/99", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var payload struct {
+			Body string `json:"body"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("failed to decode comment update: %v", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		updatedComment = payload.Body
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": 99, "body": payload.Body})
+	})
+	mux.HandleFunc("/api/v3/repos/owner/repo/issues/42/labels", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&labels); err != nil {
+			t.Errorf("failed to decode labels: %v", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	})
+	mux.HandleFunc("/api/v3/repos/owner/repo/pulls/42/requested_reviewers", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&reviewers); err != nil {
+			t.Errorf("failed to decode reviewers: %v", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"number": 42})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	if err := os.WriteFile(tmpHome+"/.ai-mr-comment.toml", []byte(fmt.Sprintf("github_base_url = %q\n", srv.URL)), 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		if prompt == titlePrompt {
+			return "Add security docs", nil
+		}
+		return "Security risk documentation update", nil
+	}
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{
+		"publish",
+		"--pr=" + srv.URL + "/owner/repo/pull/42",
+		"--provider=openai",
+		"--format=json",
+		"--auto-labels",
+		"--label=manual",
+		"--reviewer=octocat",
+		"--draft-if-risky",
+	})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
+	if updatedPR.Title != "Draft: Add security docs" {
+		t.Fatalf("expected draft title, got %q", updatedPR.Title)
+	}
+	for _, want := range []string{"Manual notes", "Security risk documentation update"} {
+		if !strings.Contains(updatedPR.Body, want) {
+			t.Fatalf("expected PR body to contain %q, got %q", want, updatedPR.Body)
+		}
+	}
+	if strings.Contains(updatedPR.Body, "old generated") {
+		t.Fatalf("expected old managed body to be replaced, got %q", updatedPR.Body)
+	}
+	if !strings.Contains(updatedComment, managedCommentMarker) || !strings.Contains(updatedComment, "Security risk documentation update") {
+		t.Fatalf("expected managed comment update, got %q", updatedComment)
+	}
+	for _, want := range []string{"manual", "docs", "security"} {
+		if !containsString(labels, want) {
+			t.Fatalf("expected label %q in %v", want, labels)
+		}
+	}
+	if !containsString(reviewers.Reviewers, "octocat") {
+		t.Fatalf("expected reviewer octocat, got %+v", reviewers)
+	}
+}
+
 // --- --output with --format=json test ---
 
 // TestOutputFlag_JSON verifies that --output writes valid JSON to the file
@@ -3201,6 +3424,49 @@ func TestQuickCommit_Body_DryRun(t *testing.T) {
 	}
 	if !strings.Contains(out, "## What Changed") {
 		t.Errorf("expected body in output, got:\n%s", out)
+	}
+}
+
+func TestQuickCommit_LongBody_DryRun(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	skipIfDetachedHead(t)
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		for _, want := range []string{"markdown body", "Long-form body mode", "approximately 32 body lines"} {
+			if !strings.Contains(prompt, want) {
+				return "", fmt.Errorf("expected prompt to contain %q, got: %s", want, prompt)
+			}
+		}
+		return "feat(config): add profiles\n\n## Summary\n- Added profile support\n\n## Testing\n- Ran go test", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--long", "--body-lines=32", "--dry-run", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil && (strings.Contains(err.Error(), "no staged changes") || strings.Contains(err.Error(), "no changes found")) {
+		t.Skip("skipping: no diff available in working tree")
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "## Summary") {
+		t.Fatalf("expected long body output, got:\n%s", buf.String())
+	}
+}
+
+func TestLongCommitBodyPromptSuffixDefault(t *testing.T) {
+	got := longCommitBodyPromptSuffix(0)
+	if !strings.Contains(got, "approximately 25 body lines") {
+		t.Fatalf("expected default body line target, got:\n%s", got)
 	}
 }
 
