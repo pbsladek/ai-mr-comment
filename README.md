@@ -728,6 +728,12 @@ ai-mr-comment quick-commit
 # Preview the generated message without touching git
 ai-mr-comment quick-commit --dry-run
 
+# Generate a long multi-section commit body
+ai-mr-comment quick-commit --long
+
+# Aim for a specific body length
+ai-mr-comment quick-commit --body-lines=32
+
 # Commit but skip the push
 ai-mr-comment quick-commit --no-push
 
@@ -824,6 +830,8 @@ Steps performed:
 | `--no-push` | Commit but skip the push |
 | `--breaking` | Force `feat!` conventional commit type to signal a breaking change (major version bump) |
 | `--multi-line` | Generate a multi-line message (subject + body) that pre-fills the PR/MR title and description |
+| `--long` | Generate a longer multi-section body; implies `--multi-line` |
+| `--body-lines` | Target body line count for long multi-line commits; implies `--multi-line` |
 | `--emoji` | Append a type-matched gitmoji to the subject (✨ feat, 🐛 fix, ♻️ refactor, 💥 breaking, etc.) |
 | `--no-conventional` | Skip conventional commits format — AI generates a free-form message instead |
 | `--chaos` | Generate a random funny/absurd conventional commit (ignores the real diff; great for pipeline trigger commits) |

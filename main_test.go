@@ -3427,6 +3427,49 @@ func TestQuickCommit_Body_DryRun(t *testing.T) {
 	}
 }
 
+func TestQuickCommit_LongBody_DryRun(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	skipIfDetachedHead(t)
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		for _, want := range []string{"markdown body", "Long-form body mode", "approximately 32 body lines"} {
+			if !strings.Contains(prompt, want) {
+				return "", fmt.Errorf("expected prompt to contain %q, got: %s", want, prompt)
+			}
+		}
+		return "feat(config): add profiles\n\n## Summary\n- Added profile support\n\n## Testing\n- Ran go test", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--long", "--body-lines=32", "--dry-run", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil && (strings.Contains(err.Error(), "no staged changes") || strings.Contains(err.Error(), "no changes found")) {
+		t.Skip("skipping: no diff available in working tree")
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "## Summary") {
+		t.Fatalf("expected long body output, got:\n%s", buf.String())
+	}
+}
+
+func TestLongCommitBodyPromptSuffixDefault(t *testing.T) {
+	got := longCommitBodyPromptSuffix(0)
+	if !strings.Contains(got, "approximately 25 body lines") {
+		t.Fatalf("expected default body line target, got:\n%s", got)
+	}
+}
+
 // --- --emoji flag tests ---
 
 func TestAppendCommitEmoji_Types(t *testing.T) {

@@ -293,6 +293,21 @@ func normalizeCommitBody(raw string) string {
 	return subject
 }
 
+func longCommitBodyPromptSuffix(bodyLines int) string {
+	if bodyLines <= 0 {
+		bodyLines = 25
+	}
+	return fmt.Sprintf(`
+
+Long-form body mode:
+- Generate a detailed multi-line commit body suitable for a PR/MR description.
+- Target approximately %d body lines after the subject and blank line.
+- Include these sections when relevant: ## Summary, ## Changes, ## Rationale, ## Testing, ## Risks.
+- Prefer concrete bullets that reference changed components, behavior, tests, migrations, config, and operational impact.
+- Mention backward compatibility, rollout notes, follow-up work, and known limitations when the diff suggests them.
+- Keep the subject under 72 characters; the longer detail belongs only in the body.`, bodyLines)
+}
+
 type agentInput struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
@@ -2059,10 +2074,11 @@ func newModelsCmd() *cobra.Command {
 // AI commit message, commits, and pushes — all in one step.
 func newQuickCommitCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
 	var provider, modelOverride, format, profileName string
-	var dryRun, noPush, breaking, multiLine, emoji, noConventional, postFlag, verbose bool
+	var dryRun, noPush, breaking, multiLine, longBody, emoji, noConventional, postFlag, verbose bool
 	var chaos, haiku, roast, fortune bool
 	var qcMonday, qcJira, qcEmoji, qcSassy, qcTechnical bool
 	var qcIntern, qcShakespeare, qcManager, qcYoda, qcExcuse bool
+	var bodyLines int
 
 	cmd := &cobra.Command{
 		Use:   "quick-commit",
@@ -2096,6 +2112,12 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			}
 			if format != "text" && format != "json" {
 				return fmt.Errorf("unsupported format %q: must be text or json", format)
+			}
+			if bodyLines < 0 {
+				return fmt.Errorf("--body-lines must be 0 or greater")
+			}
+			if longBody || bodyLines > 0 {
+				multiLine = true
 			}
 			if postFlag && dryRun {
 				return errors.New("--post cannot be combined with --dry-run")
@@ -2201,6 +2223,9 @@ remote. Use --dry-run to preview the generated message without committing.`,
 				prompt = quickCommitExcusePrompt
 			case multiLine:
 				prompt = commitMsgBodyPrompt
+				if longBody || bodyLines > 0 {
+					prompt += longCommitBodyPromptSuffix(bodyLines)
+				}
 			case noConventional:
 				prompt = quickCommitFreePrompt
 			default:
@@ -2385,6 +2410,8 @@ remote. Use --dry-run to preview the generated message without committing.`,
 	cmd.Flags().BoolVar(&postFlag, "post", false, "After pushing, find or create a PR/MR and post an AI review comment (requires GITHUB_TOKEN or GITLAB_TOKEN)")
 	cmd.Flags().BoolVar(&breaking, "breaking", false, "Mark as a breaking change: forces feat! conventional commit type for a major version bump")
 	cmd.Flags().BoolVar(&multiLine, "multi-line", false, "Generate a multi-line commit message (subject + body) that pre-fills the PR/MR title and description")
+	cmd.Flags().BoolVar(&longBody, "long", false, "Generate a longer multi-section commit body (implies --multi-line)")
+	cmd.Flags().IntVar(&bodyLines, "body-lines", 0, "Target body line count for long multi-line commits (implies --multi-line)")
 	cmd.Flags().BoolVar(&emoji, "emoji", false, "Append a type-matched gitmoji to the commit subject (e.g. feat → ✨, fix → 🐛, breaking → 💥)")
 	cmd.Flags().BoolVar(&noConventional, "no-conventional", false, "Disable conventional commits enforcement (use the AI output as-is)")
 	cmd.Flags().BoolVar(&chaos, "chaos", false, "Generate a random funny/absurd conventional commit message (great for pipeline trigger commits)")
