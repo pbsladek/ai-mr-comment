@@ -1093,7 +1093,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 					Preset:              presetName,
 					DiffSource:          diffSource,
 					Summary:             summary,
-					WouldCallProvider:   !((postFlag || updateTitleFlag || updateDescriptionFlag) && prURL == ""),
+					WouldCallProvider:   (!postFlag && !updateTitleFlag && !updateDescriptionFlag) || prURL != "",
 					WouldWriteOutput:    outputPath != "",
 					WouldCopyClipboard:  clipboardFlag != "",
 					WouldPostComment:    postFlag,
@@ -1166,7 +1166,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 			// Stream tokens directly to the terminal when output is a real TTY,
 			// text format is selected, smart-chunk is off, and no output file is set.
 			// All other paths use the buffered chatFn to get the full response first.
-			isTTY := term.IsTerminal(int(os.Stdout.Fd()))
+			isTTY := fileIsTerminal(os.Stdout)
 			shouldStream := isTTY && format == "text" && streamMode == "" && !smartChunk && outputPath == ""
 			debugLog(cfg, "streaming: tty=%v format=%s smart-chunk=%v output-file=%q → enabled=%v",
 				isTTY, format, smartChunk, outputPath, shouldStream)
@@ -1950,7 +1950,7 @@ func promptConfirm(promptWriter io.Writer, stdinReader io.Reader, autoYes bool) 
 		return true
 	}
 	if f, ok := stdinReader.(*os.File); ok {
-		if !term.IsTerminal(int(f.Fd())) {
+		if !fileIsTerminal(f) {
 			_, _ = fmt.Fprintln(promptWriter, "Non-interactive mode: auto-declining. Use --yes to proceed.")
 			return false
 		}
@@ -1963,6 +1963,13 @@ func promptConfirm(promptWriter io.Writer, stdinReader io.Reader, autoYes bool) 
 	var line string
 	_, _ = fmt.Fscan(stdinReader, &line)
 	return strings.ToLower(strings.TrimSpace(line)) == "y"
+}
+
+func fileIsTerminal(f *os.File) bool {
+	if f == nil {
+		return false
+	}
+	return term.IsTerminal(int(f.Fd())) //nolint:gosec // G115: os.File descriptors are small OS-provided handles expected by x/term.
 }
 
 // setModelOverride applies a CLI --model value to the correct provider field in cfg.

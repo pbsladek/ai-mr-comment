@@ -279,7 +279,7 @@ func cliExecError(ctx context.Context, name string, err error, stderr string) er
 
 // execCLI runs binary with args, captures stdout, and returns the trimmed output.
 func execCLI(ctx context.Context, binary string, args []string) (string, error) {
-	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd := exec.CommandContext(ctx, binary, args...) //nolint:gosec // G204: binary is resolved from explicit config/PATH for supported local AI CLIs.
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -301,7 +301,7 @@ func execCLI(ctx context.Context, binary string, args []string) (string, error) 
 
 // streamExecCLI runs binary with args, streaming stdout to w and returning the full output.
 func streamExecCLI(ctx context.Context, binary string, args []string, w io.Writer) (string, error) {
-	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd := exec.CommandContext(ctx, binary, args...) //nolint:gosec // G204: binary is resolved from explicit config/PATH for supported local AI CLIs.
 	var sb strings.Builder
 	var stderr bytes.Buffer
 	cmd.Stdout = io.MultiWriter(w, &sb)
