@@ -18,22 +18,55 @@ import (
 	"google.golang.org/api/option"
 )
 
+func openAIResponsePayload(text string) map[string]any {
+	return map[string]any{
+		"id":         "resp_1",
+		"object":     "response",
+		"created_at": 0,
+		"status":     "completed",
+		"model":      "test",
+		"output": []map[string]any{
+			{
+				"id":     "msg_1",
+				"type":   "message",
+				"status": "completed",
+				"role":   "assistant",
+				"content": []map[string]any{
+					{
+						"type":        "output_text",
+						"text":        text,
+						"annotations": []any{},
+					},
+				},
+			},
+		},
+	}
+}
+
 // --- callOpenAI tests ---
 
 func TestCallOpenAI_Success(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" {
+			t.Fatalf("expected /v1/responses, got %s", r.URL.Path)
+		}
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req["model"] != "gpt-5.5" {
+			t.Fatalf("expected model gpt-5.5, got %v", req["model"])
+		}
+		if req["instructions"] != "prompt" || req["input"] != "diff" {
+			t.Fatalf("unexpected responses request body: %+v", req)
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id": "1", "object": "chat.completion", "created": 0, "model": "test",
-			"choices": []map[string]any{
-				{"index": 0, "message": map[string]string{"role": "assistant", "content": "openai response"}, "finish_reason": "stop"},
-			},
-		})
+		_ = json.NewEncoder(w).Encode(openAIResponsePayload("openai response"))
 	}))
 	defer ts.Close()
 
 	client := openai.NewClient(openaiopt.WithBaseURL(ts.URL+"/v1/"), openaiopt.WithAPIKey("test"))
-	cfg := &Config{OpenAIModel: "gpt-4o-mini"}
+	cfg := &Config{OpenAIModel: "gpt-5.5"}
 
 	result, err := callOpenAI(context.Background(), &client, cfg, "prompt", "diff")
 	if err != nil {
@@ -44,25 +77,29 @@ func TestCallOpenAI_Success(t *testing.T) {
 	}
 }
 
-func TestCallOpenAI_NoChoices(t *testing.T) {
+func TestCallOpenAI_NoOutputText(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id": "1", "object": "chat.completion", "created": 0, "model": "test",
-			"choices": []map[string]any{},
+			"id":         "resp_1",
+			"object":     "response",
+			"created_at": 0,
+			"status":     "completed",
+			"model":      "test",
+			"output":     []map[string]any{},
 		})
 	}))
 	defer ts.Close()
 
 	client := openai.NewClient(openaiopt.WithBaseURL(ts.URL+"/v1/"), openaiopt.WithAPIKey("test"))
-	cfg := &Config{OpenAIModel: "gpt-4o-mini"}
+	cfg := &Config{OpenAIModel: "gpt-5.5"}
 
 	_, err := callOpenAI(context.Background(), &client, cfg, "prompt", "diff")
 	if err == nil {
-		t.Fatal("expected error for no choices")
+		t.Fatal("expected error for no output text")
 	}
-	if !strings.Contains(err.Error(), "no choices") {
-		t.Errorf("expected 'no choices' error, got %q", err.Error())
+	if !strings.Contains(err.Error(), "no output text") {
+		t.Errorf("expected 'no output text' error, got %q", err.Error())
 	}
 }
 
@@ -74,7 +111,7 @@ func TestCallOpenAI_APIError(t *testing.T) {
 	defer ts.Close()
 
 	client := openai.NewClient(openaiopt.WithBaseURL(ts.URL+"/v1/"), openaiopt.WithAPIKey("test"))
-	cfg := &Config{OpenAIModel: "gpt-4o-mini"}
+	cfg := &Config{OpenAIModel: "gpt-5.5"}
 
 	_, err := callOpenAI(context.Background(), &client, cfg, "prompt", "diff")
 	if err == nil {
@@ -404,19 +441,14 @@ func TestChatCompletions_Ollama(t *testing.T) {
 func TestChatCompletions_OpenAI(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id": "1", "object": "chat.completion", "created": 0, "model": "test",
-			"choices": []map[string]any{
-				{"index": 0, "message": map[string]string{"role": "assistant", "content": "openai via chat"}, "finish_reason": "stop"},
-			},
-		})
+		_ = json.NewEncoder(w).Encode(openAIResponsePayload("openai via responses"))
 	}))
 	defer ts.Close()
 
 	cfg := &Config{
 		Provider:       OpenAI,
 		OpenAIAPIKey:   "test",
-		OpenAIModel:    "gpt-4o-mini",
+		OpenAIModel:    "gpt-5.5",
 		OpenAIEndpoint: ts.URL + "/v1/",
 	}
 
@@ -424,8 +456,8 @@ func TestChatCompletions_OpenAI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != "openai via chat" {
-		t.Errorf("expected 'openai via chat', got %q", result)
+	if result != "openai via responses" {
+		t.Errorf("expected 'openai via responses', got %q", result)
 	}
 }
 
@@ -498,10 +530,10 @@ func TestStreamOpenAI_Success(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		chunks := []string{"Hello", " world", "!"}
-		for _, c := range chunks {
-			_, _ = fmt.Fprintf(w, "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"created\":0,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"content\":%q},\"finish_reason\":null}]}\n\n", c)
+		for i, c := range chunks {
+			_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.output_text.delta\",\"sequence_number\":%d,\"delta\":%q}\n\n", i, c)
 		}
-		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"sequence_number\":4,\"response\":{\"id\":\"resp_1\",\"object\":\"response\",\"created_at\":0,\"status\":\"completed\",\"model\":\"test\",\"output\":[]}}\n\n")
 	}))
 	defer ts.Close()
 
@@ -509,7 +541,7 @@ func TestStreamOpenAI_Success(t *testing.T) {
 		openaiopt.WithAPIKey("test"),
 		openaiopt.WithBaseURL(ts.URL+"/"),
 	)
-	cfg := &Config{OpenAIModel: "gpt-4o-mini"}
+	cfg := &Config{OpenAIModel: "gpt-5.5"}
 
 	var buf strings.Builder
 	result, err := streamOpenAI(context.Background(), &client, cfg, "sys", "diff", &buf)

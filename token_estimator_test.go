@@ -64,7 +64,9 @@ func TestEstimateCost(t *testing.T) {
 		expected    float64
 		description string
 	}{
-		{"gpt-4o-mini", 1_000_000, 0.15, "Exact match"},
+		{"gpt-5.5", 1_000_000, 5.00, "Latest OpenAI exact match"},
+		{"gpt-5.4-mini", 1_000_000, 0.75, "Latest OpenAI mini exact match"},
+		{"gpt-4o-mini", 1_000_000, 0.15, "Legacy OpenAI exact match"},
 		{"GPT-4o-Mini", 1_000_000, 0.15, "Case insensitive"},
 		{"claude-3-5-sonnet-20240620", 1_000_000, 3.00, "Anthropic model"},
 		{"gemini-1.5-flash", 1_000_000, 0.075, "Gemini Flash"},
@@ -72,6 +74,8 @@ func TestEstimateCost(t *testing.T) {
 		{"unknown-model", 1000, 0.0, "Unknown model"},
 		{"custom-gpt-4o-mini-v2", 1_000_000, 0.15, "Fuzzy match"},
 		// Fuzzy match branches
+		{"custom-gpt-5.5-v2", 1_000_000, 5.00, "Fuzzy gpt-5.5"},
+		{"custom-gpt-5.4-nano-v2", 1_000_000, 0.15, "Fuzzy gpt-5.4 nano"},
 		{"custom-gpt-4o-v2", 1_000_000, 2.50, "Fuzzy gpt-4o"},
 		{"claude-3-7-sonnet-custom", 1_000_000, 3.00, "Fuzzy claude-3-7"},
 		{"gemini-2.0-flash-custom", 1_000_000, 0.10, "Fuzzy flash 2.0"},

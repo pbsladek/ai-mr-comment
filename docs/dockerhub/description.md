@@ -25,7 +25,7 @@ docker run --rm \
   -e OPENAI_API_KEY=... \
   -v "$PWD:/work" -w /work \
   pwbsladek/ai-mr-comment:latest \
-  --provider openai --model gpt-4o --staged
+  --provider openai --model gpt-5.5 --staged
 ```
 
 ### Anthropic

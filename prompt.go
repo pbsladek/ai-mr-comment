@@ -9,6 +9,7 @@ import (
 )
 
 // User-facing --template prompts
+//
 //go:embed templates/default.tmpl
 var defaultPromptTemplate string
 
@@ -43,6 +44,7 @@ var mrConventionalCommitPrompt string
 var mrCommitEmojiPrompt string
 
 // Internal prompts — used programmatically, not via --template
+//
 //go:embed templates/internal-commit-msg.tmpl
 var commitMsgPrompt string
 
@@ -156,8 +158,7 @@ func resolveSystemPrompt(raw string) (string, error) {
 	if raw == "" {
 		return "", nil
 	}
-	if strings.HasPrefix(raw, "@") {
-		path := raw[1:]
+	if path, ok := strings.CutPrefix(raw, "@"); ok {
 		content, err := os.ReadFile(path) //nolint:gosec // G304: reading user-supplied prompt file is intentional
 		if err != nil {
 			return "", fmt.Errorf("--system-prompt: cannot read file %q: %w", path, err)

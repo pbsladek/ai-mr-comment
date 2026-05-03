@@ -107,8 +107,8 @@ func prCreateURL(remoteURL, branch string) string {
 	// git@github.com:owner/repo.git → https://github.com/owner/repo.git
 	// git@gitlab.com:group/proj.git → https://gitlab.com/group/proj.git
 	raw := remoteURL
-	if strings.HasPrefix(raw, "git@") {
-		raw = strings.TrimPrefix(raw, "git@")
+	if stripped, ok := strings.CutPrefix(raw, "git@"); ok {
+		raw = stripped
 		raw = strings.Replace(raw, ":", "/", 1)
 		raw = "https://" + raw
 	}
@@ -392,8 +392,8 @@ type remoteInfo struct {
 // the host and path segments. Handles git@host:path.git and https://host/path.git.
 func parseRemoteInfo(rawURL string) (remoteInfo, error) {
 	raw := rawURL
-	if strings.HasPrefix(raw, "git@") {
-		raw = strings.TrimPrefix(raw, "git@")
+	if stripped, ok := strings.CutPrefix(raw, "git@"); ok {
+		raw = stripped
 		raw = strings.Replace(raw, ":", "/", 1)
 		raw = "https://" + raw
 	}

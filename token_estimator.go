@@ -95,6 +95,10 @@ func EstimateCost(model string, inputTokens int32) float64 {
 		"o3-pro":       {Input: 20.00},
 		"o1":           {Input: 15.00},
 		"o1-mini":      {Input: 1.10},
+		"gpt-5.5":      {Input: 5.00},
+		"gpt-5.4":      {Input: 2.50},
+		"gpt-5.4-mini": {Input: 0.75},
+		"gpt-5.4-nano": {Input: 0.15},
 		"gpt-4.1":      {Input: 2.00},
 		"gpt-4.1-mini": {Input: 0.40},
 		"gpt-4.1-nano": {Input: 0.10},
@@ -157,6 +161,10 @@ func substringFallbackPrice(model string, inputTokens int32) float64 {
 	// less-specific ones (e.g. "gpt-4.1") to avoid shadowing.
 	rules := []substringRule{
 		// OpenAI
+		{"gpt-5.5", "", 5.00},
+		{"gpt-5.4-mini", "", 0.75},
+		{"gpt-5.4-nano", "", 0.15},
+		{"gpt-5.4", "", 2.50},
 		{"gpt-4.1-nano", "", 0.10},
 		{"gpt-4.1-mini", "", 0.40},
 		{"gpt-4.1", "", 2.00},

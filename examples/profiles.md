@@ -12,7 +12,7 @@ format = "plain"
 
 [profile.ci]
 provider = "openai"
-model = "gpt-4o-mini"
+model = "gpt-5.4-mini"
 template = "technical"
 format = "json"
 exit_code = true
@@ -25,4 +25,3 @@ ai-mr-comment --profile local
 ai-mr-comment --profile ci --pr "$PR_URL"
 ai-mr-comment quick-commit --profile local --dry-run
 ```
-

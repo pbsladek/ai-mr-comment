@@ -1715,6 +1715,13 @@ func TestModelsCmd(t *testing.T) {
 			if !strings.Contains(buf.String(), "--model") {
 				t.Errorf("expected output to mention --model flag, got:\n%s", buf.String())
 			}
+			if provider == "openai" {
+				for _, model := range []string{"gpt-5.5", "gpt-5.4-mini"} {
+					if !strings.Contains(buf.String(), model) {
+						t.Errorf("expected OpenAI model list to include %q, got:\n%s", model, buf.String())
+					}
+				}
+			}
 			// codex-cli has no fixed model list; verify the fallback message is shown
 			if provider == "codex-cli" && !strings.Contains(buf.String(), "no fixed model list") {
 				t.Errorf("expected codex-cli to show 'no fixed model list' message, got:\n%s", buf.String())

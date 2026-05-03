@@ -15,7 +15,7 @@ Example config:
 
 ```toml
 provider = "openai"
-model = "gpt-4o-mini"
+model = "gpt-5.5"
 template = "default"
 format = "plain"
 
@@ -26,7 +26,7 @@ format = "plain"
 
 [profile.ci]
 provider = "openai"
-model = "gpt-4o-mini"
+model = "gpt-5.4-mini"
 template = "technical"
 format = "json"
 exit_code = true
@@ -87,4 +87,3 @@ For complete control, provide a custom system prompt:
 ```sh
 ai-mr-comment --system-prompt "Review only for concurrency bugs and data races."
 ```
-

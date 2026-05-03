@@ -113,9 +113,9 @@ func withExitCode(code int, err error) error {
 // with the verdict line stripped. "UNKNOWN" indicates a missing/invalid verdict
 // line and should be handled as fail-closed by callers.
 func parseVerdict(comment string) (verdict, body string) {
-	if strings.HasPrefix(comment, "VERDICT: ") {
-		lines := strings.SplitN(comment, "\n", 2)
-		verdict = strings.TrimSpace(strings.TrimPrefix(lines[0], "VERDICT: "))
+	if verdictComment, ok := strings.CutPrefix(comment, "VERDICT: "); ok {
+		lines := strings.SplitN(verdictComment, "\n", 2)
+		verdict = strings.TrimSpace(lines[0])
 		if len(lines) > 1 {
 			body = strings.TrimSpace(lines[1])
 		}
@@ -139,13 +139,12 @@ func normalizeCommitMessage(raw string) string {
 		}
 
 		// Strip common list markers and quote wrappers.
-		switch {
-		case strings.HasPrefix(clean, "- "):
-			clean = strings.TrimSpace(strings.TrimPrefix(clean, "- "))
-		case strings.HasPrefix(clean, "* "):
-			clean = strings.TrimSpace(strings.TrimPrefix(clean, "* "))
-		case strings.HasPrefix(clean, "+ "):
-			clean = strings.TrimSpace(strings.TrimPrefix(clean, "+ "))
+		if stripped, ok := strings.CutPrefix(clean, "- "); ok {
+			clean = strings.TrimSpace(stripped)
+		} else if stripped, ok := strings.CutPrefix(clean, "* "); ok {
+			clean = strings.TrimSpace(stripped)
+		} else if stripped, ok := strings.CutPrefix(clean, "+ "); ok {
+			clean = strings.TrimSpace(stripped)
 		}
 		clean = strings.Trim(clean, "\"'`")
 
@@ -245,19 +244,23 @@ func parseConventionalSubject(subject string) (typ, scope, description string, b
 	}
 	head = strings.TrimSpace(head)
 	desc = strings.TrimSpace(desc)
-	if strings.HasSuffix(head, "!") {
+	if stripped, ok := strings.CutSuffix(head, "!"); ok {
 		breaking = true
-		head = strings.TrimSuffix(head, "!")
+		head = stripped
 	}
-	if open := strings.Index(head, "("); open > 0 && strings.HasSuffix(head, ")") {
-		typ = head[:open]
-		scope = strings.TrimSuffix(head[open+1:], ")")
+	if headWithoutClose, ok := strings.CutSuffix(head, ")"); ok {
+		if open := strings.Index(headWithoutClose, "("); open > 0 {
+			typ = headWithoutClose[:open]
+			scope = headWithoutClose[open+1:]
+		} else {
+			typ = head
+		}
 	} else {
 		typ = head
 	}
-	if strings.HasSuffix(typ, "!") {
+	if stripped, ok := strings.CutSuffix(typ, "!"); ok {
 		breaking = true
-		typ = strings.TrimSuffix(typ, "!")
+		typ = stripped
 	}
 	if !isValidCommitType(typ) {
 		return "", "", strings.TrimSpace(subject), false, false
@@ -642,8 +645,8 @@ func summarizeDiff(diffContent, source, model string, truncated bool) diffSummar
 		if binaryPatch {
 			continue
 		}
-		if strings.HasPrefix(line, "--- ") {
-			path := cleanDiffPath(strings.TrimPrefix(line, "--- "))
+		if rawPath, ok := strings.CutPrefix(line, "--- "); ok {
+			path := cleanDiffPath(rawPath)
 			if path != "/dev/null" {
 				oldPath = path
 			}
@@ -653,8 +656,8 @@ func summarizeDiff(diffContent, source, model string, truncated bool) diffSummar
 			}
 			continue
 		}
-		if strings.HasPrefix(line, "+++ ") {
-			path := cleanDiffPath(strings.TrimPrefix(line, "+++ "))
+		if rawPath, ok := strings.CutPrefix(line, "+++ "); ok {
+			path := cleanDiffPath(rawPath)
 			if path == "/dev/null" {
 				path = oldPath
 			}
@@ -695,7 +698,11 @@ func summarizeDiff(diffContent, source, model string, truncated bool) diffSummar
 }
 
 func parseDiffGitPaths(line string) (oldPath, newPath string, ok bool) {
-	rest := strings.TrimSpace(strings.TrimPrefix(line, "diff --git "))
+	rest, ok := strings.CutPrefix(line, "diff --git ")
+	if !ok {
+		return "", "", false
+	}
+	rest = strings.TrimSpace(rest)
 	first, rest, ok := nextDiffPathToken(rest)
 	if !ok {
 		return "", "", false
@@ -742,11 +749,10 @@ func cleanDiffPath(path string) string {
 	if unquoted, err := strconv.Unquote(path); err == nil {
 		path = unquoted
 	}
-	switch {
-	case strings.HasPrefix(path, "a/"):
-		path = strings.TrimPrefix(path, "a/")
-	case strings.HasPrefix(path, "b/"):
-		path = strings.TrimPrefix(path, "b/")
+	if stripped, ok := strings.CutPrefix(path, "a/"); ok {
+		path = stripped
+	} else if stripped, ok := strings.CutPrefix(path, "b/"); ok {
+		path = stripped
 	}
 	return path
 }
@@ -1788,7 +1794,7 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 	rootCmd.Flags().StringVar(&prURL, "pr", "", "GitHub PR or GitLab MR URL (e.g. https://github.com/owner/repo/pull/123 or https://gitlab.com/group/project/-/merge_requests/42)")
 	rootCmd.Flags().StringVar(&outputPath, "output", "", "Output file path")
 	rootCmd.Flags().StringVar(&provider, "provider", "openai", "API provider (openai, anthropic, gemini, ollama)")
-	rootCmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this run (e.g. gpt-4o, claude-opus-4-6, gemini-2.5-flash)")
+	rootCmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this run (e.g. gpt-5.5, claude-opus-4-6, gemini-2.5-flash)")
 	rootCmd.Flags().StringVarP(&templateName, "template", "t", "default", "Prompt template to use (e.g., default, conventional, technical)")
 	rootCmd.Flags().BoolVar(&debug, "debug", false, "Show token/cost estimate and exit without calling the API")
 	rootCmd.Flags().BoolVar(&verbose, "verbose", false, "Enable verbose debug logging to stderr (provider, model, timing, errors)")
@@ -1923,9 +1929,9 @@ request_timeout = "0s"
 
 # --- OpenAI ---
 # openai_api_key = ""   # or set OPENAI_API_KEY env var
-openai_model    = "gpt-4.1-mini"
+openai_model    = "gpt-5.5"
 openai_endpoint = "https://api.openai.com/v1/"
-# Other OpenAI models: gpt-4.1, gpt-4.1-nano, o3, o3-mini, gpt-4o, gpt-4o-mini
+# Other OpenAI models: gpt-5.4, gpt-5.4-mini, gpt-5.4-nano, gpt-4.1, gpt-4.1-mini
 
 # --- Anthropic ---
 # anthropic_api_key = ""   # or set ANTHROPIC_API_KEY env var
@@ -1975,16 +1981,16 @@ gemini_cli_model = "gemini-2.5-flash"
 # A profile overrides any top-level setting for that invocation only.
 # ---------------------------------------------------------------------------
 
-# Fast / cheap — gpt-4.1-nano for quick reviews and commit messages
+# Fast / cheap — gpt-5.4-nano for quick reviews and commit messages
 [profile.fast]
 provider     = "openai"
-openai_model = "gpt-4.1-nano"
+openai_model = "gpt-5.4-nano"
 template     = "conventional"
 
-# OpenAI — gpt-4.1 with technical template for thorough reviews
+# OpenAI — gpt-5.5 with technical template for thorough reviews
 [profile.openai]
 provider     = "openai"
-openai_model = "gpt-4.1"
+openai_model = "gpt-5.5"
 template     = "technical"
 
 # Anthropic — claude-opus-4-6 with technical template
@@ -2207,6 +2213,10 @@ func setModelOverride(cfg *Config, model string) {
 // providerModels lists known models for each provider, used by the `models` subcommand.
 var providerModels = map[ApiProvider][]string{
 	OpenAI: {
+		"gpt-5.5",
+		"gpt-5.4",
+		"gpt-5.4-mini",
+		"gpt-5.4-nano",
 		"gpt-4.1",
 		"gpt-4.1-mini",
 		"gpt-4.1-nano",

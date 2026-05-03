@@ -25,6 +25,7 @@ import (
 	openai "github.com/openai/openai-go"
 	openaiopt "github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/param"
+	"github.com/openai/openai-go/responses"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
@@ -81,25 +82,25 @@ func getGeminiClient(ctx context.Context, apiKey string) (*genai.Client, error) 
 	return client, nil
 }
 
-// callOpenAI sends a chat completion request to the OpenAI API and returns the
-// generated message content.
+// callOpenAI sends a Responses API request to OpenAI and returns the generated
+// output text.
 func callOpenAI(ctx context.Context, client *openai.Client, cfg *Config, systemPrompt, diffContent string) (string, error) {
-	resp, err := client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-		Model: cfg.OpenAIModel,
-		Messages: []openai.ChatCompletionMessageParamUnion{
-			openai.SystemMessage(systemPrompt),
-			openai.UserMessage(diffContent),
-		},
-		Temperature: param.NewOpt(0.7),
-		MaxTokens:   param.NewOpt(int64(4000)),
+	resp, err := client.Responses.New(ctx, responses.ResponseNewParams{
+		Model:           cfg.OpenAIModel,
+		Instructions:    param.NewOpt(systemPrompt),
+		Input:           responses.ResponseNewParamsInputUnion{OfString: param.NewOpt(diffContent)},
+		MaxOutputTokens: param.NewOpt(int64(4000)),
+		Store:           param.NewOpt(false),
+		Truncation:      responses.ResponseNewParamsTruncationAuto,
 	})
 	if err != nil {
 		return "", enrichOpenAIError(err)
 	}
-	if len(resp.Choices) == 0 {
-		return "", errors.New("no choices returned")
+	output := resp.OutputText()
+	if output == "" {
+		return "", errors.New("no output text returned")
 	}
-	return resp.Choices[0].Message.Content, nil
+	return output, nil
 }
 
 // enrichNetworkError wraps DNS/connection errors with a human-readable hint.
@@ -543,26 +544,32 @@ func streamToWriter(ctx context.Context, cfg *Config, provider ApiProvider, syst
 	}
 }
 
-// streamOpenAI streams a chat completion from OpenAI, writing each token to w.
+// streamOpenAI streams a Responses API call from OpenAI, writing each output
+// text delta to w.
 func streamOpenAI(ctx context.Context, client *openai.Client, cfg *Config, systemPrompt, diffContent string, w io.Writer) (string, error) {
-	stream := client.Chat.Completions.NewStreaming(ctx, openai.ChatCompletionNewParams{
-		Model: cfg.OpenAIModel,
-		Messages: []openai.ChatCompletionMessageParamUnion{
-			openai.SystemMessage(systemPrompt),
-			openai.UserMessage(diffContent),
-		},
-		Temperature: param.NewOpt(0.7),
-		MaxTokens:   param.NewOpt(int64(4000)),
+	stream := client.Responses.NewStreaming(ctx, responses.ResponseNewParams{
+		Model:           cfg.OpenAIModel,
+		Instructions:    param.NewOpt(systemPrompt),
+		Input:           responses.ResponseNewParamsInputUnion{OfString: param.NewOpt(diffContent)},
+		MaxOutputTokens: param.NewOpt(int64(4000)),
+		Store:           param.NewOpt(false),
+		Truncation:      responses.ResponseNewParamsTruncationAuto,
 	})
 	defer func() { _ = stream.Close() }()
 
 	var sb strings.Builder
 	for stream.Next() {
-		chunk := stream.Current()
-		if len(chunk.Choices) > 0 {
-			token := chunk.Choices[0].Delta.Content
+		event := stream.Current()
+		switch event.Type {
+		case "response.output_text.delta":
+			token := event.Delta.OfString
+			if token == "" {
+				token = event.Text
+			}
 			_, _ = fmt.Fprint(w, token)
 			sb.WriteString(token)
+		case "error":
+			return "", fmt.Errorf("OpenAI stream error: %s", event.Message)
 		}
 	}
 	if err := stream.Err(); err != nil {

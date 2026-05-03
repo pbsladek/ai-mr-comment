@@ -208,9 +208,9 @@ claude_cli_model = "claude-sonnet-4-6"
 
 # === OpenAI Settings ===
 openai_api_key = "xxxx"
-openai_model = "gpt-4.1-mini"
+openai_model = "gpt-5.5"
 openai_endpoint = "https://api.openai.com/v1/"
-# Other OpenAI models: gpt-4.1, gpt-4.1-nano, gpt-4o, gpt-4o-mini, o3, o3-mini
+# Other OpenAI models: gpt-5.4, gpt-5.4-mini, gpt-5.4-nano, gpt-4.1, gpt-4.1-mini
 
 # === Gemini Settings ===
 gemini_api_key = "xxxx"
@@ -253,12 +253,12 @@ template = "default"
 
 [profile.fast]
 provider     = "openai"
-openai_model = "gpt-4.1-nano"
+openai_model = "gpt-5.4-nano"
 template     = "conventional"
 
 [profile.openai]
 provider     = "openai"
-openai_model = "gpt-4.1-mini"
+openai_model = "gpt-5.5"
 
 [profile.anthropic]
 provider        = "anthropic"
@@ -322,7 +322,7 @@ Provides a secure foundation for user identity, allowing protected access to API
   "description": "## Key Changes\n\n- Added user model...",
   "comment": "## Key Changes\n\n- Added user model...",
   "provider": "openai",
-  "model": "gpt-4o-mini"
+  "model": "gpt-5.5"
 }
 ```
 
@@ -353,7 +353,7 @@ ai-mr-comment --smart-chunk
 ai-mr-comment --provider anthropic --template technical
 
 # Override the model for a single run
-ai-mr-comment --model gpt-4o
+ai-mr-comment --model gpt-5.5
 
 # Generate comment for a specific commit range
 ai-mr-comment --commit "HEAD~3..HEAD"
@@ -551,7 +551,7 @@ Exit codes are stable for automation: `0` success/pass, `1` tool or runtime erro
 - `--print-request`: Print the resolved provider request as JSON and exit without calling the provider
 - `--preset <NAME>`: Apply built-in defaults: `ci` (JSON + exit-code + technical), `local-fast` (Ollama + plain), `security` (security-focused technical review), or `release-notes` (user-focused title/description).
 - `--provider <PROVIDER>`: Provider (`openai`, `anthropic`, `gemini`, `ollama`, `claude-cli`, `gemini-cli`, `codex-cli`)
-- `--model <NAME>`: Override the model for this run (e.g. `gpt-4o`, `claude-opus-4-6`, `gemini-2.5-flash`)
+- `--model <NAME>`: Override the model for this run (e.g. `gpt-5.5`, `claude-opus-4-6`, `gemini-2.5-flash`)
 - `-t, --template <NAME>`: Template style — `default`, `conventional`, `technical`, `user-focused`, `emoji`, `sassy`, `monday`, `jira`, `commit`, `commit-emoji`, `commit-conventional`, `chaos`, `haiku`, `roast`, `intern`, `shakespeare`, `manager`, `yoda`, `excuse` (`commit`, `commit-emoji`, and `commit-conventional` require `--commit-msg`; style templates cannot be combined with `--commit-msg`)
 - `--system-prompt <TEXT|@FILE>`: Override the system prompt for this run. Pass the prompt inline (`--system-prompt="Focus on security"`) or read it from a file with an `@` prefix (`--system-prompt=@review.txt`). Mutually exclusive with `--template`.
 - `--chaos`: Generate a chaotic, dramatically over-the-top MR/PR description (still technically accurate). Mutually exclusive with `--template`, `--system-prompt`, `--commit-msg`.
@@ -1105,12 +1105,12 @@ template        = "default"
 
 [profile.fast]
 provider     = "openai"
-openai_model = "gpt-4.1-nano"
+openai_model = "gpt-5.4-nano"
 template     = "conventional"
 
 [profile.openai]
 provider     = "openai"
-openai_model = "gpt-4.1"
+openai_model = "gpt-5.5"
 template     = "technical"
 
 [profile.anthropic]
