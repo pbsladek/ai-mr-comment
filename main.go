@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime/debug"
 	"sort"
@@ -175,8 +176,7 @@ func normalizeCommitMessage(raw string) string {
 
 func isConventionalCommitLine(line string) bool {
 	l := strings.ToLower(strings.TrimSpace(line))
-	types := []string{"feat", "fix", "docs", "style", "refactor", "test", "chore", "perf", "ci", "build", "revert"}
-	for _, typ := range types {
+	for _, typ := range conventionalCommitTypes {
 		if strings.HasPrefix(l, typ+":") {
 			return true
 		}
@@ -189,6 +189,110 @@ func isConventionalCommitLine(line string) bool {
 		}
 	}
 	return false
+}
+
+var conventionalCommitTypes = []string{"feat", "fix", "docs", "style", "refactor", "test", "chore", "perf", "ci", "build", "revert"}
+var quickCommitMessageTemplateNames = []string{"short", "detailed", "release", "ticket"}
+
+func isValidCommitType(typ string) bool {
+	for _, valid := range conventionalCommitTypes {
+		if typ == valid {
+			return true
+		}
+	}
+	return false
+}
+
+func isValidQuickCommitMessageTemplate(name string) bool {
+	for _, valid := range quickCommitMessageTemplateNames {
+		if name == valid {
+			return true
+		}
+	}
+	return false
+}
+
+func quickCommitMessageTemplateImpliesBody(name string) bool {
+	switch name {
+	case "detailed", "release", "ticket":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateCommitScope(scope string) error {
+	if scope == "" {
+		return errors.New("--scope cannot be empty")
+	}
+	for _, r := range scope {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			continue
+		}
+		switch r {
+		case '.', '_', '-', '/':
+			continue
+		}
+		return fmt.Errorf("--scope contains invalid character %q", r)
+	}
+	return nil
+}
+
+func parseConventionalSubject(subject string) (typ, scope, description string, breaking, ok bool) {
+	head, desc, hasColon := strings.Cut(subject, ":")
+	if !hasColon {
+		return "", "", strings.TrimSpace(subject), false, false
+	}
+	head = strings.TrimSpace(head)
+	desc = strings.TrimSpace(desc)
+	if strings.HasSuffix(head, "!") {
+		breaking = true
+		head = strings.TrimSuffix(head, "!")
+	}
+	if open := strings.Index(head, "("); open > 0 && strings.HasSuffix(head, ")") {
+		typ = head[:open]
+		scope = strings.TrimSuffix(head[open+1:], ")")
+	} else {
+		typ = head
+	}
+	if strings.HasSuffix(typ, "!") {
+		breaking = true
+		typ = strings.TrimSuffix(typ, "!")
+	}
+	if !isValidCommitType(typ) {
+		return "", "", strings.TrimSpace(subject), false, false
+	}
+	return typ, scope, desc, breaking, true
+}
+
+func applyCommitTypeScope(msg, forcedType, forcedScope string) string {
+	if forcedType == "" && forcedScope == "" {
+		return msg
+	}
+	subject, rest, hasRest := strings.Cut(msg, "\n")
+	typ, scope, description, breaking, ok := parseConventionalSubject(strings.TrimSpace(subject))
+	if !ok {
+		typ = "feat"
+		description = strings.TrimSpace(subject)
+	}
+	if forcedType != "" {
+		typ = forcedType
+	}
+	if forcedScope != "" {
+		scope = forcedScope
+	}
+	prefix := typ
+	if breaking {
+		prefix += "!"
+	}
+	if scope != "" {
+		prefix += "(" + scope + ")"
+	}
+	subject = prefix + ": " + strings.TrimSpace(description)
+	if hasRest {
+		return subject + "\n" + rest
+	}
+	return subject
 }
 
 // commitTypeEmoji maps a conventional commit type to a trailing gitmoji.
@@ -306,6 +410,113 @@ Long-form body mode:
 - Prefer concrete bullets that reference changed components, behavior, tests, migrations, config, and operational impact.
 - Mention backward compatibility, rollout notes, follow-up work, and known limitations when the diff suggests them.
 - Keep the subject under 72 characters; the longer detail belongs only in the body.`, bodyLines)
+}
+
+func appendCommitGuidance(prompt, commitType, commitScope, messageTemplate string) string {
+	var hints []string
+	if commitType != "" {
+		hints = append(hints, fmt.Sprintf("- Use conventional commit type `%s`.", commitType))
+	}
+	if commitScope != "" {
+		hints = append(hints, fmt.Sprintf("- Use conventional commit scope `%s`.", commitScope))
+	}
+	if messageTemplate != "" {
+		hints = append(hints, quickCommitMessageTemplateGuidance(messageTemplate))
+	}
+	if len(hints) == 0 {
+		return prompt
+	}
+	return prompt + "\n\nQuick-commit overrides:\n" + strings.Join(hints, "\n")
+}
+
+func quickCommitMessageTemplateGuidance(name string) string {
+	switch name {
+	case "short":
+		return "- Use the `short` message template: generate one concise conventional commit subject only; no body unless another flag explicitly requires one."
+	case "detailed":
+		return "- Use the `detailed` message template: generate a subject plus a markdown body with ## Summary, ## Changes, ## Rationale, and ## Testing sections when relevant."
+	case "release":
+		return "- Use the `release` message template: generate a subject plus a release-note-ready body focused on user-visible behavior, compatibility, migration notes, risks, and validation."
+	case "ticket":
+		return "- Use the `ticket` message template: generate a subject plus a body that references the branch ticket key when present and includes issue context, implementation notes, and verification."
+	default:
+		return ""
+	}
+}
+
+func appendSignedOffBy(message, identity string) string {
+	trailer := "Signed-off-by: " + identity
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return trailer
+	}
+	if strings.Contains(message, trailer) {
+		return message
+	}
+	return message + "\n\n" + trailer
+}
+
+func splitEditor(editor string) []string {
+	return strings.Fields(editor)
+}
+
+func defaultEditor() string {
+	for _, key := range []string{"GIT_EDITOR", "VISUAL", "EDITOR"} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return "vi"
+}
+
+func editCommitMessage(message string) (string, error) {
+	return editCommitMessageWithEditor(message, defaultEditor())
+}
+
+func editCommitMessageWithEditor(message, editor string) (string, error) {
+	parts := splitEditor(editor)
+	if len(parts) == 0 {
+		return "", errors.New("--edit requires a non-empty editor command")
+	}
+	tmp, err := os.CreateTemp("", "ai-mr-comment-edit-*.txt")
+	if err != nil {
+		return "", fmt.Errorf("creating editor file: %w", err)
+	}
+	name := tmp.Name()
+	defer func() {
+		_ = os.Remove(name)
+	}()
+	if _, err := tmp.WriteString(strings.TrimSpace(message) + "\n"); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("writing editor file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("closing editor file: %w", err)
+	}
+	args := append(parts[1:], name)
+	cmd := exec.Command(parts[0], args...) //nolint:gosec // G204: explicit editor command selected by the user via environment
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("running editor %q: %w", editor, err)
+	}
+	edited, err := os.ReadFile(name)
+	if err != nil {
+		return "", fmt.Errorf("reading edited commit message: %w", err)
+	}
+	out := strings.TrimSpace(string(edited))
+	if out == "" {
+		return "", errors.New("edited commit message is empty")
+	}
+	return out, nil
+}
+
+func stageQuickCommitChanges(trackedOnly bool) error {
+	if trackedOnly {
+		return gitAddTracked()
+	}
+	return gitAdd()
 }
 
 type agentInput struct {
@@ -1651,15 +1862,16 @@ func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, strin
 		ValidArgs: []string{"bash", "zsh", "fish", "powershell"},
 		Args:      cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
 			switch args[0] {
 			case "bash":
-				return rootCmd.GenBashCompletionV2(os.Stdout, true)
+				return rootCmd.GenBashCompletionV2(out, true)
 			case "zsh":
-				return rootCmd.GenZshCompletion(os.Stdout)
+				return rootCmd.GenZshCompletion(out)
 			case "fish":
-				return rootCmd.GenFishCompletion(os.Stdout, true)
+				return rootCmd.GenFishCompletion(out, true)
 			case "powershell":
-				return rootCmd.GenPowerShellCompletionWithDesc(os.Stdout)
+				return rootCmd.GenPowerShellCompletionWithDesc(out)
 			default:
 				return fmt.Errorf("unsupported shell: %s", args[0])
 			}
@@ -2080,8 +2292,9 @@ func newModelsCmd() *cobra.Command {
 // newQuickCommitCmd returns a command that stages all changes, generates an
 // AI commit message, commits, and pushes — all in one step.
 func newQuickCommitCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
-	var provider, modelOverride, format, profileName string
+	var provider, modelOverride, format, profileName, commitType, commitScope, messageTemplate string
 	var dryRun, noPush, breaking, multiLine, longBody, emoji, noConventional, postFlag, verbose bool
+	var editMessage, includeUntracked, trackedOnly, signoff bool
 	var chaos, haiku, roast, fortune bool
 	var qcMonday, qcJira, qcEmoji, qcSassy, qcTechnical bool
 	var qcIntern, qcShakespeare, qcManager, qcYoda, qcExcuse bool
@@ -2123,7 +2336,30 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			if bodyLines < 0 {
 				return fmt.Errorf("--body-lines must be 0 or greater")
 			}
-			if longBody || bodyLines > 0 {
+			commitType = strings.ToLower(strings.TrimSpace(commitType))
+			commitScope = strings.TrimSpace(commitScope)
+			messageTemplate = strings.ToLower(strings.TrimSpace(messageTemplate))
+			if commitType != "" && !isValidCommitType(commitType) {
+				return fmt.Errorf("--type must be one of: %s", strings.Join(conventionalCommitTypes, ", "))
+			}
+			if messageTemplate != "" && !isValidQuickCommitMessageTemplate(messageTemplate) {
+				return fmt.Errorf("--message-template must be one of: %s", strings.Join(quickCommitMessageTemplateNames, ", "))
+			}
+			if cmd.Flags().Changed("scope") {
+				if err := validateCommitScope(commitScope); err != nil {
+					return err
+				}
+			}
+			if noConventional && (commitType != "" || commitScope != "") {
+				return fmt.Errorf("--type and --scope cannot be combined with --no-conventional")
+			}
+			if breaking && commitType != "" && commitType != "feat" {
+				return fmt.Errorf("--breaking can only be combined with --type=feat")
+			}
+			if includeUntracked && trackedOnly {
+				return fmt.Errorf("--include-untracked and --tracked-only are mutually exclusive")
+			}
+			if longBody || bodyLines > 0 || quickCommitMessageTemplateImpliesBody(messageTemplate) {
 				multiLine = true
 			}
 			if postFlag && dryRun {
@@ -2145,8 +2381,12 @@ remote. Use --dry-run to preview the generated message without committing.`,
 
 			// Stage everything (skipped in dry-run).
 			if !dryRun {
-				_, _ = fmt.Fprintln(out, "Staging all changes (git add .)...")
-				if err := gitAdd(); err != nil {
+				if trackedOnly {
+					_, _ = fmt.Fprintln(out, "Staging tracked changes (git add -u)...")
+				} else {
+					_, _ = fmt.Fprintln(out, "Staging all changes (git add .)...")
+				}
+				if err := stageQuickCommitChanges(trackedOnly); err != nil {
 					return err
 				}
 			}
@@ -2242,6 +2482,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 				prompt += "\n\nThis is a BREAKING CHANGE release. You MUST use the 'feat!' type (with an exclamation mark) to signal a breaking change, e.g. \"feat!(scope): description\" or \"feat!: description\"."
 				diffContent += "\n\nBREAKING CHANGE: this release introduces a breaking change and must use the feat! conventional commit type."
 			}
+			prompt = appendCommitGuidance(prompt, commitType, commitScope, messageTemplate)
 			commitMessage, err := chatFn(cmd.Context(), cfg, cfg.Provider, prompt, diffContent)
 			if err != nil {
 				return fmt.Errorf("generating commit message: %w", err)
@@ -2257,6 +2498,10 @@ remote. Use --dry-run to preview the generated message without committing.`,
 				// major bump even when the commit is squashed into a merge commit
 				// (where the subject line is replaced by "Merge pull request #N...").
 				commitMessage += "\n\nBREAKING CHANGE: breaking change"
+			}
+			commitMessage = applyCommitTypeScope(commitMessage, commitType, commitScope)
+			if breaking {
+				commitMessage = enforceBreakingChange(commitMessage)
 			}
 			if emoji {
 				commitMessage = appendCommitEmoji(commitMessage)
@@ -2278,6 +2523,24 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			jsonMsg := commitMessage
 			if fortuneBody != "" {
 				jsonMsg += "\n\n" + fortuneBody
+			}
+			if editMessage {
+				edited, editErr := editCommitMessage(jsonMsg)
+				if editErr != nil {
+					return editErr
+				}
+				jsonMsg = edited
+				commitMessage = edited
+				fortuneBody = ""
+			}
+			if signoff {
+				identity, signoffErr := getGitSignoffIdentity()
+				if signoffErr != nil {
+					return fmt.Errorf("--signoff: %w", signoffErr)
+				}
+				jsonMsg = appendSignedOffBy(jsonMsg, identity)
+				commitMessage = jsonMsg
+				fortuneBody = ""
 			}
 			if format == "json" {
 				if err := json.NewEncoder(out).Encode(struct {
@@ -2309,7 +2572,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			if format != "json" {
 				_, _ = fmt.Fprintln(out, "Committing...")
 			}
-			if err := gitCommit(commitMessage, fortuneBody); err != nil {
+			if err := gitCommitMessage(jsonMsg); err != nil {
 				return err
 			}
 
@@ -2414,6 +2677,13 @@ remote. Use --dry-run to preview the generated message without committing.`,
 	cmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Generate and print the commit message without staging, committing, or pushing")
 	cmd.Flags().BoolVar(&noPush, "no-push", false, "Commit but skip the push step")
+	cmd.Flags().BoolVar(&editMessage, "edit", false, "Open the generated commit message in $GIT_EDITOR, $VISUAL, or $EDITOR before committing")
+	cmd.Flags().BoolVar(&includeUntracked, "include-untracked", false, "Explicitly stage tracked and untracked changes (default behaviour)")
+	cmd.Flags().BoolVar(&trackedOnly, "tracked-only", false, "Stage only tracked modified/deleted files with git add -u")
+	cmd.Flags().BoolVar(&signoff, "signoff", false, "Append a Signed-off-by trailer using git user.name and user.email")
+	cmd.Flags().StringVar(&commitType, "type", "", "Force a conventional commit type (feat, fix, docs, style, refactor, test, chore, perf, ci, build, revert)")
+	cmd.Flags().StringVar(&commitScope, "scope", "", "Force a conventional commit scope")
+	cmd.Flags().StringVar(&messageTemplate, "message-template", "", "Apply a commit message template style (short, detailed, release, ticket)")
 	cmd.Flags().BoolVar(&postFlag, "post", false, "After pushing, find or create a PR/MR and post an AI review comment (requires GITHUB_TOKEN or GITLAB_TOKEN)")
 	cmd.Flags().BoolVar(&breaking, "breaking", false, "Mark as a breaking change: forces feat! conventional commit type for a major version bump")
 	cmd.Flags().BoolVar(&multiLine, "multi-line", false, "Generate a multi-line commit message (subject + body) that pre-fills the PR/MR title and description")
@@ -2439,6 +2709,8 @@ remote. Use --dry-run to preview the generated message without committing.`,
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Print debug info (provider, model, prompt size, timing) to stderr")
 	_ = cmd.RegisterFlagCompletionFunc("provider", completeValues(providerNames))
 	_ = cmd.RegisterFlagCompletionFunc("format", completeValues([]string{"text", "json"}))
+	_ = cmd.RegisterFlagCompletionFunc("type", completeValues(conventionalCommitTypes))
+	_ = cmd.RegisterFlagCompletionFunc("message-template", completeValues(quickCommitMessageTemplateNames))
 	_ = cmd.RegisterFlagCompletionFunc("profile", completeProfiles)
 	return cmd
 }
@@ -3369,6 +3641,15 @@ alias amc-technical='ai-mr-comment --template=technical'       # deeply technica
 alias amc-user='ai-mr-comment --template=user-focused'         # user-impact focused MR/PR description
 alias amc-qc='ai-mr-comment quick-commit'                      # stage + AI commit + push
 alias amc-qc-dry='ai-mr-comment quick-commit --dry-run'        # preview commit msg
+alias amc-qc-edit='ai-mr-comment quick-commit --edit'          # edit generated commit msg before committing
+alias amc-qc-local='ai-mr-comment quick-commit --no-push'      # commit locally without pushing
+alias amc-qc-tracked='ai-mr-comment quick-commit --tracked-only'  # commit tracked changes only
+alias amc-qc-signoff='ai-mr-comment quick-commit --signoff'    # append Signed-off-by trailer
+alias amc-qc-fix='ai-mr-comment quick-commit --type=fix'       # force fix commit type
+alias amc-qc-docs='ai-mr-comment quick-commit --type=docs'     # force docs commit type
+alias amc-qc-detailed='ai-mr-comment quick-commit --message-template=detailed'  # detailed commit body
+alias amc-qc-release='ai-mr-comment quick-commit --message-template=release'    # release-note-ready commit body
+alias amc-qc-ticket='ai-mr-comment quick-commit --message-template=ticket'       # ticket-oriented commit body
 alias amc-qc-breaking='ai-mr-comment quick-commit --breaking'  # breaking change commit (feat!)
 alias amc-qc-chaos='ai-mr-comment quick-commit --chaos'              # funny/absurd conventional commit
 alias amc-qc-haiku='ai-mr-comment quick-commit --haiku'              # commit description as a haiku
@@ -3433,6 +3714,15 @@ Aliases defined:
   amc-user           — user-impact focused MR/PR description
   amc-qc             — quick-commit (stage + AI commit + push)
   amc-qc-dry         — quick-commit dry-run (preview only)
+  amc-qc-edit        — quick-commit with editor review before commit
+  amc-qc-local       — quick-commit without pushing
+  amc-qc-tracked     — quick-commit tracked changes only
+  amc-qc-signoff     — quick-commit with Signed-off-by trailer
+  amc-qc-fix         — quick-commit forcing fix type
+  amc-qc-docs        — quick-commit forcing docs type
+  amc-qc-detailed    — quick-commit with detailed message template
+  amc-qc-release     — quick-commit with release-note-ready message template
+  amc-qc-ticket      — quick-commit with ticket-oriented message template
   amc-qc-breaking    — quick-commit with breaking change (feat!)
   amc-qc-chaos       — quick-commit with funny/absurd conventional commit
   amc-qc-haiku       — quick-commit with commit description as a haiku
@@ -3468,5 +3758,6 @@ Aliases defined:
 
 	cmd.Flags().StringVar(&shell, "shell", "bash", "Target shell: bash or zsh (both use the same alias syntax)")
 	cmd.Flags().StringVar(&outputPath, "output", "", "Also write aliases to this file (e.g. ~/.bashrc)")
+	_ = cmd.RegisterFlagCompletionFunc("shell", completeValues([]string{"bash", "zsh"}))
 	return cmd
 }

@@ -737,6 +737,23 @@ ai-mr-comment quick-commit --body-lines=32
 # Commit but skip the push
 ai-mr-comment quick-commit --no-push
 
+# Open the generated message in your editor before committing
+ai-mr-comment quick-commit --edit
+
+# Force conventional commit type and scope
+ai-mr-comment quick-commit --type fix --scope api
+
+# Apply a message template style
+ai-mr-comment quick-commit --message-template detailed
+ai-mr-comment quick-commit --message-template release
+ai-mr-comment quick-commit --message-template ticket
+
+# Stage only tracked modified/deleted files
+ai-mr-comment quick-commit --tracked-only
+
+# Append a DCO signoff trailer from git user config
+ai-mr-comment quick-commit --signoff
+
 # Use a specific provider or model
 ai-mr-comment quick-commit --provider anthropic --model claude-opus-4-6
 
@@ -818,16 +835,23 @@ ai-mr-comment quick-commit --format json
 ```
 
 Steps performed:
-1. `git add .` — stages all changes
+1. `git add .` — stages all changes by default; `--tracked-only` uses `git add -u`
 2. Reads the staged diff; prepends branch name for ticket key context
 3. Calls AI with the conventional commits prompt
-4. `git commit -m "<message>"`
+4. Optionally edits, signs off, and commits the generated message
 5. `git push --set-upstream origin <branch>` — works for new branches too
 
 | Flag | Description |
 |---|---|
 | `--dry-run` | Generate and print the message, skip all git operations |
 | `--no-push` | Commit but skip the push |
+| `--edit` | Open the generated commit message in `$GIT_EDITOR`, `$VISUAL`, or `$EDITOR` before committing |
+| `--type` | Force a conventional commit type (`feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `perf`, `ci`, `build`, or `revert`) |
+| `--scope` | Force a conventional commit scope |
+| `--message-template` | Apply a commit message template style: `short`, `detailed`, `release`, or `ticket` |
+| `--include-untracked` | Explicitly stage tracked and untracked changes, matching the default behavior |
+| `--tracked-only` | Stage only tracked modified/deleted files with `git add -u` |
+| `--signoff` | Append a `Signed-off-by:` trailer using local `git user.name` and `git user.email` |
 | `--breaking` | Force `feat!` conventional commit type to signal a breaking change (major version bump) |
 | `--multi-line` | Generate a multi-line message (subject + body) that pre-fills the PR/MR title and description |
 | `--long` | Generate a longer multi-section body; implies `--multi-line` |
@@ -972,6 +996,15 @@ Aliases defined:
 | `amc-user` | `ai-mr-comment --template=user-focused` |
 | `amc-qc` | `ai-mr-comment quick-commit` |
 | `amc-qc-dry` | `ai-mr-comment quick-commit --dry-run` |
+| `amc-qc-edit` | `ai-mr-comment quick-commit --edit` |
+| `amc-qc-local` | `ai-mr-comment quick-commit --no-push` |
+| `amc-qc-tracked` | `ai-mr-comment quick-commit --tracked-only` |
+| `amc-qc-signoff` | `ai-mr-comment quick-commit --signoff` |
+| `amc-qc-fix` | `ai-mr-comment quick-commit --type=fix` |
+| `amc-qc-docs` | `ai-mr-comment quick-commit --type=docs` |
+| `amc-qc-detailed` | `ai-mr-comment quick-commit --message-template=detailed` |
+| `amc-qc-release` | `ai-mr-comment quick-commit --message-template=release` |
+| `amc-qc-ticket` | `ai-mr-comment quick-commit --message-template=ticket` |
 | `amc-qc-breaking` | `ai-mr-comment quick-commit --breaking` |
 | `amc-qc-chaos` | `ai-mr-comment quick-commit --chaos` |
 | `amc-qc-haiku` | `ai-mr-comment quick-commit --haiku` |

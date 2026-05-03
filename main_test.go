@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1067,27 +1068,85 @@ func TestNewRootCmd_TitleFlagJSON(t *testing.T) {
 }
 
 func TestCompletionCommand(t *testing.T) {
-	// Capture os.Stdout since GenBashCompletionV2 writes directly to os.Stdout
-	origStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
+	var buf strings.Builder
 	cmd := newRootCmd(dummyChatFn)
 	cmd.SetArgs([]string{"completion", "bash"})
+	cmd.SetOut(&buf)
 	cmd.SetErr(io.Discard)
 	err := cmd.Execute()
-
-	_ = w.Close()
-	os.Stdout = origStdout
-
-	var buf strings.Builder
-	_, _ = io.Copy(&buf, r)
 
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 	if !strings.Contains(buf.String(), "ai-mr-comment") {
 		t.Error("expected completion output to contain 'ai-mr-comment'")
+	}
+}
+
+func TestCompletionScriptsForBashAndZsh(t *testing.T) {
+	for _, shell := range []string{"bash", "zsh"} {
+		t.Run(shell, func(t *testing.T) {
+			var buf strings.Builder
+			cmd := newRootCmd(dummyChatFn)
+			cmd.SetArgs([]string{"completion", shell})
+			cmd.SetOut(&buf)
+			cmd.SetErr(io.Discard)
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("completion %s failed: %v", shell, err)
+			}
+			out := buf.String()
+			if !strings.Contains(out, "ai-mr-comment") {
+				t.Fatalf("expected %s completion output to mention ai-mr-comment", shell)
+			}
+		})
+	}
+}
+
+func TestQuickCommitQoLFlagsRegisteredForCompletion(t *testing.T) {
+	cmd := newRootCmd(dummyChatFn)
+	quickCommit, _, err := cmd.Find([]string{"quick-commit"})
+	if err != nil {
+		t.Fatalf("find quick-commit: %v", err)
+	}
+	for _, want := range []string{"edit", "type", "scope", "message-template", "include-untracked", "tracked-only", "signoff"} {
+		if quickCommit.Flags().Lookup(want) == nil {
+			t.Fatalf("quick-commit flag %q is not registered", want)
+		}
+	}
+}
+
+func TestQuickCommitTypeCompletion(t *testing.T) {
+	cmd := newRootCmd(dummyChatFn)
+	quickCommit, _, err := cmd.Find([]string{"quick-commit"})
+	if err != nil {
+		t.Fatalf("find quick-commit: %v", err)
+	}
+	completion, ok := quickCommit.GetFlagCompletionFunc("type")
+	if !ok {
+		t.Fatal("missing quick-commit --type completion")
+	}
+	values, directive := completion(quickCommit, nil, "f")
+	if directive == 0 || !containsString(values, "fix") || !containsString(values, "feat") {
+		t.Fatalf("expected type completions to include feat/fix, got %v directive=%v", values, directive)
+	}
+}
+
+func TestQuickCommitMessageTemplateCompletion(t *testing.T) {
+	cmd := newRootCmd(dummyChatFn)
+	quickCommit, _, err := cmd.Find([]string{"quick-commit"})
+	if err != nil {
+		t.Fatalf("find quick-commit: %v", err)
+	}
+	completion, ok := quickCommit.GetFlagCompletionFunc("message-template")
+	if !ok {
+		t.Fatal("missing quick-commit --message-template completion")
+	}
+	values, directive := completion(quickCommit, nil, "d")
+	if directive == 0 || !containsString(values, "detailed") {
+		t.Fatalf("expected message-template completions, got %v directive=%v", values, directive)
 	}
 }
 
@@ -3154,6 +3213,15 @@ func TestGenAliases_DefaultOutput(t *testing.T) {
 		"alias amc-commit-multi=",
 		"alias amc-qc=",
 		"alias amc-qc-dry=",
+		"alias amc-qc-edit=",
+		"alias amc-qc-local=",
+		"alias amc-qc-tracked=",
+		"alias amc-qc-signoff=",
+		"alias amc-qc-fix=",
+		"alias amc-qc-docs=",
+		"alias amc-qc-detailed=",
+		"alias amc-qc-release=",
+		"alias amc-qc-ticket=",
 		"alias amc-qc-breaking=",
 		"alias amc-cl=",
 		"alias amc-models=",
@@ -3193,6 +3261,22 @@ func TestGenAliases_UnsupportedShell(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "unsupported shell") {
 		t.Fatalf("expected unsupported shell error, got %v", err)
+	}
+}
+
+func TestGenAliasesShellCompletion(t *testing.T) {
+	cmd := newRootCmd(dummyChatFn)
+	genAliases, _, err := cmd.Find([]string{"gen-aliases"})
+	if err != nil {
+		t.Fatalf("find gen-aliases: %v", err)
+	}
+	completion, ok := genAliases.GetFlagCompletionFunc("shell")
+	if !ok {
+		t.Fatal("missing shell completion")
+	}
+	values, directive := completion(genAliases, nil, "z")
+	if directive == 0 || !containsString(values, "zsh") {
+		t.Fatalf("expected zsh completion, got %v directive=%v", values, directive)
 	}
 }
 
@@ -3460,6 +3544,259 @@ func TestQuickCommit_LongBody_DryRun(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "## Summary") {
 		t.Fatalf("expected long body output, got:\n%s", buf.String())
+	}
+}
+
+func TestQuickCommit_MessageTemplate_DetailedImpliesBody(t *testing.T) {
+	dir := initEmptyRepo(t)
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	if err := os.WriteFile(filepath.Join(dir, "template.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", dir, "add", ".").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+
+	var capturedPrompt string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		capturedPrompt = prompt
+		return "feat(cli): add template flag\n\n## Summary\n- Added template support\n\n## Testing\n- Ran go test", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--message-template=detailed", "--dry-run", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{"markdown body", "`detailed` message template", "## Summary", "## Testing"} {
+		if !strings.Contains(capturedPrompt, want) && !strings.Contains(buf.String(), want) {
+			t.Fatalf("expected prompt or output to contain %q\nprompt:\n%s\noutput:\n%s", want, capturedPrompt, buf.String())
+		}
+	}
+}
+
+func TestApplyCommitTypeScope(t *testing.T) {
+	cases := []struct {
+		name       string
+		msg        string
+		forceType  string
+		forceScope string
+		want       string
+	}{
+		{
+			name:      "force type preserves scope",
+			msg:       "fix(api): handle nil response",
+			forceType: "chore",
+			want:      "chore(api): handle nil response",
+		},
+		{
+			name:       "force scope preserves type",
+			msg:        "feat: add quick commit edit mode",
+			forceScope: "cli",
+			want:       "feat(cli): add quick commit edit mode",
+		},
+		{
+			name:       "non conventional gets conventional prefix",
+			msg:        "update generated docs",
+			forceType:  "docs",
+			forceScope: "examples",
+			want:       "docs(examples): update generated docs",
+		},
+		{
+			name:       "body is preserved",
+			msg:        "fix: avoid nil panic\n\n## Why\nThe guard was missing.",
+			forceScope: "review",
+			want:       "fix(review): avoid nil panic\n\n## Why\nThe guard was missing.",
+		},
+		{
+			name:       "breaking marker is preserved",
+			msg:        "feat!: remove legacy config",
+			forceScope: "config",
+			want:       "feat!(config): remove legacy config",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := applyCommitTypeScope(tc.msg, tc.forceType, tc.forceScope)
+			if got != tc.want {
+				t.Fatalf("applyCommitTypeScope() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAppendSignedOffBy(t *testing.T) {
+	got := appendSignedOffBy("feat(cli): add edit flag", "Test User <test@example.com>")
+	want := "feat(cli): add edit flag\n\nSigned-off-by: Test User <test@example.com>"
+	if got != want {
+		t.Fatalf("appendSignedOffBy() = %q, want %q", got, want)
+	}
+	if again := appendSignedOffBy(got, "Test User <test@example.com>"); again != got {
+		t.Fatalf("appendSignedOffBy should not duplicate trailers, got %q", again)
+	}
+}
+
+func TestEditCommitMessageWithEditor(t *testing.T) {
+	editor := filepath.Join(t.TempDir(), "editor.sh")
+	if err := os.WriteFile(editor, []byte("#!/bin/sh\nprintf 'fix(cli): edited message\\n\\nEdited body\\n' > \"$1\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := editCommitMessageWithEditor("feat(cli): generated message", editor)
+	if err != nil {
+		t.Fatalf("editCommitMessageWithEditor returned error: %v", err)
+	}
+	want := "fix(cli): edited message\n\nEdited body"
+	if got != want {
+		t.Fatalf("edited message = %q, want %q", got, want)
+	}
+}
+
+func TestQuickCommit_TypeScopeSignoff_NoPush(t *testing.T) {
+	dir := initEmptyRepo(t)
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	if err := os.WriteFile(filepath.Join(dir, "feature.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		for _, want := range []string{"Use conventional commit type `fix`", "Use conventional commit scope `cli`"} {
+			if !strings.Contains(prompt, want) {
+				return "", fmt.Errorf("expected prompt to contain %q, got:\n%s", want, prompt)
+			}
+		}
+		return "feat(api): add generated subject", nil
+	}
+
+	var buf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--type=fix", "--scope=cli", "--signoff", "--no-push", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("quick-commit failed: %v\noutput:\n%s", err, buf.String())
+	}
+
+	out, err := exec.Command("git", "-C", dir, "log", "-1", "--pretty=%B").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git log failed: %v\n%s", err, out)
+	}
+	message := string(out)
+	for _, want := range []string{"fix(cli): add generated subject", "Signed-off-by: Test <test@example.com>"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("expected commit message to contain %q, got:\n%s", want, message)
+		}
+	}
+	if !strings.Contains(buf.String(), "Done. (skipped push)") {
+		t.Fatalf("expected no-push output, got:\n%s", buf.String())
+	}
+}
+
+func TestQuickCommit_TrackedOnlyLeavesUntrackedFiles(t *testing.T) {
+	dir := initEmptyRepo(t)
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"-C", dir, "add", "."},
+		{"-C", dir, "commit", "-m", "initial"},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("after\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "fix(repo): update tracked file", nil
+	}
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--tracked-only", "--no-push", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("quick-commit failed: %v", err)
+	}
+
+	out, err := exec.Command("git", "-C", dir, "status", "--short").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "?? untracked.txt") {
+		t.Fatalf("expected untracked file to remain untracked, got:\n%s", out)
+	}
+}
+
+func TestQuickCommit_NewFlagValidation(t *testing.T) {
+	if !isGitRepo() {
+		t.Skip("skipping: not inside a git repository")
+	}
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "invalid type",
+			args: []string{"quick-commit", "--type=feature", "--dry-run", "--provider=openai"},
+			want: "--type must be one of",
+		},
+		{
+			name: "invalid scope",
+			args: []string{"quick-commit", "--scope=bad scope", "--dry-run", "--provider=openai"},
+			want: "--scope contains invalid character",
+		},
+		{
+			name: "no conventional conflict",
+			args: []string{"quick-commit", "--type=fix", "--no-conventional", "--dry-run", "--provider=openai"},
+			want: "--type and --scope cannot be combined with --no-conventional",
+		},
+		{
+			name: "staging mode conflict",
+			args: []string{"quick-commit", "--include-untracked", "--tracked-only", "--dry-run", "--provider=openai"},
+			want: "--include-untracked and --tracked-only are mutually exclusive",
+		},
+		{
+			name: "invalid message template",
+			args: []string{"quick-commit", "--message-template=verbose", "--dry-run", "--provider=openai"},
+			want: "--message-template must be one of",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newRootCmd(dummyChatFn)
+			cmd.SetArgs(tc.args)
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+
+			err := cmd.Execute()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected error containing %q, got %v", tc.want, err)
+			}
+		})
 	}
 }
 

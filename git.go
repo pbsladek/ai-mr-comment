@@ -183,6 +183,15 @@ func gitAdd() error {
 	return nil
 }
 
+// gitAddTracked stages only tracked modified/deleted files (git add -u).
+func gitAddTracked() error {
+	out, err := exec.Command("git", "add", "-u").CombinedOutput() //nolint:gosec // G204: git is a fixed binary, args are internal constants
+	if err != nil {
+		return fmt.Errorf("git add -u: %w\n%s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // gitCommit creates a commit with the given message. When body is non-empty it
 // is passed as a second -m argument, producing a commit with a subject and body
 // separated by a blank line (as git does with multiple -m flags).
@@ -196,6 +205,55 @@ func gitCommit(message, body string) error {
 		return fmt.Errorf("git commit: %w\n%s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// gitCommitMessage creates a commit from the full multi-line message exactly as
+// supplied.
+func gitCommitMessage(message string) error {
+	tmp, err := os.CreateTemp("", "ai-mr-comment-commit-*.txt")
+	if err != nil {
+		return fmt.Errorf("creating commit message file: %w", err)
+	}
+	name := tmp.Name()
+	defer func() {
+		_ = os.Remove(name)
+	}()
+	if _, err := tmp.WriteString(message); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("writing commit message file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("closing commit message file: %w", err)
+	}
+	out, err := exec.Command("git", "commit", "-F", name).CombinedOutput() //nolint:gosec // G204: git is a fixed binary, temp file path is created by this process
+	if err != nil {
+		return fmt.Errorf("git commit: %w\n%s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func getGitConfigValue(key string) (string, error) {
+	out, err := exec.Command("git", "config", "--get", key).CombinedOutput() //nolint:gosec // G204: git is a fixed binary, key is caller-controlled from constants
+	if err != nil {
+		return "", fmt.Errorf("git config %s: %w", key, err)
+	}
+	value := strings.TrimSpace(string(out))
+	if value == "" {
+		return "", fmt.Errorf("git config %s is empty", key)
+	}
+	return value, nil
+}
+
+func getGitSignoffIdentity() (string, error) {
+	name, err := getGitConfigValue("user.name")
+	if err != nil {
+		return "", err
+	}
+	email, err := getGitConfigValue("user.email")
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s <%s>", name, email), nil
 }
 
 // gitPush pushes the current branch to its upstream remote.
