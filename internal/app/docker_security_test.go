@@ -143,6 +143,7 @@ func TestWorkflowAndMakefileUseCommandPackageLayout(t *testing.T) {
 	releaseWorkflow := readRepoFile(t, ".github/workflows/release.yml")
 	goreleaser := readRepoFile(t, ".goreleaser.yaml")
 	dockerfile := readRepoFile(t, "Dockerfile")
+	dockerignore := readRepoFile(t, ".dockerignore")
 
 	required := map[string][]string{
 		"Makefile": {
@@ -168,6 +169,12 @@ func TestWorkflowAndMakefileUseCommandPackageLayout(t *testing.T) {
 			"COPY internal/ ./internal/",
 			"-o /out/ai-mr-comment ./cmd/ai-mr-comment",
 		},
+		".dockerignore": {
+			"!cmd/",
+			"!cmd/**",
+			"!internal/",
+			"!internal/**",
+		},
 	}
 	contents := map[string]string{
 		"Makefile":                      makefile,
@@ -175,6 +182,7 @@ func TestWorkflowAndMakefileUseCommandPackageLayout(t *testing.T) {
 		".github/workflows/release.yml": releaseWorkflow,
 		".goreleaser.yaml":              goreleaser,
 		"Dockerfile":                    dockerfile,
+		".dockerignore":                 dockerignore,
 	}
 	for file, wants := range required {
 		for _, want := range wants {
@@ -192,6 +200,9 @@ func TestWorkflowAndMakefileUseCommandPackageLayout(t *testing.T) {
 		"\tgo test -fuzz=FuzzEstimateCost -fuzztime=30s .\n",
 		"main: .\n",
 		"COPY templates/ ./templates/",
+		"!api.go\n",
+		"!main.go\n",
+		"!templates/\n",
 	}
 	for _, stale := range staleRootCommands {
 		for file, content := range contents {
