@@ -3,7 +3,7 @@
 Install the CLI from a release archive, from source, or by using Docker.
 
 ```sh
-go install github.com/pwbsladek/ai-mr-comment@latest
+go install github.com/pbsladek/ai-mr-comment/cmd/ai-mr-comment@latest
 ```
 
 Release archives are published for Linux, macOS, and Windows on x86_64 and arm64.
@@ -31,4 +31,3 @@ docker run --rm \
   pwbsladek/ai-mr-comment:latest \
   --pr https://github.com/owner/repo/pull/42
 ```
-

@@ -12,8 +12,8 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY api.go changelog.go config.go git.go main.go prompt.go token_estimator.go ./
-COPY templates/ ./templates/
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
 
 ARG VERSION=dev
 ARG COMMIT=unknown
@@ -21,7 +21,7 @@ ARG COMMIT_FULL=unknown
 ARG GOFIPS140=off
 RUN CGO_ENABLED=0 GOFIPS140=${GOFIPS140} go build \
       -ldflags="-s -w -X 'main.Version=${VERSION}' -X 'main.Commit=${COMMIT}' -X 'main.CommitFull=${COMMIT_FULL}'" \
-      -o /out/ai-mr-comment .
+      -o /out/ai-mr-comment ./cmd/ai-mr-comment
 
 FROM dhi.io/debian-base:trixie-debian13-dev@sha256:9415967aa0ed8adea8b5c048994259d1982026dca143d0303c7bbe0e11ed67d3
 

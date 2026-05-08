@@ -9,6 +9,49 @@ on:
 permissions: read-all
 
 jobs:
+  e2e-openai:
+    name: E2E OpenAI CLI
+    runs-on: ubuntu-latest
+    environment: e2e
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Download Dependencies
+        run: go mod download 2>/dev/null
+
+      - name: Run OpenAI e2e tests
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_INTEGRATION_MODEL: ${{ vars.OPENAI_INTEGRATION_MODEL }}
+        run: make test-integration-openai
+
+  e2e-gemini:
+    name: E2E Gemini CLI
+    runs-on: ubuntu-latest
+    environment: e2e
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Download Dependencies
+        run: go mod download 2>/dev/null
+
+      - name: Run Gemini e2e tests
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: make test-integration-gemini
+
   e2e-anthropic:
     name: E2E Anthropic CLI
     runs-on: ubuntu-latest

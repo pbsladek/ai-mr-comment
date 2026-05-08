@@ -55,7 +55,7 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 - Verbose debug logging to stderr (`--verbose`) — API timing, diff stats, config details
 - Live streaming output to the terminal — tokens appear as they are generated
 - Bootstrap a config file with `init-config` (never edit TOML by hand again)
-- All prompt templates stored as editable files in `templates/` — embedded at build time, overridable at `~/.config/ai-mr-comment/templates/<name>.tmpl`
+- All prompt templates stored as editable files in `internal/app/templates/` — embedded at build time, overridable at `~/.config/ai-mr-comment/templates/<name>.tmpl`
 - Shell completions for bash, zsh, fish, and PowerShell (`completion` subcommand)
 - **Shell aliases** (`gen-aliases`) — prints `amc` and `amc-*` convenience aliases ready to source into your shell profile
 - **Changelog generation** (`changelog`) — produces a user-facing Keep a Changelog entry from a commit range, grouped by Added / Fixed / Breaking Changes etc.
@@ -631,7 +631,7 @@ gitlab_base_url = "https://gitlab.mycompany.com"
 
 Select a template with `-t` / `--template`. All templates receive the branch name as context (useful for ticket key extraction).
 
-All built-in templates live in `templates/` in the repository and are embedded into the binary at build time. You can override any template by placing a file at `~/.config/ai-mr-comment/templates/<name>.tmpl`.
+All built-in templates live in `internal/app/templates/` in the repository and are embedded into the binary at build time. You can override any template by placing a file at `~/.config/ai-mr-comment/templates/<name>.tmpl`.
 
 | Name | Description |
 |---|---|
@@ -1258,8 +1258,9 @@ When running with the `--debug` flag, the tool provides a detailed breakdown of 
 
 ### Project Structure
 
-- `./`: Main Go source files (`main.go`, `api.go`, etc.)
-- `templates/`: Markdown prompt templates
+- `cmd/ai-mr-comment/`: Executable entry point
+- `internal/app/`: Cobra command orchestration and embedded prompt templates
+- `internal/`: Internal packages for config, providers, remote hosts, git diffs, prompts, estimates, and commit helpers
 - `testdata/`: Sample git diffs for testing
 - `dist/`: Compiled binaries (after build)
 
@@ -1269,8 +1270,19 @@ When running with the `--debug` flag, the tool provides a detailed breakdown of 
 # Run unit tests
 make test
 
-# Run integration tests (requires GEMINI_API_KEY)
+# Run deterministic compiled-binary e2e smoke tests
+make test-e2e-smoke
+
+# Run deterministic Docker smoke tests
+make docker-smoke
+
+# Run all provider integration tests (provider tests skip when keys are missing)
 make test-integration
+
+# Run one provider integration lane
+make test-integration-openai
+make test-integration-gemini
+make test-integration-anthropic
 
 # Run Ollama-only integration tests (CPU-friendly small model)
 OLLAMA_ENDPOINT=http://127.0.0.1:11434/api/generate \
@@ -1293,7 +1305,9 @@ make eval-quality-deps
 make lint
 ```
 
-CI coverage on PRs includes fast unit/lint/fuzz checks.
+CI coverage on PRs includes unit/lint checks plus deterministic binary e2e smoke checks.
+Docker smoke also runs when DHI registry credentials are available to pull the hardened base images.
+Provider e2e tests run after merge to `main` or by manual dispatch when credentials are available.
 Long Ollama integration + promptfoo quality eval lanes run from a separate manual workflow: `Ollama Integration (Manual)`.
 Open GitHub Actions, select that workflow, then click **Run workflow**.
 

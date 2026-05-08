@@ -1,0 +1,566 @@
+//go:build integration
+
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+const testDiff = `diff --git a/test.txt b/test.txt
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/test.txt
+@@ -0,0 +1 @@
++Hello World`
+
+const testSystemPrompt = "You are a code reviewer. Summarize the changes. Be concise."
+
+func ollamaIntegrationEnv(t *testing.T) (endpoint, model string) {
+	t.Helper()
+	endpoint = os.Getenv("OLLAMA_ENDPOINT")
+	if endpoint == "" {
+		endpoint = "http://127.0.0.1:11434/api/generate"
+	}
+	model = os.Getenv("OLLAMA_MODEL")
+	if model == "" {
+		model = "llama3.2:1b"
+	}
+	// loadConfig() reads this key via AI_MR_COMMENT_ prefix.
+	t.Setenv("AI_MR_COMMENT_OLLAMA_ENDPOINT", endpoint)
+	return endpoint, model
+}
+
+func integrationModel(envName, fallback string) string {
+	if model := strings.TrimSpace(os.Getenv(envName)); model != "" {
+		return model
+	}
+	return fallback
+}
+
+func isModelUnavailableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "model") {
+		return false
+	}
+	return strings.Contains(msg, "404") ||
+		strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "not_found") ||
+		strings.Contains(msg, "does not exist") ||
+		strings.Contains(msg, "unavailable") ||
+		strings.Contains(msg, "not supported")
+}
+
+func skipIfModelUnavailable(t *testing.T, provider string, err error) {
+	t.Helper()
+	if isModelUnavailableError(err) {
+		t.Skipf("Skipping %s integration test: model unavailable (%v)", provider, err)
+	}
+}
+
+func isOllamaUnreachable(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "couldn't connect")
+}
+
+func isOllamaModelMissing(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "model") &&
+		(strings.Contains(msg, "not found") || strings.Contains(msg, "pull"))
+}
+
+func handleOllamaIntegrationError(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		return
+	}
+	if isOllamaUnreachable(err) {
+		t.Skipf("Skipping Ollama integration test: %v", err)
+	}
+	if isOllamaModelMissing(err) && os.Getenv("CI") == "" && os.Getenv("OLLAMA_REQUIRE_MODEL") == "" {
+		t.Skipf("Skipping Ollama integration test: %v. Pull the model or set OLLAMA_MODEL to an installed model.", err)
+	}
+}
+
+func TestIntegration_Gemini(t *testing.T) {
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		t.Skip("Skipping Gemini integration test: GEMINI_API_KEY not set")
+	}
+
+	cfg := &Config{
+		Provider:     Gemini,
+		GeminiAPIKey: apiKey,
+		GeminiModel:  "gemini-2.5-flash",
+	}
+
+	response, err := chatCompletions(context.Background(), cfg, Gemini, testSystemPrompt, testDiff)
+	if err != nil {
+		skipIfModelUnavailable(t, "Gemini", err)
+		t.Fatalf("Gemini API call failed: %v", err)
+	}
+
+	if strings.TrimSpace(response) == "" {
+		t.Error("Expected non-empty response from Gemini")
+	}
+
+	t.Logf("Gemini Response:\n%s", response)
+}
+
+func TestIntegration_OpenAI(t *testing.T) {
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" {
+		t.Skip("Skipping OpenAI integration test: OPENAI_API_KEY not set")
+	}
+
+	cfg := &Config{
+		Provider:       OpenAI,
+		OpenAIAPIKey:   apiKey,
+		OpenAIModel:    integrationModel("OPENAI_INTEGRATION_MODEL", "gpt-5.5"),
+		OpenAIEndpoint: "https://api.openai.com/v1/",
+	}
+
+	response, err := chatCompletions(context.Background(), cfg, OpenAI, testSystemPrompt, testDiff)
+	if err != nil {
+		skipIfModelUnavailable(t, "OpenAI", err)
+		t.Fatalf("OpenAI API call failed: %v", err)
+	}
+
+	if strings.TrimSpace(response) == "" {
+		t.Error("Expected non-empty response from OpenAI")
+	}
+
+	t.Logf("OpenAI Response:\n%s", response)
+}
+
+func TestIntegration_Anthropic(t *testing.T) {
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+	if apiKey == "" {
+		t.Skip("Skipping Anthropic integration test: ANTHROPIC_API_KEY not set")
+	}
+
+	cfg := &Config{
+		Provider:          Anthropic,
+		AnthropicAPIKey:   apiKey,
+		AnthropicModel:    "claude-sonnet-4-6",
+		AnthropicEndpoint: "https://api.anthropic.com",
+	}
+
+	response, err := chatCompletions(context.Background(), cfg, Anthropic, testSystemPrompt, testDiff)
+	if err != nil {
+		skipIfModelUnavailable(t, "Anthropic", err)
+		t.Fatalf("Anthropic API call failed: %v", err)
+	}
+
+	if strings.TrimSpace(response) == "" {
+		t.Error("Expected non-empty response from Anthropic")
+	}
+
+	t.Logf("Anthropic Response:\n%s", response)
+}
+
+func TestIntegration_Ollama(t *testing.T) {
+	endpoint, model := ollamaIntegrationEnv(t)
+
+	cfg := &Config{
+		Provider:       Ollama,
+		OllamaModel:    model,
+		OllamaEndpoint: endpoint,
+	}
+
+	response, err := chatCompletions(context.Background(), cfg, Ollama, testSystemPrompt, testDiff)
+	if err != nil {
+		handleOllamaIntegrationError(t, err)
+		t.Fatalf("Ollama API call failed: %v", err)
+	}
+
+	if strings.TrimSpace(response) == "" {
+		t.Error("Expected non-empty response from Ollama")
+	}
+
+	t.Logf("Ollama Response:\n%s", response)
+}
+
+func TestIntegration_Ollama_MainCmd_Text(t *testing.T) {
+	_, model := ollamaIntegrationEnv(t)
+
+	var out strings.Builder
+	cmd := newRootCmd(chatCompletions)
+	cmd.SetArgs([]string{
+		"--provider=ollama",
+		"--model=" + model,
+		"--file=testdata/simple.diff",
+	})
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil {
+		handleOllamaIntegrationError(t, err)
+		t.Fatalf("main command failed: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "── Description ──") {
+		t.Fatalf("expected description section, got:\n%s", got)
+	}
+	if strings.TrimSpace(got) == "" {
+		t.Fatal("expected non-empty output")
+	}
+}
+
+func TestIntegration_Ollama_MainCmd_JSONTitle(t *testing.T) {
+	_, model := ollamaIntegrationEnv(t)
+
+	var out strings.Builder
+	cmd := newRootCmd(chatCompletions)
+	cmd.SetArgs([]string{
+		"--provider=ollama",
+		"--model=" + model,
+		"--format=json",
+		"--title",
+		"--file=testdata/simple.diff",
+	})
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil {
+		handleOllamaIntegrationError(t, err)
+		t.Fatalf("json+title command failed: %v", err)
+	}
+
+	var payload struct {
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Provider    string `json:"provider"`
+		Model       string `json:"model"`
+	}
+	if decErr := json.Unmarshal([]byte(out.String()), &payload); decErr != nil {
+		t.Fatalf("invalid json output: %v\n%s", decErr, out.String())
+	}
+	if payload.Provider != string(Ollama) {
+		t.Fatalf("expected provider=%q, got %q", Ollama, payload.Provider)
+	}
+	if payload.Model != model {
+		t.Fatalf("expected model=%q, got %q", model, payload.Model)
+	}
+	if strings.TrimSpace(payload.Title) == "" {
+		t.Fatal("expected non-empty title")
+	}
+	if strings.TrimSpace(payload.Description) == "" {
+		t.Fatal("expected non-empty description")
+	}
+}
+
+func TestIntegration_Ollama_SmartChunk(t *testing.T) {
+	_, model := ollamaIntegrationEnv(t)
+
+	var out strings.Builder
+	cmd := newRootCmd(chatCompletions)
+	cmd.SetArgs([]string{
+		"--provider=ollama",
+		"--model=" + model,
+		"--smart-chunk",
+		"--file=testdata/multiple-files.diff",
+	})
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil {
+		handleOllamaIntegrationError(t, err)
+		t.Fatalf("smart-chunk command failed: %v", err)
+	}
+	if strings.TrimSpace(out.String()) == "" {
+		t.Fatal("expected non-empty smart-chunk output")
+	}
+}
+
+func TestIntegration_Ollama_CommitMsg(t *testing.T) {
+	_, model := ollamaIntegrationEnv(t)
+
+	var out strings.Builder
+	cmd := newRootCmd(chatCompletions)
+	cmd.SetArgs([]string{
+		"--provider=ollama",
+		"--model=" + model,
+		"--commit-msg",
+		"--file=testdata/simple.diff",
+	})
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil {
+		handleOllamaIntegrationError(t, err)
+		t.Fatalf("commit-msg command failed: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected a single-line commit message, got:\n%s", out.String())
+	}
+	if strings.TrimSpace(lines[0]) == "" {
+		t.Fatal("expected non-empty commit message")
+	}
+}
+
+func TestIntegration_Ollama_ChangelogJSON(t *testing.T) {
+	_, model := ollamaIntegrationEnv(t)
+
+	var out strings.Builder
+	cmd := newRootCmd(chatCompletions)
+	cmd.SetArgs([]string{
+		"changelog",
+		"--provider=ollama",
+		"--model=" + model,
+		"--format=json",
+		"--file=testdata/multiple-files.diff",
+	})
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err != nil {
+		handleOllamaIntegrationError(t, err)
+		t.Fatalf("changelog command failed: %v", err)
+	}
+
+	var payload struct {
+		Changelog string `json:"changelog"`
+		Provider  string `json:"provider"`
+		Model     string `json:"model"`
+	}
+	if decErr := json.Unmarshal([]byte(out.String()), &payload); decErr != nil {
+		t.Fatalf("invalid changelog json: %v\n%s", decErr, out.String())
+	}
+	if payload.Provider != string(Ollama) {
+		t.Fatalf("expected provider=%q, got %q", Ollama, payload.Provider)
+	}
+	if payload.Model != model {
+		t.Fatalf("expected model=%q, got %q", model, payload.Model)
+	}
+	if strings.TrimSpace(payload.Changelog) == "" {
+		t.Fatal("expected non-empty changelog")
+	}
+}
+
+// TestIntegration_SmartChunk_Gemini verifies that --smart-chunk processes a
+// large multi-file diff end-to-end using the real Gemini API: each file is
+// summarised independently (in parallel), the summaries are synthesised into a
+// final comment, and the output is non-empty.
+func TestIntegration_SmartChunk_Gemini(t *testing.T) {
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		t.Skip("Skipping smart-chunk integration test: GEMINI_API_KEY not set")
+	}
+
+	t.Setenv("GEMINI_API_KEY", apiKey)
+
+	var buf strings.Builder
+	cmd := newRootCmd(chatCompletions)
+	cmd.SetArgs([]string{
+		"--smart-chunk",
+		"--file=testdata/large-multi-file.diff",
+		"--provider=gemini",
+		"--model=gemini-2.5-flash",
+		"--verbose",
+	})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		skipIfModelUnavailable(t, "Gemini", err)
+		t.Fatalf("smart-chunk command failed: %v", err)
+	}
+
+	out := buf.String()
+	if strings.TrimSpace(out) == "" {
+		t.Error("expected non-empty output from smart-chunk synthesis")
+	}
+	t.Logf("Smart-chunk synthesis output:\n%s", out)
+}
+
+// TestIntegration_Anthropic_CLI_Default exercises the full CLI pipeline with
+// no explicit provider or model flags — only ANTHROPIC_API_KEY and
+// AI_MR_COMMENT_PROVIDER are set, so the default model (claude-sonnet-4-6)
+// is resolved from config defaults. This mirrors how a typical user runs the
+// tool after setting their API key.
+func TestIntegration_Anthropic_CLI_Default(t *testing.T) {
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+	if apiKey == "" {
+		t.Skip("Skipping: ANTHROPIC_API_KEY not set")
+	}
+	t.Setenv("ANTHROPIC_API_KEY", apiKey)
+	t.Setenv("AI_MR_COMMENT_PROVIDER", "anthropic")
+
+	var out strings.Builder
+	cmd := newRootCmd(chatCompletions)
+	cmd.SetArgs([]string{
+		"--file=testdata/simple.diff",
+	})
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		skipIfModelUnavailable(t, "Anthropic", err)
+		t.Fatalf("command failed: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "── Description ──") {
+		t.Fatalf("expected description section in output, got %d bytes", len(got))
+	}
+	t.Logf("output length: %d bytes", len(got))
+}
+
+// TestIntegration_Anthropic_CLI_NoConfig exercises the full CLI pipeline with
+// Anthropic using only the ANTHROPIC_API_KEY environment variable (no config
+// file). The API key is never written to disk or included in any log output.
+func TestIntegration_Anthropic_CLI_NoConfig(t *testing.T) {
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+	if apiKey == "" {
+		t.Skip("Skipping: ANTHROPIC_API_KEY not set")
+	}
+	// Isolate the env var; never log it.
+	t.Setenv("ANTHROPIC_API_KEY", apiKey)
+
+	var out strings.Builder
+	cmd := newRootCmd(chatCompletions)
+	cmd.SetArgs([]string{
+		"--provider=anthropic",
+		"--model=claude-sonnet-4-6",
+		"--file=testdata/simple.diff",
+	})
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		skipIfModelUnavailable(t, "Anthropic", err)
+		t.Fatalf("command failed: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "── Description ──") {
+		t.Fatalf("expected description section in output, got %d bytes", len(got))
+	}
+	t.Logf("output length: %d bytes", len(got))
+}
+
+// TestIntegration_Anthropic_CLI_WithConfig exercises the full CLI pipeline with
+// Anthropic when provider and model are read from a TOML config file. The API
+// key is supplied via environment variable so it is never written to disk.
+func TestIntegration_Anthropic_CLI_WithConfig(t *testing.T) {
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+	if apiKey == "" {
+		t.Skip("Skipping: ANTHROPIC_API_KEY not set")
+	}
+	t.Setenv("ANTHROPIC_API_KEY", apiKey)
+
+	// Resolve testdata path before changing directory.
+	testdataDiff, err := filepath.Abs("testdata/simple.diff")
+	if err != nil {
+		t.Fatalf("resolving testdata path: %v", err)
+	}
+
+	// Write a minimal config that sets provider and model; the API key stays
+	// in the environment so it is never persisted to disk.
+	tmpDir := t.TempDir()
+	cfgContent := "provider = \"anthropic\"\nanthropic_model = \"claude-sonnet-4-6\"\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, ".ai-mr-comment.toml"), []byte(cfgContent), 0o600); err != nil {
+		t.Fatalf("writing config: %v", err)
+	}
+	// Viper searches "." before "$HOME", so our tmpDir config takes priority.
+	t.Chdir(tmpDir)
+
+	var out strings.Builder
+	cmd := newRootCmd(chatCompletions)
+	cmd.SetArgs([]string{
+		"--file=" + testdataDiff,
+	})
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		skipIfModelUnavailable(t, "Anthropic", err)
+		t.Fatalf("command failed: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "── Description ──") {
+		t.Fatalf("expected description section in output, got %d bytes", len(got))
+	}
+	t.Logf("output length: %d bytes", len(got))
+}
+
+// TestIntegration_SmartChunk_OpenAI verifies the same end-to-end behaviour
+// against the real OpenAI API.
+func TestIntegration_SmartChunk_OpenAI(t *testing.T) {
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" {
+		t.Skip("Skipping smart-chunk integration test: OPENAI_API_KEY not set")
+	}
+
+	t.Setenv("OPENAI_API_KEY", apiKey)
+
+	var buf strings.Builder
+	cmd := newRootCmd(chatCompletions)
+	cmd.SetArgs([]string{
+		"--smart-chunk",
+		"--file=testdata/large-multi-file.diff",
+		"--provider=openai",
+		"--model=" + integrationModel("OPENAI_INTEGRATION_MODEL", "gpt-5.5"),
+		"--verbose",
+	})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		skipIfModelUnavailable(t, "OpenAI", err)
+		t.Fatalf("smart-chunk command failed: %v", err)
+	}
+
+	out := buf.String()
+	if strings.TrimSpace(out) == "" {
+		t.Error("expected non-empty output from smart-chunk synthesis")
+	}
+	t.Logf("Smart-chunk synthesis output:\n%s", out)
+}
