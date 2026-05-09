@@ -230,7 +230,7 @@ func assertBefore(t *testing.T, haystack, first, second string) {
 
 func readRepoFile(t *testing.T, path string) string {
 	t.Helper()
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(repoPath(t, path))
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}

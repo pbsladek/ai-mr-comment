@@ -21,10 +21,7 @@ func TestE2ESmoke_BinaryCommands(t *testing.T) {
 		t.Fatalf("getwd: %v", err)
 	}
 
-	bin := filepath.Join(t.TempDir(), "ai-mr-comment")
-	if runtime.GOOS == "windows" {
-		bin += ".exe"
-	}
+	bin := filepath.Join(t.TempDir(), binaryNameForGOOS("ai-mr-comment", runtime.GOOS))
 	if out, buildErr := exec.Command("go", "build", "-o", bin, "./cmd/ai-mr-comment").CombinedOutput(); buildErr != nil {
 		t.Fatalf("go build failed: %v\n%s", buildErr, out)
 	}

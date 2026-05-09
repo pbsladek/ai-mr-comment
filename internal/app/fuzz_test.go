@@ -20,12 +20,12 @@ func FuzzSplitDiffByFile(f *testing.F) {
 
 	// Seed from existing testdata diff files.
 	for _, name := range []string{
-		"testdata/simple.diff",
-		"testdata/multiple-files.diff",
-		"testdata/deletion.diff",
-		"testdata/new-file.diff",
+		"simple.diff",
+		"multiple-files.diff",
+		"deletion.diff",
+		"new-file.diff",
 	} {
-		if b, err := os.ReadFile(name); err == nil {
+		if b, err := os.ReadFile(testdataPath(f, name)); err == nil {
 			f.Add(string(b))
 		}
 	}
@@ -56,7 +56,7 @@ func FuzzProcessDiff(f *testing.F) {
 	f.Add("line1\nline2\nline3\n", 2)
 	f.Add("diff --git a/x b/x\n+content\n", 100)
 
-	if b, err := os.ReadFile("testdata/multiple-files.diff"); err == nil {
+	if b, err := os.ReadFile(testdataPath(f, "multiple-files.diff")); err == nil {
 		f.Add(string(b), 10)
 		f.Add(string(b), 1)
 	}

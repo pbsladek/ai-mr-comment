@@ -1020,11 +1020,7 @@ func TestUpsertGitLabMRNoteUpdatesManagedNote(t *testing.T) {
 // ── splitDiffByFile edge case tests ───────────────────────────────────────────
 
 func TestSplitDiffByFile_BinaryFiles(t *testing.T) {
-	data, err := os.ReadFile("testdata/binary-files.diff")
-	if err != nil {
-		t.Fatal(err)
-	}
-	chunks := splitDiffByFile(string(data))
+	chunks := splitDiffByFile(readTestdata(t, "binary-files.diff"))
 	if len(chunks) != 5 {
 		t.Errorf("expected 5 chunks for binary-files.diff, got %d", len(chunks))
 	}
@@ -1036,11 +1032,7 @@ func TestSplitDiffByFile_BinaryFiles(t *testing.T) {
 }
 
 func TestSplitDiffByFile_RenameMove(t *testing.T) {
-	data, err := os.ReadFile("testdata/rename-move.diff")
-	if err != nil {
-		t.Fatal(err)
-	}
-	chunks := splitDiffByFile(string(data))
+	chunks := splitDiffByFile(readTestdata(t, "rename-move.diff"))
 	if len(chunks) != 4 {
 		t.Errorf("expected 4 chunks for rename-move.diff, got %d", len(chunks))
 	}
@@ -1053,11 +1045,7 @@ func TestSplitDiffByFile_RenameMove(t *testing.T) {
 }
 
 func TestSplitDiffByFile_ModeChange(t *testing.T) {
-	data, err := os.ReadFile("testdata/mode-change.diff")
-	if err != nil {
-		t.Fatal(err)
-	}
-	chunks := splitDiffByFile(string(data))
+	chunks := splitDiffByFile(readTestdata(t, "mode-change.diff"))
 	if len(chunks) != 5 {
 		t.Errorf("expected 5 chunks for mode-change.diff, got %d", len(chunks))
 	}
@@ -1069,11 +1057,7 @@ func TestSplitDiffByFile_ModeChange(t *testing.T) {
 }
 
 func TestSplitDiffByFile_SubmoduleChanges(t *testing.T) {
-	data, err := os.ReadFile("testdata/submodule-changes.diff")
-	if err != nil {
-		t.Fatal(err)
-	}
-	chunks := splitDiffByFile(string(data))
+	chunks := splitDiffByFile(readTestdata(t, "submodule-changes.diff"))
 	if len(chunks) != 2 {
 		t.Errorf("expected 2 chunks for submodule-changes.diff, got %d", len(chunks))
 	}
@@ -1083,11 +1067,7 @@ func TestSplitDiffByFile_SubmoduleChanges(t *testing.T) {
 }
 
 func TestSplitDiffByFile_SymlinkChanges(t *testing.T) {
-	data, err := os.ReadFile("testdata/symlink-changes.diff")
-	if err != nil {
-		t.Fatal(err)
-	}
-	chunks := splitDiffByFile(string(data))
+	chunks := splitDiffByFile(readTestdata(t, "symlink-changes.diff"))
 	if len(chunks) != 3 {
 		t.Errorf("expected 3 chunks for symlink-changes.diff, got %d", len(chunks))
 	}
@@ -1099,11 +1079,7 @@ func TestSplitDiffByFile_SymlinkChanges(t *testing.T) {
 }
 
 func TestSplitDiffByFile_MultipleHunksOneFile(t *testing.T) {
-	data, err := os.ReadFile("testdata/multiple-hunks-one-file.diff")
-	if err != nil {
-		t.Fatal(err)
-	}
-	chunks := splitDiffByFile(string(data))
+	chunks := splitDiffByFile(readTestdata(t, "multiple-hunks-one-file.diff"))
 	if len(chunks) != 1 {
 		t.Errorf("expected 1 chunk for multiple-hunks-one-file.diff, got %d", len(chunks))
 	}
@@ -1116,11 +1092,7 @@ func TestSplitDiffByFile_MultipleHunksOneFile(t *testing.T) {
 // ── processDiff edge case tests ────────────────────────────────────────────────
 
 func TestProcessDiff_TruncationTrigger(t *testing.T) {
-	data, err := os.ReadFile("testdata/truncation-trigger.diff")
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw := string(data)
+	raw := readTestdata(t, "truncation-trigger.diff")
 	lineCount := strings.Count(raw, "\n") + 1
 	if lineCount <= 4000 {
 		t.Skipf("truncation-trigger.diff has only %d lines, need >4000", lineCount)
@@ -1132,17 +1104,14 @@ func TestProcessDiff_TruncationTrigger(t *testing.T) {
 }
 
 func TestProcessDiff_VeryLargeSingleFile(t *testing.T) {
-	data, err := os.ReadFile("testdata/very-large-single-file.diff")
-	if err != nil {
-		t.Fatal(err)
-	}
+	raw := readTestdata(t, "very-large-single-file.diff")
 	// Should not truncate at max=4000 (file is ~1300 lines).
-	output := processDiff(string(data), 4000)
+	output := processDiff(raw, 4000)
 	if strings.Contains(output, "[...diff truncated...]") {
 		t.Error("did not expect truncation for very-large-single-file.diff at max=4000")
 	}
 	// Should truncate at max=100.
-	outputSmall := processDiff(string(data), 100)
+	outputSmall := processDiff(raw, 100)
 	if !strings.Contains(outputSmall, "[...diff truncated...]") {
 		t.Error("expected truncation for very-large-single-file.diff at max=100")
 	}
@@ -1151,7 +1120,7 @@ func TestProcessDiff_VeryLargeSingleFile(t *testing.T) {
 // ── readDiffFromFile edge case tests ──────────────────────────────────────────
 
 func TestReadDiffFromFile_UnicodeEmoji(t *testing.T) {
-	content, err := readDiffFromFile("testdata/unicode-emoji.diff")
+	content, err := readDiffFromFile(testdataPath(t, "unicode-emoji.diff"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1166,7 +1135,7 @@ func TestReadDiffFromFile_UnicodeEmoji(t *testing.T) {
 }
 
 func TestReadDiffFromFile_CRLFLineEndings(t *testing.T) {
-	content, err := readDiffFromFile("testdata/crlf-line-endings.diff")
+	content, err := readDiffFromFile(testdataPath(t, "crlf-line-endings.diff"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1180,7 +1149,7 @@ func TestReadDiffFromFile_CRLFLineEndings(t *testing.T) {
 }
 
 func TestReadDiffFromFile_NoNewlineAtEOF(t *testing.T) {
-	content, err := readDiffFromFile("testdata/no-newline-at-eof.diff")
+	content, err := readDiffFromFile(testdataPath(t, "no-newline-at-eof.diff"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

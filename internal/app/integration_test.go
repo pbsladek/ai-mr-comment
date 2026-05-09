@@ -492,10 +492,7 @@ func TestIntegration_Anthropic_CLI_WithConfig(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", apiKey)
 
 	// Resolve testdata path before changing directory.
-	testdataDiff, err := filepath.Abs("testdata/simple.diff")
-	if err != nil {
-		t.Fatalf("resolving testdata path: %v", err)
-	}
+	testdataDiff := testdataPath(t, "simple.diff")
 
 	// Write a minimal config that sets provider and model; the API key stays
 	// in the environment so it is never persisted to disk.
