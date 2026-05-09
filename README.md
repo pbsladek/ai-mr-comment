@@ -55,7 +55,7 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 - Verbose debug logging to stderr (`--verbose`) — API timing, diff stats, config details
 - Live streaming output to the terminal — tokens appear as they are generated
 - Bootstrap a config file with `init-config` (never edit TOML by hand again)
-- All prompt templates stored as editable files in `templates/` — embedded at build time, overridable at `~/.config/ai-mr-comment/templates/<name>.tmpl`
+- All prompt templates stored as editable files in `internal/app/templates/` — embedded at build time, overridable at `~/.config/ai-mr-comment/templates/<name>.tmpl`
 - Shell completions for bash, zsh, fish, and PowerShell (`completion` subcommand)
 - **Shell aliases** (`gen-aliases`) — prints `amc` and `amc-*` convenience aliases ready to source into your shell profile
 - **Changelog generation** (`changelog`) — produces a user-facing Keep a Changelog entry from a commit range, grouped by Added / Fixed / Breaking Changes etc.
@@ -208,9 +208,9 @@ claude_cli_model = "claude-sonnet-4-6"
 
 # === OpenAI Settings ===
 openai_api_key = "xxxx"
-openai_model = "gpt-4.1-mini"
+openai_model = "gpt-5.5"
 openai_endpoint = "https://api.openai.com/v1/"
-# Other OpenAI models: gpt-4.1, gpt-4.1-nano, gpt-4o, gpt-4o-mini, o3, o3-mini
+# Other OpenAI models: gpt-5.4, gpt-5.4-mini, gpt-5.4-nano, gpt-4.1, gpt-4.1-mini
 
 # === Gemini Settings ===
 gemini_api_key = "xxxx"
@@ -253,12 +253,12 @@ template = "default"
 
 [profile.fast]
 provider     = "openai"
-openai_model = "gpt-4.1-nano"
+openai_model = "gpt-5.4-nano"
 template     = "conventional"
 
 [profile.openai]
 provider     = "openai"
-openai_model = "gpt-4.1-mini"
+openai_model = "gpt-5.5"
 
 [profile.anthropic]
 provider        = "anthropic"
@@ -322,7 +322,7 @@ Provides a secure foundation for user identity, allowing protected access to API
   "description": "## Key Changes\n\n- Added user model...",
   "comment": "## Key Changes\n\n- Added user model...",
   "provider": "openai",
-  "model": "gpt-4o-mini"
+  "model": "gpt-5.5"
 }
 ```
 
@@ -353,7 +353,7 @@ ai-mr-comment --smart-chunk
 ai-mr-comment --provider anthropic --template technical
 
 # Override the model for a single run
-ai-mr-comment --model gpt-4o
+ai-mr-comment --model gpt-5.5
 
 # Generate comment for a specific commit range
 ai-mr-comment --commit "HEAD~3..HEAD"
@@ -551,7 +551,7 @@ Exit codes are stable for automation: `0` success/pass, `1` tool or runtime erro
 - `--print-request`: Print the resolved provider request as JSON and exit without calling the provider
 - `--preset <NAME>`: Apply built-in defaults: `ci` (JSON + exit-code + technical), `local-fast` (Ollama + plain), `security` (security-focused technical review), or `release-notes` (user-focused title/description).
 - `--provider <PROVIDER>`: Provider (`openai`, `anthropic`, `gemini`, `ollama`, `claude-cli`, `gemini-cli`, `codex-cli`)
-- `--model <NAME>`: Override the model for this run (e.g. `gpt-4o`, `claude-opus-4-6`, `gemini-2.5-flash`)
+- `--model <NAME>`: Override the model for this run (e.g. `gpt-5.5`, `claude-opus-4-6`, `gemini-2.5-flash`)
 - `-t, --template <NAME>`: Template style — `default`, `conventional`, `technical`, `user-focused`, `emoji`, `sassy`, `monday`, `jira`, `commit`, `commit-emoji`, `commit-conventional`, `chaos`, `haiku`, `roast`, `intern`, `shakespeare`, `manager`, `yoda`, `excuse` (`commit`, `commit-emoji`, and `commit-conventional` require `--commit-msg`; style templates cannot be combined with `--commit-msg`)
 - `--system-prompt <TEXT|@FILE>`: Override the system prompt for this run. Pass the prompt inline (`--system-prompt="Focus on security"`) or read it from a file with an `@` prefix (`--system-prompt=@review.txt`). Mutually exclusive with `--template`.
 - `--chaos`: Generate a chaotic, dramatically over-the-top MR/PR description (still technically accurate). Mutually exclusive with `--template`, `--system-prompt`, `--commit-msg`.
@@ -631,7 +631,7 @@ gitlab_base_url = "https://gitlab.mycompany.com"
 
 Select a template with `-t` / `--template`. All templates receive the branch name as context (useful for ticket key extraction).
 
-All built-in templates live in `templates/` in the repository and are embedded into the binary at build time. You can override any template by placing a file at `~/.config/ai-mr-comment/templates/<name>.tmpl`.
+All built-in templates live in `internal/app/templates/` in the repository and are embedded into the binary at build time. You can override any template by placing a file at `~/.config/ai-mr-comment/templates/<name>.tmpl`.
 
 | Name | Description |
 |---|---|
@@ -737,6 +737,23 @@ ai-mr-comment quick-commit --body-lines=32
 # Commit but skip the push
 ai-mr-comment quick-commit --no-push
 
+# Open the generated message in your editor before committing
+ai-mr-comment quick-commit --edit
+
+# Force conventional commit type and scope
+ai-mr-comment quick-commit --type fix --scope api
+
+# Apply a message template style
+ai-mr-comment quick-commit --message-template detailed
+ai-mr-comment quick-commit --message-template release
+ai-mr-comment quick-commit --message-template ticket
+
+# Stage only tracked modified/deleted files
+ai-mr-comment quick-commit --tracked-only
+
+# Append a DCO signoff trailer from git user config
+ai-mr-comment quick-commit --signoff
+
 # Use a specific provider or model
 ai-mr-comment quick-commit --provider anthropic --model claude-opus-4-6
 
@@ -818,16 +835,23 @@ ai-mr-comment quick-commit --format json
 ```
 
 Steps performed:
-1. `git add .` — stages all changes
+1. `git add .` — stages all changes by default; `--tracked-only` uses `git add -u`
 2. Reads the staged diff; prepends branch name for ticket key context
 3. Calls AI with the conventional commits prompt
-4. `git commit -m "<message>"`
+4. Optionally edits, signs off, and commits the generated message
 5. `git push --set-upstream origin <branch>` — works for new branches too
 
 | Flag | Description |
 |---|---|
 | `--dry-run` | Generate and print the message, skip all git operations |
 | `--no-push` | Commit but skip the push |
+| `--edit` | Open the generated commit message in `$GIT_EDITOR`, `$VISUAL`, or `$EDITOR` before committing |
+| `--type` | Force a conventional commit type (`feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `perf`, `ci`, `build`, or `revert`) |
+| `--scope` | Force a conventional commit scope |
+| `--message-template` | Apply a commit message template style: `short`, `detailed`, `release`, or `ticket` |
+| `--include-untracked` | Explicitly stage tracked and untracked changes, matching the default behavior |
+| `--tracked-only` | Stage only tracked modified/deleted files with `git add -u` |
+| `--signoff` | Append a `Signed-off-by:` trailer using local `git user.name` and `git user.email` |
 | `--breaking` | Force `feat!` conventional commit type to signal a breaking change (major version bump) |
 | `--multi-line` | Generate a multi-line message (subject + body) that pre-fills the PR/MR title and description |
 | `--long` | Generate a longer multi-section body; implies `--multi-line` |
@@ -972,6 +996,15 @@ Aliases defined:
 | `amc-user` | `ai-mr-comment --template=user-focused` |
 | `amc-qc` | `ai-mr-comment quick-commit` |
 | `amc-qc-dry` | `ai-mr-comment quick-commit --dry-run` |
+| `amc-qc-edit` | `ai-mr-comment quick-commit --edit` |
+| `amc-qc-local` | `ai-mr-comment quick-commit --no-push` |
+| `amc-qc-tracked` | `ai-mr-comment quick-commit --tracked-only` |
+| `amc-qc-signoff` | `ai-mr-comment quick-commit --signoff` |
+| `amc-qc-fix` | `ai-mr-comment quick-commit --type=fix` |
+| `amc-qc-docs` | `ai-mr-comment quick-commit --type=docs` |
+| `amc-qc-detailed` | `ai-mr-comment quick-commit --message-template=detailed` |
+| `amc-qc-release` | `ai-mr-comment quick-commit --message-template=release` |
+| `amc-qc-ticket` | `ai-mr-comment quick-commit --message-template=ticket` |
 | `amc-qc-breaking` | `ai-mr-comment quick-commit --breaking` |
 | `amc-qc-chaos` | `ai-mr-comment quick-commit --chaos` |
 | `amc-qc-haiku` | `ai-mr-comment quick-commit --haiku` |
@@ -1072,12 +1105,12 @@ template        = "default"
 
 [profile.fast]
 provider     = "openai"
-openai_model = "gpt-4.1-nano"
+openai_model = "gpt-5.4-nano"
 template     = "conventional"
 
 [profile.openai]
 provider     = "openai"
-openai_model = "gpt-4.1"
+openai_model = "gpt-5.5"
 template     = "technical"
 
 [profile.anthropic]
@@ -1225,8 +1258,9 @@ When running with the `--debug` flag, the tool provides a detailed breakdown of 
 
 ### Project Structure
 
-- `./`: Main Go source files (`main.go`, `api.go`, etc.)
-- `templates/`: Markdown prompt templates
+- `cmd/ai-mr-comment/`: Executable entry point
+- `internal/app/`: Cobra command orchestration and embedded prompt templates
+- `internal/`: Internal packages for config, providers, remote hosts, git diffs, prompts, estimates, and commit helpers
 - `testdata/`: Sample git diffs for testing
 - `dist/`: Compiled binaries (after build)
 
@@ -1236,8 +1270,19 @@ When running with the `--debug` flag, the tool provides a detailed breakdown of 
 # Run unit tests
 make test
 
-# Run integration tests (requires GEMINI_API_KEY)
+# Run deterministic compiled-binary e2e smoke tests
+make test-e2e-smoke
+
+# Run deterministic Docker smoke tests
+make docker-smoke
+
+# Run all provider integration tests (provider tests skip when keys are missing)
 make test-integration
+
+# Run one provider integration lane
+make test-integration-openai
+make test-integration-gemini
+make test-integration-anthropic
 
 # Run Ollama-only integration tests (CPU-friendly small model)
 OLLAMA_ENDPOINT=http://127.0.0.1:11434/api/generate \
@@ -1260,7 +1305,9 @@ make eval-quality-deps
 make lint
 ```
 
-CI coverage on PRs includes fast unit/lint/fuzz checks.
+CI coverage on PRs includes unit/lint checks plus deterministic binary e2e smoke checks.
+Docker smoke also runs when DHI registry credentials are available to pull the hardened base images.
+Provider e2e tests run after merge to `main` or by manual dispatch when credentials are available.
 Long Ollama integration + promptfoo quality eval lanes run from a separate manual workflow: `Ollama Integration (Manual)`.
 Open GitHub Actions, select that workflow, then click **Run workflow**.
 

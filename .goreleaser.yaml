@@ -18,9 +18,9 @@ builds:
     goarch:
       - amd64
       - arm64
-    main: .
+    main: ./cmd/ai-mr-comment
     ldflags:
-      - -s -w -X main.Version={{.Version}} -X main.Commit={{.Commit}} -X main.Date={{.Date}} -X main.BuiltBy=goreleaser
+      - -s -w -X main.Version={{.Version}} -X main.Commit={{.ShortCommit}} -X main.CommitFull={{.FullCommit}} -X main.Date={{.Date}} -X main.BuiltBy=goreleaser
 
 archives:
   - formats: [tar.gz]

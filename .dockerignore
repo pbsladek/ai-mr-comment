@@ -1,11 +1,7 @@
 *
 !go.mod
 !go.sum
-!api.go
-!changelog.go
-!config.go
-!git.go
-!main.go
-!prompt.go
-!token_estimator.go
-!templates/
+!cmd/
+!cmd/**
+!internal/
+!internal/**

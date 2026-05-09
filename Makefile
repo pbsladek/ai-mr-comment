@@ -1,4 +1,5 @@
 APP       := ai-mr-comment
+MAIN_PKG  := ./cmd/ai-mr-comment
 # VERSION is the nearest reachable tag, with any -N-gSHA dev suffix stripped.
 # If your local tags are stale, run `make fetch-tags build` or override:
 #   make build VERSION=v1.2.3
@@ -14,7 +15,7 @@ PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 win
 # Raise this ceiling deliberately if you add large deps; shrink it to lock in gains.
 MAX_BINARY_BYTES := 36700160
 
-.PHONY: all clean build fetch-tags release test test-cover test-integration test-integration-ollama test-integration-ollama-8b test-fuzz lint lint-shell test-run quick-commit run-debug changelog gen-aliases install install-completion-bash install-completion-zsh check-size help docker-build docker-build-fips docker-scout docker-scout-fips docker-run docker-run-fips docker-quick-commit profile-cpu profile-mem profile-bench
+.PHONY: all clean build fetch-tags release test test-cover test-e2e-smoke test-integration test-integration-openai test-integration-gemini test-integration-ollama test-integration-ollama-8b test-fuzz lint lint-shell test-run quick-commit run-debug changelog gen-aliases install install-completion-bash install-completion-zsh check-size help docker-build docker-build-fips docker-smoke docker-scout docker-scout-fips docker-run docker-run-fips docker-quick-commit profile-cpu profile-mem profile-bench
 
 all: build
 
@@ -26,12 +27,12 @@ fetch-tags: ## Fetch all remote tags so VERSION reflects the latest release
 
 build: ## Build binary to dist/
 	@mkdir -p $(BUILD_DIR)
-	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) .
+	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) $(MAIN_PKG)
 
 check-size: ## Verify linux/amd64 binary is within the size limit
 	@mkdir -p $(BUILD_DIR)
 	@echo "Building linux/amd64 for size check..."
-	@GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP)-size-check .
+	@GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP)-size-check $(MAIN_PKG)
 	@SIZE=$$(wc -c < $(BUILD_DIR)/$(APP)-size-check); \
 	rm -f $(BUILD_DIR)/$(APP)-size-check; \
 	SIZE_MB=$$(echo "scale=1; $$SIZE / 1048576" | bc); \
@@ -48,29 +49,29 @@ ARGS ?=
 
 run: ## Build and run against current git diff (pass extra flags with ARGS="--flag value")
 	@mkdir -p $(BUILD_DIR)
-	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) .
+	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) $(MAIN_PKG)
 	./dist/ai-mr-comment $(ARGS)
 
 quick-commit: ## Build and run quick-commit (pass extra flags with ARGS="--dry-run")
 	@mkdir -p $(BUILD_DIR)
-	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) .
+	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) $(MAIN_PKG)
 	./dist/ai-mr-comment quick-commit $(ARGS)
 
 COMMIT_RANGE ?= HEAD~10..HEAD
 
 changelog: ## Build and generate a changelog entry (COMMIT_RANGE="v1.2.0..HEAD" ARGS="--provider gemini")
 	@mkdir -p $(BUILD_DIR)
-	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) .
+	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) $(MAIN_PKG)
 	./dist/ai-mr-comment changelog --commit="$(COMMIT_RANGE)" $(ARGS)
 
 gen-aliases: ## Print shell aliases for ai-mr-comment (append to ~/.bashrc or ~/.zshrc)
 	@mkdir -p $(BUILD_DIR)
-	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) .
+	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) $(MAIN_PKG)
 	./dist/ai-mr-comment gen-aliases
 
 run-debug: ## Build and run with --debug flag
 	@mkdir -p $(BUILD_DIR)
-	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) .
+	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) $(MAIN_PKG)
 	./dist/ai-mr-comment --debug
 
 test: ## Run unit tests
@@ -84,6 +85,9 @@ test-cover-report: test-cover ## Run tests with coverage and print summary
 	@echo ""
 	@echo "Total coverage: $$(go tool cover -func=coverage.out | grep total | awk '{print $$3}')"
 
+test-e2e-smoke: ## Run deterministic compiled-binary e2e smoke tests
+	go test -v -tags=e2e -run '^TestE2ESmoke_' -count=1 ./...
+
 install-shellcheck: ## Install shellcheck (requires sudo, for CI)
 	sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends shellcheck
 
@@ -94,6 +98,12 @@ verify-deps: ## Verify go module integrity and tidiness
 
 test-integration: ## Run all integration tests (provider tests may skip if env vars are missing)
 	go test -v -tags=integration ./...
+
+test-integration-openai: ## Run only OpenAI integration tests (requires OPENAI_API_KEY)
+	go test -v -tags=integration -run '^TestIntegration_(OpenAI|SmartChunk_OpenAI)$$' -count=1 -timeout 120s ./...
+
+test-integration-gemini: ## Run only Gemini integration tests (requires GEMINI_API_KEY)
+	go test -v -tags=integration -run '^TestIntegration_(Gemini|SmartChunk_Gemini)$$' -count=1 -timeout 120s ./...
 
 INTEGRATION_TEST_PATTERN ?= ^TestIntegration_Ollama
 LOCAL_OLLAMA_ENDPOINT ?= http://127.0.0.1:11434/api/generate
@@ -116,9 +126,9 @@ local-ollama-8b-ci: ## Run Ollama integration tests locally with CI-like setting
 	$(MAKE) test-integration-ollama-8b
 
 test-fuzz: ## Run fuzz tests (30s per target)
-	go test -fuzz=FuzzSplitDiffByFile -fuzztime=30s .
-	go test -fuzz=FuzzProcessDiff -fuzztime=30s .
-	go test -fuzz=FuzzEstimateCost -fuzztime=30s .
+	go test -fuzz=FuzzSplitDiffByFile -fuzztime=30s ./internal/app
+	go test -fuzz=FuzzProcessDiff -fuzztime=30s ./internal/app
+	go test -fuzz=FuzzEstimateCost -fuzztime=30s ./internal/app
 
 lint: ## Run golangci-lint
 	golangci-lint run ./...
@@ -133,7 +143,7 @@ test-run: build ## Build and run on current diff with PROVIDER (default: gemini)
 	./dist/ai-mr-comment --provider $(PROVIDER)
 
 install: ## Install binary via go install
-	go install $(LDFLAGS) .
+	go install $(LDFLAGS) $(MAIN_PKG)
 
 install-completion-bash: build ## Generate bash completion script to /tmp/
 	./dist/ai-mr-comment completion bash > /tmp/ai-mr-comment-completion.bash
@@ -178,6 +188,10 @@ docker-build-fips: ## Build the FIPS Docker image (IMAGE=name TAG=tag-fips)
 		--build-arg COMMIT_FULL=$(COMMIT_FULL) \
 		--build-arg GOFIPS140=v1.0.0 \
 		-t $(DOCKER_IMAGE):$(DOCKER_TAG)-fips .
+
+docker-smoke: docker-build ## Run deterministic Docker CLI smoke checks
+	docker run --rm $(DOCKER_IMAGE):$(DOCKER_TAG) --version
+	printf 'diff --git a/container.go b/container.go\n+container smoke\n' | docker run -i --rm $(DOCKER_IMAGE):$(DOCKER_TAG) --print-request --file=- --provider openai >/tmp/ai-mr-comment-docker-smoke.json
 
 docker-scout: docker-build ## Scan Docker image for fixable critical/high CVEs
 	docker scout cves --only-fixed --only-severity critical,high --exit-code local://$(DOCKER_IMAGE):$(DOCKER_TAG)
@@ -240,5 +254,5 @@ release: clean ## Build release binaries for all platforms
 		EXT=$$( [ "$$OS" = "windows" ] && echo .exe || echo ); \
 		OUTPUT=$(BUILD_DIR)/$(APP)-$$OS-$$ARCH$$EXT; \
 		echo "Building: $$OUTPUT"; \
-		GOOS=$$OS GOARCH=$$ARCH go build $(LDFLAGS) -o $$OUTPUT .; \
+		GOOS=$$OS GOARCH=$$ARCH go build $(LDFLAGS) -o $$OUTPUT $(MAIN_PKG); \
 	done

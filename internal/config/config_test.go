@@ -1,0 +1,132 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/spf13/viper"
+)
+
+func TestLoadWithDefaultsWhenMissingFile(t *testing.T) {
+	v := viper.New()
+	v.SetConfigName(".ai-mr-comment")
+	v.SetConfigType("toml")
+	v.AddConfigPath(filepath.Join(t.TempDir(), "missing"))
+
+	cfg, err := LoadWith(v, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Provider != Anthropic {
+		t.Errorf("expected provider %q, got %q", Anthropic, cfg.Provider)
+	}
+	if cfg.OpenAIModel != "gpt-5.5" {
+		t.Errorf("expected OpenAI default model gpt-5.5, got %q", cfg.OpenAIModel)
+	}
+	if cfg.AnthropicModel != "claude-sonnet-4-6" {
+		t.Errorf("expected Anthropic default model claude-sonnet-4-6, got %q", cfg.AnthropicModel)
+	}
+	if cfg.RequestTimeout != 0 {
+		t.Errorf("expected zero request timeout, got %v", cfg.RequestTimeout)
+	}
+}
+
+func TestLoadWithProfileOverlay(t *testing.T) {
+	path := writeConfig(t, `
+provider = "openai"
+openai_model = "gpt-4.1-mini"
+request_timeout = "30s"
+
+[profile.review]
+provider = "anthropic"
+anthropic_model = "claude-opus-4-6"
+template = "technical"
+`)
+
+	cfg, err := LoadWith(viperFromFile(path), "review")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Provider != Anthropic {
+		t.Errorf("expected profile provider anthropic, got %q", cfg.Provider)
+	}
+	if cfg.OpenAIModel != "gpt-4.1-mini" {
+		t.Errorf("expected non-overridden openai_model to remain, got %q", cfg.OpenAIModel)
+	}
+	if cfg.AnthropicModel != "claude-opus-4-6" {
+		t.Errorf("expected profile anthropic_model, got %q", cfg.AnthropicModel)
+	}
+	if cfg.Template != "technical" {
+		t.Errorf("expected profile template technical, got %q", cfg.Template)
+	}
+	if cfg.RequestTimeout != 30*time.Second {
+		t.Errorf("expected request timeout 30s, got %v", cfg.RequestTimeout)
+	}
+}
+
+func TestLoadWithMissingProfile(t *testing.T) {
+	path := writeConfig(t, `provider = "openai"`)
+
+	_, err := LoadWith(viperFromFile(path), "missing")
+	if err == nil {
+		t.Fatal("expected missing profile error")
+	}
+	if !strings.Contains(err.Error(), `profile "missing" not found`) {
+		t.Fatalf("expected missing profile message, got %v", err)
+	}
+}
+
+func TestLoadWithMalformedConfig(t *testing.T) {
+	path := writeConfig(t, `provider = anthropic`)
+
+	_, err := LoadWith(viperFromFile(path), "")
+	if err == nil {
+		t.Fatal("expected malformed config error")
+	}
+	if !strings.Contains(err.Error(), "malformed config file") {
+		t.Fatalf("expected malformed config message, got %v", err)
+	}
+}
+
+func TestListProfiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".ai-mr-comment.toml"), []byte(`
+[profile.zed]
+provider = "openai"
+
+[profile.alpha]
+provider = "anthropic"
+`), 0o644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+	t.Chdir(dir)
+
+	got := ListProfiles()
+	want := []string{"alpha", "zed"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("profiles mismatch:\ngot  %v\nwant %v", got, want)
+	}
+}
+
+func viperFromFile(path string) *viper.Viper {
+	v := viper.New()
+	v.SetConfigFile(path)
+	v.SetConfigType("toml")
+	return v
+}
+
+func writeConfig(t *testing.T, content string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), ".ai-mr-comment.toml")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+	return path
+}

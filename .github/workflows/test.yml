@@ -44,14 +44,33 @@ jobs:
       - name: Run Tests
         run: make test
 
+      - name: Run E2E Smoke
+        run: make test-e2e-smoke
+
       - name: Run Coverage
         run: make test-cover-report
 
       # - name: Fuzz Smoke Test
-      #   run: |
-      #     go test -fuzz=FuzzSplitDiffByFile -fuzztime=10s .
-      #     go test -fuzz=FuzzProcessDiff -fuzztime=10s .
-      #     go test -fuzz=FuzzEstimateCost -fuzztime=10s .
+      #   run: make test-fuzz
 
       - name: Check Binary Size
         run: make check-size
+
+      - name: Check Docker Credentials
+        id: docker_creds
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: .github/scripts/check-docker-creds.sh
+
+      - name: Log in to DHI registry
+        if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: dhi.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Run Docker Smoke
+        if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
+        run: make docker-smoke
