@@ -122,6 +122,8 @@ func initSmokeGitRepo(t *testing.T) string {
 		{"init", dir},
 		{"-C", dir, "config", "user.email", "smoke@example.com"},
 		{"-C", dir, "config", "user.name", "Smoke Test"},
+		{"-C", dir, "config", "commit.gpgsign", "false"},
+		{"-C", dir, "config", "tag.gpgSign", "false"},
 	} {
 		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)

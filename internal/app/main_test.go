@@ -108,9 +108,7 @@ func TestChangelogCmd_MalformedConfig(t *testing.T) {
 }
 
 func TestQuickCommitCmd_MalformedConfig(t *testing.T) {
-	if !isGitRepo() {
-		t.Skip("skipping: not inside a git repository")
-	}
+	initEmptyRepo(t)
 
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
@@ -1949,10 +1947,10 @@ func TestNewRootCmd_CommitMsgFlag_NormalizesMultilineOutput(t *testing.T) {
 // repo (no --file, no --pr), the branch name is prepended to the diffContent
 // that reaches the AI so templates like jira can extract the ticket key.
 func TestBranchPrependedForLocalGitDiff(t *testing.T) {
-	if !isGitRepo() {
-		t.Skip("skipping: not inside a git repository")
-	}
+	dir := initEmptyRepo(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
+	writeRepoFile(t, dir, "branch.txt", "changed\n")
+	runGit(t, dir, "add", "branch.txt")
 
 	var capturedDiff string
 	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, diffContent string) (string, error) {
@@ -1968,16 +1966,12 @@ func TestBranchPrependedForLocalGitDiff(t *testing.T) {
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
 
-	// May return "no staged changes" error — that's fine, we only care about
-	// whether the branch prefix was added before the diff is processed.
-	// If the error is about missing staged changes the branch inject already ran.
 	err := cmd.Execute()
-	if err != nil && !strings.Contains(err.Error(), "no staged changes") && !strings.Contains(err.Error(), "no diff found") {
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// If chatFn was called, capturedDiff must start with "Branch: ".
-	if capturedDiff != "" && !strings.HasPrefix(capturedDiff, "Branch: ") {
+	if !strings.HasPrefix(capturedDiff, "Branch: ") {
 		preview := capturedDiff
 		if len(preview) > 200 {
 			preview = preview[:200]
@@ -2013,23 +2007,10 @@ func TestBranchNotPrependedForFileDiff(t *testing.T) {
 	}
 }
 
-// skipIfDetachedHead skips the test when the repo is in detached HEAD state
-// (e.g. CI shallow clones), since quick-commit requires a named branch.
-func skipIfDetachedHead(t *testing.T) {
-	t.Helper()
-	branch, err := getCurrentBranch()
-	if err != nil || branch == "" {
-		t.Skip("skipping: detached HEAD state or no branch available")
-	}
-}
-
 // TestQuickCommit_DryRun verifies that --dry-run generates and prints the
 // commit message without staging, committing, or pushing.
 func TestQuickCommit_DryRun(t *testing.T) {
-	if !isGitRepo() {
-		t.Skip("skipping: not inside a git repository")
-	}
-	skipIfDetachedHead(t)
+	initRepoWithWorktreeChange(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
 	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
@@ -2044,12 +2025,7 @@ func TestQuickCommit_DryRun(t *testing.T) {
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
 
-	err := cmd.Execute()
-	// Skip when the working tree is clean — no diff to feed the AI.
-	if err != nil && (strings.Contains(err.Error(), "no staged changes") || strings.Contains(err.Error(), "no changes found")) {
-		t.Skip("skipping: no diff available in working tree")
-	}
-	if err != nil {
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2063,9 +2039,7 @@ func TestQuickCommit_DryRun(t *testing.T) {
 }
 
 func TestQuickCommit_InvalidFormatRejected(t *testing.T) {
-	if !isGitRepo() {
-		t.Skip("skipping: not inside a git repository")
-	}
+	initEmptyRepo(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
 	called := false
@@ -2091,10 +2065,7 @@ func TestQuickCommit_InvalidFormatRejected(t *testing.T) {
 }
 
 func TestQuickCommit_JSONIncludesProviderAndModel(t *testing.T) {
-	if !isGitRepo() {
-		t.Skip("skipping: not inside a git repository")
-	}
-	skipIfDetachedHead(t)
+	initEmptyRepo(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
 	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
@@ -2134,10 +2105,7 @@ func TestQuickCommit_JSONIncludesProviderAndModel(t *testing.T) {
 // TestQuickCommit_DryRun_BranchPrefix verifies that the branch name is
 // prepended to the diff content passed to the AI.
 func TestQuickCommit_DryRun_BranchPrefix(t *testing.T) {
-	if !isGitRepo() {
-		t.Skip("skipping: not inside a git repository")
-	}
-	skipIfDetachedHead(t)
+	initRepoWithWorktreeChange(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
 	var capturedDiff string
@@ -2153,26 +2121,18 @@ func TestQuickCommit_DryRun_BranchPrefix(t *testing.T) {
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
 
-	err := cmd.Execute()
-	// Skip when the working tree is clean — no diff to feed the AI.
-	if err != nil && (strings.Contains(err.Error(), "no staged changes") || strings.Contains(err.Error(), "no changes found")) {
-		t.Skip("skipping: no diff available in working tree")
-	}
-	if err != nil {
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if capturedDiff != "" && !strings.HasPrefix(capturedDiff, "Branch: ") {
+	if !strings.HasPrefix(capturedDiff, "Branch: ") {
 		t.Errorf("expected diffContent to start with 'Branch: ', got:\n%s", capturedDiff)
 	}
 }
 
 // TestQuickCommit_AIError verifies that an AI error is surfaced correctly.
 func TestQuickCommit_AIError(t *testing.T) {
-	if !isGitRepo() {
-		t.Skip("skipping: not inside a git repository")
-	}
-	skipIfDetachedHead(t)
+	initRepoWithWorktreeChange(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
 	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
@@ -2187,10 +2147,6 @@ func TestQuickCommit_AIError(t *testing.T) {
 	cmd.SilenceErrors = true
 
 	err := cmd.Execute()
-	// Skip when the working tree is clean — no diff to reach the AI call.
-	if err != nil && (strings.Contains(err.Error(), "no staged changes") || strings.Contains(err.Error(), "no changes found")) {
-		t.Skip("skipping: no diff available in working tree")
-	}
 	if err == nil {
 		t.Fatal("expected an error from AI failure, got nil")
 	}
@@ -2201,16 +2157,8 @@ func TestQuickCommit_AIError(t *testing.T) {
 
 // TestQuickCommit_DetachedHead verifies an error is returned in detached HEAD state.
 func TestQuickCommit_DetachedHead(t *testing.T) {
-	// Check if we're actually in detached HEAD; if not, this code path can't be
-	// triggered without destructive git operations, so we just unit-test the guard
-	// indirectly by confirming getCurrentBranch returns "" → "" branch guard fires.
-	out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output()
-	if err != nil {
-		t.Skip("skipping: not in a git repo")
-	}
-	if strings.TrimSpace(string(out)) != "HEAD" {
-		t.Skip("skipping: not in detached HEAD state")
-	}
+	dir := initRepoWithTwoCommits(t)
+	runGit(t, dir, "checkout", "--detach", "HEAD")
 
 	t.Setenv("OPENAI_API_KEY", "dummy")
 	cmd := newRootCmd(dummyChatFn)
@@ -2257,10 +2205,7 @@ func TestEnforceBreakingChange(t *testing.T) {
 }
 
 func TestQuickCommit_Breaking_DryRun(t *testing.T) {
-	if !isGitRepo() {
-		t.Skip("skipping: not inside a git repository")
-	}
-	skipIfDetachedHead(t)
+	initRepoWithWorktreeChange(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
 	// AI returns a plain feat without !, enforceBreakingChange should add it.
@@ -2279,11 +2224,7 @@ func TestQuickCommit_Breaking_DryRun(t *testing.T) {
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
 
-	err := cmd.Execute()
-	if err != nil && (strings.Contains(err.Error(), "no staged changes") || strings.Contains(err.Error(), "no changes found")) {
-		t.Skip("skipping: no diff available in working tree")
-	}
-	if err != nil {
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -3732,10 +3673,7 @@ func TestCommitOnlyTemplates_RequireCommitMsg(t *testing.T) {
 }
 
 func TestQuickCommit_Body_DryRun(t *testing.T) {
-	if !isGitRepo() {
-		t.Skip("skipping: not inside a git repository")
-	}
-	skipIfDetachedHead(t)
+	initRepoWithWorktreeChange(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
 	multiLine := "feat(config): add profiles\n\n## What Changed\n- Added --profile flag\n\n## Why\nUsers need to switch providers easily."
@@ -3754,11 +3692,7 @@ func TestQuickCommit_Body_DryRun(t *testing.T) {
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
 
-	err := cmd.Execute()
-	if err != nil && (strings.Contains(err.Error(), "no staged changes") || strings.Contains(err.Error(), "no changes found")) {
-		t.Skip("skipping: no diff available in working tree")
-	}
-	if err != nil {
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -3772,10 +3706,7 @@ func TestQuickCommit_Body_DryRun(t *testing.T) {
 }
 
 func TestQuickCommit_LongBody_DryRun(t *testing.T) {
-	if !isGitRepo() {
-		t.Skip("skipping: not inside a git repository")
-	}
-	skipIfDetachedHead(t)
+	initRepoWithWorktreeChange(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
 	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
@@ -3795,11 +3726,7 @@ func TestQuickCommit_LongBody_DryRun(t *testing.T) {
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
 
-	err := cmd.Execute()
-	if err != nil && (strings.Contains(err.Error(), "no staged changes") || strings.Contains(err.Error(), "no changes found")) {
-		t.Skip("skipping: no diff available in working tree")
-	}
-	if err != nil {
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(buf.String(), "## Summary") {
@@ -4007,9 +3934,7 @@ func TestQuickCommit_TrackedOnlyLeavesUntrackedFiles(t *testing.T) {
 }
 
 func TestQuickCommit_NewFlagValidation(t *testing.T) {
-	if !isGitRepo() {
-		t.Skip("skipping: not inside a git repository")
-	}
+	initEmptyRepo(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
 	cases := []struct {
@@ -4134,10 +4059,7 @@ func TestEmbeddedPromptsNonEmpty(t *testing.T) {
 // TestQuickCommitUsesConventionalPrompt verifies that quick-commit (default)
 // sends quickCommitPrompt to the AI, which instructs type(scope) format.
 func TestQuickCommitUsesConventionalPrompt(t *testing.T) {
-	if !isGitRepo() {
-		t.Skip("skipping: not inside a git repository")
-	}
-	skipIfDetachedHead(t)
+	initRepoWithWorktreeChange(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
 	var capturedPrompt string
@@ -4152,11 +4074,7 @@ func TestQuickCommitUsesConventionalPrompt(t *testing.T) {
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
 
-	err := cmd.Execute()
-	if err != nil && strings.Contains(err.Error(), "no changes found") {
-		t.Skip("skipping: no diff available")
-	}
-	if err != nil {
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -4172,10 +4090,7 @@ func TestQuickCommitUsesConventionalPrompt(t *testing.T) {
 // TestQuickCommitNoConventionalUsesFreePrompt verifies that --no-conventional
 // sends quickCommitFreePrompt, which does not require a type(scope) prefix.
 func TestQuickCommitNoConventionalUsesFreePrompt(t *testing.T) {
-	if !isGitRepo() {
-		t.Skip("skipping: not inside a git repository")
-	}
-	skipIfDetachedHead(t)
+	initRepoWithWorktreeChange(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
 	var capturedPrompt string
@@ -4190,11 +4105,7 @@ func TestQuickCommitNoConventionalUsesFreePrompt(t *testing.T) {
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
 
-	err := cmd.Execute()
-	if err != nil && strings.Contains(err.Error(), "no changes found") {
-		t.Skip("skipping: no diff available")
-	}
-	if err != nil {
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -4242,10 +4153,7 @@ func TestCommitMsgPromptUsedByRootCmd(t *testing.T) {
 // TestQuickCommit_Chaos_DryRun verifies that --chaos sends quickCommitChaosPrompt
 // and overrides the diff content with "chaos mode".
 func TestQuickCommit_Chaos_DryRun(t *testing.T) {
-	if !isGitRepo() {
-		t.Skip("skipping: not inside a git repository")
-	}
-	skipIfDetachedHead(t)
+	initEmptyRepo(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
 	var capturedPrompt, capturedDiff string
@@ -4281,10 +4189,7 @@ func TestQuickCommit_Chaos_DryRun(t *testing.T) {
 // TestQuickCommit_Chaos_MutualExclusion verifies that --chaos cannot be combined
 // with --multi-line or --no-conventional.
 func TestQuickCommit_Chaos_MutualExclusion(t *testing.T) {
-	if !isGitRepo() {
-		t.Skip("skipping: not inside a git repository")
-	}
-	skipIfDetachedHead(t)
+	initEmptyRepo(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
 	for _, args := range [][]string{
@@ -4309,10 +4214,7 @@ func TestQuickCommit_Chaos_MutualExclusion(t *testing.T) {
 
 // TestQuickCommit_Haiku_DryRun verifies that --haiku sends quickCommitHaikuPrompt.
 func TestQuickCommit_Haiku_DryRun(t *testing.T) {
-	if !isGitRepo() {
-		t.Skip("skipping: not inside a git repository")
-	}
-	skipIfDetachedHead(t)
+	initRepoWithWorktreeChange(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
 	var capturedPrompt string
@@ -4328,11 +4230,7 @@ func TestQuickCommit_Haiku_DryRun(t *testing.T) {
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
 
-	err := cmd.Execute()
-	if err != nil && strings.Contains(err.Error(), "no changes found") {
-		t.Skip("skipping: no diff available")
-	}
-	if err != nil {
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -4346,10 +4244,7 @@ func TestQuickCommit_Haiku_DryRun(t *testing.T) {
 
 // TestQuickCommit_Roast_DryRun verifies that --roast sends quickCommitRoastPrompt.
 func TestQuickCommit_Roast_DryRun(t *testing.T) {
-	if !isGitRepo() {
-		t.Skip("skipping: not inside a git repository")
-	}
-	skipIfDetachedHead(t)
+	initRepoWithWorktreeChange(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
 	var capturedPrompt string
@@ -4365,11 +4260,7 @@ func TestQuickCommit_Roast_DryRun(t *testing.T) {
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
 
-	err := cmd.Execute()
-	if err != nil && strings.Contains(err.Error(), "no changes found") {
-		t.Skip("skipping: no diff available")
-	}
-	if err != nil {
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -4384,10 +4275,7 @@ func TestQuickCommit_Roast_DryRun(t *testing.T) {
 // TestQuickCommit_Fortune_DryRun verifies that --fortune makes a second AI call
 // and appends the fortune to the output.
 func TestQuickCommit_Fortune_DryRun(t *testing.T) {
-	if !isGitRepo() {
-		t.Skip("skipping: not inside a git repository")
-	}
-	skipIfDetachedHead(t)
+	initRepoWithWorktreeChange(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
 	callCount := 0
@@ -4406,11 +4294,7 @@ func TestQuickCommit_Fortune_DryRun(t *testing.T) {
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
 
-	err := cmd.Execute()
-	if err != nil && strings.Contains(err.Error(), "no changes found") {
-		t.Skip("skipping: no diff available")
-	}
-	if err != nil {
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 

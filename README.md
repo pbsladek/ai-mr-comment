@@ -55,7 +55,7 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 - Verbose debug logging to stderr (`--verbose`) — API timing, diff stats, config details
 - Live streaming output to the terminal — tokens appear as they are generated
 - Bootstrap a config file with `init-config` (never edit TOML by hand again)
-- All prompt templates stored as editable files in `internal/app/templates/` — embedded at build time, overridable at `~/.config/ai-mr-comment/templates/<name>.tmpl`
+- All prompt templates stored as editable files in `internal/prompts/templates/` — embedded at build time, overridable at `~/.config/ai-mr-comment/templates/<name>.tmpl`
 - Shell completions for bash, zsh, fish, and PowerShell (`completion` subcommand)
 - **Shell aliases** (`gen-aliases`) — prints `amc` and `amc-*` convenience aliases ready to source into your shell profile
 - **Changelog generation** (`changelog`) — produces a user-facing Keep a Changelog entry from a commit range, grouped by Added / Fixed / Breaking Changes etc.
@@ -631,7 +631,7 @@ gitlab_base_url = "https://gitlab.mycompany.com"
 
 Select a template with `-t` / `--template`. All templates receive the branch name as context (useful for ticket key extraction).
 
-All built-in templates live in `internal/app/templates/` in the repository and are embedded into the binary at build time. You can override any template by placing a file at `~/.config/ai-mr-comment/templates/<name>.tmpl`.
+All built-in templates live in `internal/prompts/templates/` in the repository and are embedded into the binary at build time. You can override any template by placing a file at `~/.config/ai-mr-comment/templates/<name>.tmpl`.
 
 | Name | Description |
 |---|---|

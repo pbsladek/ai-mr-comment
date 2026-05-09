@@ -1,15 +1,153 @@
 package app
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/spf13/cobra"
 )
 
 var presetNames = []string{"ci", "local-fast", "security", "release-notes"}
-var providerNames = []string{"openai", "anthropic", "gemini", "ollama", "claude-cli", "gemini-cli", "codex-cli"}
-var templateNames = []string{"default", "conventional", "technical", "user-focused", "emoji", "sassy", "monday", "jira", "commit", "commit-emoji", "commit-conventional", "chaos", "haiku", "roast", "intern", "shakespeare", "manager", "yoda", "excuse"}
+
+type providerCallFunc func(context.Context, *Config, string, string) (string, error)
+type providerStreamFunc func(context.Context, *Config, string, string, io.Writer) (string, error)
+type providerModelFunc func(*Config) string
+
+type providerMetadata struct {
+	Name         string
+	Provider     ApiProvider
+	DefaultModel string
+	RequiresKey  bool
+	Streaming    bool
+	ModelName    providerModelFunc
+	Call         providerCallFunc
+	Stream       providerStreamFunc
+}
+
+var providerRegistry = []providerMetadata{
+	{
+		Name:         "openai",
+		Provider:     OpenAI,
+		DefaultModel: "gpt-5.5",
+		RequiresKey:  true,
+		Streaming:    true,
+		ModelName:    func(cfg *Config) string { return cfg.OpenAIModel },
+		Call:         callOpenAIProvider,
+		Stream:       streamOpenAIProvider,
+	},
+	{
+		Name:         "anthropic",
+		Provider:     Anthropic,
+		DefaultModel: "claude-sonnet-4-6",
+		RequiresKey:  true,
+		Streaming:    true,
+		ModelName:    func(cfg *Config) string { return cfg.AnthropicModel },
+		Call:         callAnthropicProvider,
+		Stream:       streamAnthropicProvider,
+	},
+	{
+		Name:         "gemini",
+		Provider:     Gemini,
+		DefaultModel: "gemini-2.5-pro",
+		RequiresKey:  true,
+		Streaming:    true,
+		ModelName:    func(cfg *Config) string { return cfg.GeminiModel },
+		Call:         callGemini,
+		Stream:       streamGemini,
+	},
+	{
+		Name:         "ollama",
+		Provider:     Ollama,
+		DefaultModel: "llama3.2",
+		Streaming:    true,
+		ModelName:    func(cfg *Config) string { return cfg.OllamaModel },
+		Call:         callOllama,
+		Stream:       streamOllama,
+	},
+	{
+		Name:         "claude-cli",
+		Provider:     ClaudeCLI,
+		DefaultModel: "claude-sonnet-4-6",
+		Streaming:    true,
+		ModelName:    func(cfg *Config) string { return cfg.ClaudeCLIModel },
+		Call:         callClaudeCLI,
+		Stream:       streamClaudeCLI,
+	},
+	{
+		Name:         "gemini-cli",
+		Provider:     GeminiCLI,
+		DefaultModel: "gemini-2.5-flash",
+		Streaming:    true,
+		ModelName:    func(cfg *Config) string { return cfg.GeminiCLIModel },
+		Call:         callGeminiCLI,
+		Stream:       streamGeminiCLI,
+	},
+	{
+		Name:         "codex-cli",
+		Provider:     CodexCLI,
+		DefaultModel: "gpt-5.5",
+		Streaming:    true,
+		ModelName:    func(cfg *Config) string { return cfg.CodexCLIModel },
+		Call:         callCodexCLI,
+		Stream:       streamCodexCLI,
+	},
+}
+
+type templatePromptType string
+
+const (
+	templatePromptMR     templatePromptType = "mr"
+	templatePromptCommit templatePromptType = "commit"
+	templatePromptAny    templatePromptType = "any"
+)
+
+type templateMetadata struct {
+	Name       string
+	PromptType templatePromptType
+}
+
+var templateRegistry = []templateMetadata{
+	{Name: "default", PromptType: templatePromptAny},
+	{Name: "conventional", PromptType: templatePromptMR},
+	{Name: "technical", PromptType: templatePromptMR},
+	{Name: "user-focused", PromptType: templatePromptMR},
+	{Name: "emoji", PromptType: templatePromptMR},
+	{Name: "sassy", PromptType: templatePromptMR},
+	{Name: "monday", PromptType: templatePromptMR},
+	{Name: "jira", PromptType: templatePromptMR},
+	{Name: "commit", PromptType: templatePromptCommit},
+	{Name: "commit-emoji", PromptType: templatePromptCommit},
+	{Name: "commit-conventional", PromptType: templatePromptCommit},
+	{Name: "chaos", PromptType: templatePromptMR},
+	{Name: "haiku", PromptType: templatePromptMR},
+	{Name: "roast", PromptType: templatePromptMR},
+	{Name: "intern", PromptType: templatePromptMR},
+	{Name: "shakespeare", PromptType: templatePromptMR},
+	{Name: "manager", PromptType: templatePromptMR},
+	{Name: "yoda", PromptType: templatePromptMR},
+	{Name: "excuse", PromptType: templatePromptMR},
+}
+
+var providerNames = providerCompletionValues()
+var templateNames = templateCompletionValues()
+
+func providerCompletionValues() []string {
+	values := make([]string, 0, len(providerRegistry))
+	for _, meta := range providerRegistry {
+		values = append(values, meta.Name)
+	}
+	return values
+}
+
+func templateCompletionValues() []string {
+	values := make([]string, 0, len(templateRegistry))
+	for _, meta := range templateRegistry {
+		values = append(values, meta.Name)
+	}
+	return values
+}
 
 func completeValues(values []string) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	return func(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -102,10 +240,34 @@ func applyChangelogPreset(cmd *cobra.Command, name string, cfg *Config, format *
 }
 
 func isSupportedProvider(provider ApiProvider) bool {
-	switch provider {
-	case OpenAI, Anthropic, Gemini, Ollama, ClaudeCLI, GeminiCLI, CodexCLI:
-		return true
-	default:
-		return false
+	_, ok := providerInfo(provider)
+	return ok
+}
+
+func providerInfo(provider ApiProvider) (providerMetadata, bool) {
+	for _, meta := range providerRegistry {
+		if provider == meta.Provider {
+			return meta, true
+		}
 	}
+	return providerMetadata{}, false
+}
+
+func templateInfo(name string) (templateMetadata, bool) {
+	for _, meta := range templateRegistry {
+		if meta.Name == name {
+			return meta, true
+		}
+	}
+	return templateMetadata{}, false
+}
+
+func isCommitOnlyTemplate(name string) bool {
+	meta, ok := templateInfo(name)
+	return ok && meta.PromptType == templatePromptCommit
+}
+
+func isMROnlyTemplate(name string) bool {
+	meta, ok := templateInfo(name)
+	return ok && meta.PromptType == templatePromptMR
 }

@@ -12,7 +12,7 @@ import (
 
 // newQuickCommitCmd returns a command that stages all changes, generates an
 // AI commit message, commits, and pushes — all in one step.
-func newQuickCommitCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
+func newQuickCommitCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error), deps commandDeps) *cobra.Command {
 	var provider, modelOverride, format, profileName, commitType, commitScope, messageTemplate string
 	var dryRun, noPush, breaking, multiLine, longBody, emoji, noConventional, postFlag, verbose bool
 	var editMessage, includeUntracked, trackedOnly, signoff bool
@@ -28,11 +28,11 @@ func newQuickCommitCmd(chatFn func(context.Context, *Config, ApiProvider, string
 using AI, commits with that message, and pushes to the current branch's
 remote. Use --dry-run to preview the generated message without committing.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !isGitRepo() {
+			if !deps.isGitRepo() {
 				return fmt.Errorf("not a git repository")
 			}
 
-			cfg, err := loadConfigForProfile(profileName)
+			cfg, err := deps.loadConfig(profileName)
 			if err != nil {
 				return err
 			}
@@ -90,7 +90,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 				return errors.New("--post cannot be combined with --no-push")
 			}
 
-			branch, err := getCurrentBranch()
+			branch, err := deps.getCurrentBranch()
 			if err != nil {
 				return fmt.Errorf("could not determine current branch: %w", err)
 			}
@@ -107,7 +107,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 				} else {
 					_, _ = fmt.Fprintln(out, "Staging all changes (git add .)...")
 				}
-				if err := stageQuickCommitChanges(trackedOnly); err != nil {
+				if err := deps.stageQuickCommitChanges(trackedOnly); err != nil {
 					return err
 				}
 			}
@@ -118,9 +118,9 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			// (staged + unstaged) so the preview is still meaningful.
 			var diffContent string
 			if dryRun {
-				diffContent, err = getGitDiff("", false, nil)
+				diffContent, err = deps.getGitDiff("", false, nil)
 			} else {
-				diffContent, err = getGitDiff("", true, nil)
+				diffContent, err = deps.getGitDiff("", true, nil)
 			}
 			if err != nil {
 				return fmt.Errorf("reading diff: %w", err)
@@ -246,7 +246,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 				jsonMsg += "\n\n" + fortuneBody
 			}
 			if editMessage {
-				edited, editErr := editCommitMessage(jsonMsg)
+				edited, editErr := deps.editCommitMessage(jsonMsg)
 				if editErr != nil {
 					return editErr
 				}
@@ -255,7 +255,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 				fortuneBody = ""
 			}
 			if signoff {
-				identity, signoffErr := getGitSignoffIdentity()
+				identity, signoffErr := deps.getSignoffIdentity()
 				if signoffErr != nil {
 					return fmt.Errorf("--signoff: %w", signoffErr)
 				}
@@ -293,7 +293,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			if format != "json" {
 				_, _ = fmt.Fprintln(out, "Committing...")
 			}
-			if err := gitCommitMessage(jsonMsg); err != nil {
+			if err := deps.commitMessage(jsonMsg); err != nil {
 				return err
 			}
 
@@ -308,13 +308,13 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			if format != "json" {
 				_, _ = fmt.Fprintf(out, "Pushing to origin/%s...\n", branch)
 			}
-			if err := gitPush(branch); err != nil {
+			if err := deps.push(branch); err != nil {
 				return err
 			}
 
 			if format != "json" {
 				_, _ = fmt.Fprintln(out, "Done.")
-				if remoteURL, remErr := getRemoteURL(); remErr == nil {
+				if remoteURL, remErr := deps.getRemoteURL(); remErr == nil {
 					if createURL := prCreateURL(remoteURL, branch); createURL != "" {
 						_, _ = fmt.Fprintf(out, "\nOpen PR/MR: %s\n", createURL)
 					}
@@ -322,11 +322,11 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			}
 
 			if postFlag {
-				remoteURL, remErr := getRemoteURL()
+				remoteURL, remErr := deps.getRemoteURL()
 				if remErr != nil {
 					return fmt.Errorf("--post: getting remote URL: %w", remErr)
 				}
-				info, parseErr := parseRemoteInfo(remoteURL)
+				info, parseErr := deps.parseRemoteInfo(remoteURL)
 				if parseErr != nil {
 					return fmt.Errorf("--post: %w", parseErr)
 				}
@@ -335,18 +335,10 @@ remote. Use --dry-run to preview the generated message without committing.`,
 				subject, _, _ := strings.Cut(commitMessage, "\n")
 
 				// Find an existing open PR/MR or create a new one.
-				var prMRURL string
-				switch {
-				case isGitHubHost(info.Host, cfg.GitHubBaseURL):
-					if len(info.PathParts) < 2 {
-						return fmt.Errorf("--post: could not parse owner/repo from remote URL")
-					}
-					prMRURL, err = findOrCreateGitHubPRFromConfig(cmd.Context(), cfg, info.PathParts[0], info.PathParts[1], branch, subject)
-				case isGitLabHost(info.Host, cfg.GitLabBaseURL):
-					prMRURL, err = findOrCreateGitLabMRFromConfig(cmd.Context(), cfg, strings.Join(info.PathParts, "/"), branch, subject)
-				default:
+				if !deps.isGitHubHost(info.Host, cfg.GitHubBaseURL) && !deps.isGitLabHost(info.Host, cfg.GitLabBaseURL) {
 					return fmt.Errorf("--post: unrecognised remote host %q; set github_base_url or gitlab_base_url in config", info.Host)
 				}
+				prMRURL, err := deps.findOrCreateTarget(cmd.Context(), cfg, info, branch, subject)
 				if err != nil {
 					return fmt.Errorf("--post: finding or creating PR/MR: %w", err)
 				}
@@ -354,13 +346,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 
 				// Fetch the PR/MR diff from the remote API.
 				_, _ = fmt.Fprintln(out, "Generating AI review comment...")
-				var diffForReview string
-				switch {
-				case isGitHubHost(info.Host, cfg.GitHubBaseURL):
-					diffForReview, err = getPRDiff(cmd.Context(), prMRURL, cfg.GitHubToken, cfg.GitHubBaseURL)
-				case isGitLabHost(info.Host, cfg.GitLabBaseURL):
-					diffForReview, err = getMRDiff(cmd.Context(), prMRURL, cfg.GitLabToken, cfg.GitLabBaseURL)
-				}
+				diffForReview, err := deps.getRemoteDiff(cmd.Context(), cfg, prMRURL)
 				if err != nil {
 					return fmt.Errorf("--post: fetching PR/MR diff: %w", err)
 				}
@@ -371,22 +357,10 @@ remote. Use --dry-run to preview the generated message without committing.`,
 					return fmt.Errorf("--post: generating review comment: %w", reviewErr)
 				}
 
-				// Post the comment back to the PR/MR.
-				switch {
-				case isGitHubHost(info.Host, cfg.GitHubBaseURL):
-					err = postGitHubPRComment(cmd.Context(), prMRURL, cfg.GitHubToken, cfg.GitHubBaseURL, reviewComment)
-					if err == nil {
-						_, _ = fmt.Fprintln(out, "Posted AI review comment to GitHub PR.")
-					}
-				case isGitLabHost(info.Host, cfg.GitLabBaseURL):
-					err = postGitLabMRNote(cmd.Context(), prMRURL, cfg.GitLabToken, cfg.GitLabBaseURL, reviewComment)
-					if err == nil {
-						_, _ = fmt.Fprintln(out, "Posted AI review note to GitLab MR.")
-					}
-				}
-				if err != nil {
+				if err := deps.postRemoteComment(cmd.Context(), cfg, prMRURL, reviewComment); err != nil {
 					return fmt.Errorf("--post: posting comment: %w", err)
 				}
+				_, _ = fmt.Fprintln(out, "Posted AI review comment to PR/MR.")
 			}
 
 			return nil

@@ -76,10 +76,3 @@ func editCommitMessage(message string) (string, error) {
 func editCommitMessageWithEditor(message, editor string) (string, error) {
 	return internalcommit.EditMessageWithEditor(message, editor)
 }
-
-func stageQuickCommitChanges(trackedOnly bool) error {
-	if trackedOnly {
-		return gitAddTracked()
-	}
-	return gitAdd()
-}

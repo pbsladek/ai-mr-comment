@@ -16,7 +16,7 @@ const managedDescriptionStart = "<!-- ai-mr-comment:description:start -->"
 const managedDescriptionEnd = "<!-- ai-mr-comment:description:end -->"
 const managedCommentMarker = "<!-- ai-mr-comment:comment -->"
 
-func newPublishCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
+func newPublishCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error), deps commandDeps) *cobra.Command {
 	var prURL, provider, modelOverride, templateName, profileName, format string
 	var dryRun, noUpdateTitle, noUpdateDescription, replaceDescription, postSummary, autoLabels, draftIfRisky bool
 	var labels, reviewers []string
@@ -28,7 +28,7 @@ func newPublishCmd(chatFn func(context.Context, *Config, ApiProvider, string, st
 GitHub PR or GitLab MR. Pass --pr to target an existing PR/MR, or omit --pr to
 find or create one from the current branch and origin remote.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := loadConfigForProfile(profileName)
+			cfg, err := deps.loadConfig(profileName)
 			if err != nil {
 				return err
 			}
@@ -57,7 +57,7 @@ find or create one from the current branch and origin remote.`,
 				defer cancel()
 			}
 
-			diffContent, targetURL, err := resolvePublishDiff(cmd.Context(), cfg, prURL)
+			diffContent, targetURL, err := resolvePublishDiffWithDeps(cmd.Context(), cfg, prURL, deps)
 			if err != nil {
 				return err
 			}
@@ -104,7 +104,7 @@ find or create one from the current branch and origin remote.`,
 			reviewers = cleanStringList(reviewers)
 
 			if targetURL == "" {
-				targetURL, err = findOrCreatePublishTarget(cmd.Context(), cfg, title)
+				targetURL, err = findOrCreatePublishTargetWithDeps(cmd.Context(), cfg, title, deps)
 				if err != nil {
 					return err
 				}
@@ -120,7 +120,7 @@ find or create one from the current branch and origin remote.`,
 			if updateDescription {
 				body := description
 				if !replaceDescription {
-					metadata, metaErr := getRemoteMetadata(cmd.Context(), cfg, targetURL)
+					metadata, metaErr := deps.getRemoteMetadata(cmd.Context(), cfg, targetURL)
 					if metaErr != nil {
 						return metaErr
 					}
@@ -134,22 +134,22 @@ find or create one from the current branch and origin remote.`,
 			}
 
 			if updateTitle || updateDescription {
-				if err := updateRemoteMetadata(cmd.Context(), cfg, targetURL, updateTitleValue, updateDescriptionValue); err != nil {
+				if err := deps.updateRemoteMetadata(cmd.Context(), cfg, targetURL, updateTitleValue, updateDescriptionValue); err != nil {
 					return err
 				}
 			}
 			if postSummary {
-				if err := upsertRemoteManagedComment(cmd.Context(), cfg, targetURL, buildManagedComment(title, description)); err != nil {
+				if err := deps.upsertRemoteManagedComment(cmd.Context(), cfg, targetURL, buildManagedComment(title, description)); err != nil {
 					return err
 				}
 			}
 			if len(appliedLabels) > 0 {
-				if err := addRemoteLabels(cmd.Context(), cfg, targetURL, appliedLabels); err != nil {
+				if err := deps.addRemoteLabels(cmd.Context(), cfg, targetURL, appliedLabels); err != nil {
 					return err
 				}
 			}
 			if len(reviewers) > 0 {
-				if err := requestRemoteReviewers(cmd.Context(), cfg, targetURL, reviewers); err != nil {
+				if err := deps.requestRemoteReviewers(cmd.Context(), cfg, targetURL, reviewers); err != nil {
 					return err
 				}
 			}
@@ -202,26 +202,24 @@ find or create one from the current branch and origin remote.`,
 	return cmd
 }
 
-func resolvePublishDiff(ctx context.Context, cfg *Config, prURL string) (diffContent, targetURL string, err error) {
+func resolvePublishDiffWithDeps(ctx context.Context, cfg *Config, prURL string, deps commandDeps) (diffContent, targetURL string, err error) {
 	if prURL != "" {
 		switch {
-		case isGitHubURL(prURL):
-			diffContent, err = getPRDiff(ctx, prURL, cfg.GitHubToken, cfg.GitHubBaseURL)
-		case isGitLabURL(prURL):
-			diffContent, err = getMRDiff(ctx, prURL, cfg.GitLabToken, cfg.GitLabBaseURL)
+		case deps.isGitHubURL(prURL), deps.isGitLabURL(prURL):
+			diffContent, err = deps.getRemoteDiff(ctx, cfg, prURL)
 		default:
 			return "", "", fmt.Errorf("unsupported URL %q: must be a GitHub PR (/pull/) or GitLab MR (/-/merge_requests/) URL", prURL)
 		}
 		return diffContent, prURL, err
 	}
-	if !isGitRepo() {
+	if !deps.isGitRepo() {
 		return "", "", errors.New("not a git repository. Pass --pr to publish a remote PR/MR without a local checkout")
 	}
-	branch, err := getCurrentBranch()
+	branch, err := deps.getCurrentBranch()
 	if err != nil {
 		return "", "", fmt.Errorf("could not determine current branch: %w", err)
 	}
-	diffContent, err = getGitDiff("", false, nil)
+	diffContent, err = deps.getGitDiff("", false, nil)
 	if err != nil {
 		return "", "", fmt.Errorf("reading local diff: %w", err)
 	}
@@ -231,88 +229,67 @@ func resolvePublishDiff(ctx context.Context, cfg *Config, prURL string) (diffCon
 	return diffContent, "", nil
 }
 
-func findOrCreatePublishTarget(ctx context.Context, cfg *Config, title string) (string, error) {
-	branch, err := getCurrentBranch()
+func findOrCreatePublishTargetWithDeps(ctx context.Context, cfg *Config, title string, deps commandDeps) (string, error) {
+	branch, err := deps.getCurrentBranch()
 	if err != nil {
 		return "", fmt.Errorf("could not determine current branch: %w", err)
 	}
 	if branch == "" {
 		return "", errors.New("cannot publish from detached HEAD without --pr")
 	}
-	remoteURL, err := getRemoteURL()
+	remoteURL, err := deps.getRemoteURL()
 	if err != nil {
 		return "", fmt.Errorf("getting remote URL: %w", err)
 	}
-	info, err := parseRemoteInfo(remoteURL)
+	info, err := deps.parseRemoteInfo(remoteURL)
 	if err != nil {
 		return "", err
 	}
 	switch {
-	case isGitHubHost(info.Host, cfg.GitHubBaseURL):
-		if len(info.PathParts) < 2 {
-			return "", errors.New("could not parse owner/repo from remote URL")
-		}
-		return findOrCreateGitHubPRFromConfig(ctx, cfg, info.PathParts[0], info.PathParts[1], branch, title)
-	case isGitLabHost(info.Host, cfg.GitLabBaseURL):
-		return findOrCreateGitLabMRFromConfig(ctx, cfg, strings.Join(info.PathParts, "/"), branch, title)
-	default:
-		return "", fmt.Errorf("unrecognised remote host %q; set github_base_url or gitlab_base_url in config", info.Host)
+	case deps.isGitHubHost(info.Host, cfg.GitHubBaseURL), deps.isGitLabHost(info.Host, cfg.GitLabBaseURL):
+		return deps.findOrCreateTarget(ctx, cfg, info, branch, title)
 	}
+	return "", fmt.Errorf("unrecognised remote host %q; set github_base_url or gitlab_base_url in config", info.Host)
 }
 
 func getRemoteMetadata(ctx context.Context, cfg *Config, targetURL string) (prMetadata, error) {
-	switch {
-	case isGitHubURL(targetURL):
-		return getGitHubPRMetadata(ctx, targetURL, cfg.GitHubToken, cfg.GitHubBaseURL)
-	case isGitLabURL(targetURL):
-		return getGitLabMRMetadata(ctx, targetURL, cfg.GitLabToken, cfg.GitLabBaseURL)
-	default:
-		return prMetadata{}, fmt.Errorf("unsupported PR/MR URL %q", targetURL)
+	target, err := parseRemoteTarget(targetURL)
+	if err != nil {
+		return prMetadata{}, err
 	}
+	return target.Metadata(ctx, remoteCredentials(cfg))
 }
 
 func updateRemoteMetadata(ctx context.Context, cfg *Config, targetURL string, title, description *string) error {
-	switch {
-	case isGitHubURL(targetURL):
-		return updateGitHubPRMetadata(ctx, targetURL, cfg.GitHubToken, cfg.GitHubBaseURL, title, description)
-	case isGitLabURL(targetURL):
-		return updateGitLabMRMetadata(ctx, targetURL, cfg.GitLabToken, cfg.GitLabBaseURL, title, description)
-	default:
-		return fmt.Errorf("unsupported PR/MR URL %q", targetURL)
+	target, err := parseRemoteTarget(targetURL)
+	if err != nil {
+		return err
 	}
+	return target.UpdateMetadata(ctx, remoteCredentials(cfg), title, description)
 }
 
 func upsertRemoteManagedComment(ctx context.Context, cfg *Config, targetURL, body string) error {
-	switch {
-	case isGitHubURL(targetURL):
-		return upsertGitHubPRComment(ctx, targetURL, cfg.GitHubToken, cfg.GitHubBaseURL, managedCommentMarker, body)
-	case isGitLabURL(targetURL):
-		return upsertGitLabMRNote(ctx, targetURL, cfg.GitLabToken, cfg.GitLabBaseURL, managedCommentMarker, body)
-	default:
-		return fmt.Errorf("unsupported PR/MR URL %q", targetURL)
+	target, err := parseRemoteTarget(targetURL)
+	if err != nil {
+		return err
 	}
+	return target.UpsertManagedComment(ctx, remoteCredentials(cfg), managedCommentMarker, body)
 }
 
 func addRemoteLabels(ctx context.Context, cfg *Config, targetURL string, labels []string) error {
-	switch {
-	case isGitHubURL(targetURL):
-		return addGitHubPRLabels(ctx, targetURL, cfg.GitHubToken, cfg.GitHubBaseURL, labels)
-	case isGitLabURL(targetURL):
-		return addGitLabMRLabels(ctx, targetURL, cfg.GitLabToken, cfg.GitLabBaseURL, labels)
-	default:
-		return fmt.Errorf("unsupported PR/MR URL %q", targetURL)
+	target, err := parseRemoteTarget(targetURL)
+	if err != nil {
+		return err
 	}
+	return target.AddLabels(ctx, remoteCredentials(cfg), labels)
 }
 
 func requestRemoteReviewers(ctx context.Context, cfg *Config, targetURL string, reviewers []string) error {
-	switch {
-	case isGitHubURL(targetURL):
-		return requestGitHubPRReviewers(ctx, targetURL, cfg.GitHubToken, cfg.GitHubBaseURL, reviewers)
-	case isGitLabURL(targetURL):
-		return requestGitLabMRReviewers(ctx, targetURL, cfg.GitLabToken, cfg.GitLabBaseURL, reviewers)
-	default:
-		return fmt.Errorf("unsupported PR/MR URL %q", targetURL)
+	target, err := parseRemoteTarget(targetURL)
+	if err != nil {
+		return err
 	}
+	return target.RequestReviewers(ctx, remoteCredentials(cfg), reviewers)
 }
 
 func mergeManagedSection(existing, generated string) string {

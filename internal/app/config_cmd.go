@@ -179,24 +179,10 @@ models, endpoints, or the default provider.`,
 
 // getModelName returns the configured model name for the active provider.
 func getModelName(cfg *Config) string {
-	switch cfg.Provider {
-	case OpenAI:
-		return cfg.OpenAIModel
-	case Anthropic:
-		return cfg.AnthropicModel
-	case Gemini:
-		return cfg.GeminiModel
-	case Ollama:
-		return cfg.OllamaModel
-	case ClaudeCLI:
-		return cfg.ClaudeCLIModel
-	case GeminiCLI:
-		return cfg.GeminiCLIModel
-	case CodexCLI:
-		return cfg.CodexCLIModel
-	default:
-		return "unknown"
+	if meta, ok := providerInfo(cfg.Provider); ok && meta.ModelName != nil {
+		return meta.ModelName(cfg)
 	}
+	return "unknown"
 }
 
 func validateProviderConfig(cfg *Config) error {

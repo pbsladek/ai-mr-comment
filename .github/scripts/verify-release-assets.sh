@@ -4,6 +4,7 @@ set -euo pipefail
 tag="${1:?tag is required}"
 repo="${2:-pbsladek/ai-mr-comment}"
 require_docker_provenance="${3:-false}"
+require_docker_fips_provenance="${4:-${require_docker_provenance}}"
 
 if [ -z "${GH_TOKEN:-}" ]; then
   echo "GH_TOKEN is required to verify release assets." >&2
@@ -19,6 +20,8 @@ required_exact=(
 
 if [ "${require_docker_provenance}" = "true" ]; then
   required_exact+=("provenance-docker.intoto.jsonl")
+fi
+if [ "${require_docker_fips_provenance}" = "true" ]; then
   required_exact+=("provenance-docker-fips.intoto.jsonl")
 fi
 
@@ -59,7 +62,16 @@ for attempt in $(seq 1 "${max_attempts}"); do
     "ai-mr-comment_Windows_arm64.zip"
   )
 
-  for name in "${required_archives[@]}"; do
+  required_sboms=(
+    "ai-mr-comment_linux_amd64.sbom.json"
+    "ai-mr-comment_linux_arm64.sbom.json"
+    "ai-mr-comment_darwin_amd64.sbom.json"
+    "ai-mr-comment_darwin_arm64.sbom.json"
+    "ai-mr-comment_windows_amd64.sbom.json"
+    "ai-mr-comment_windows_arm64.sbom.json"
+  )
+
+  for name in "${required_archives[@]}" "${required_sboms[@]}"; do
     found="false"
     for asset in "${assets[@]}"; do
       if [ "${asset}" = "${name}" ]; then
@@ -73,6 +85,30 @@ for attempt in $(seq 1 "${max_attempts}"); do
   done
 
   if [ "${#missing[@]}" -eq 0 ]; then
+    tmpdir="$(mktemp -d)"
+    trap 'rm -rf "${tmpdir}"' EXIT
+    gh release download "${tag}" --repo "${repo}" --pattern "release-manifest.json" --dir "${tmpdir}" --clobber >/dev/null
+    manifest="${tmpdir}/release-manifest.json"
+    if [ ! -f "${manifest}" ]; then
+      echo "Release ${tag} is missing release-manifest.json download." >&2
+      exit 1
+    fi
+    if [ "${require_docker_provenance}" = "true" ]; then
+      jq -e '
+        .docker.published == true
+        and (.docker.image | length > 0)
+        and (.docker.digest | test("^sha256:[0-9a-fA-F]{64}$"))
+        and ((.docker.tags // []) | length > 0)
+      ' "${manifest}" >/dev/null
+    fi
+    if [ "${require_docker_fips_provenance}" = "true" ]; then
+      jq -e '
+        .docker_fips.published == true
+        and (.docker_fips.image | length > 0)
+        and (.docker_fips.digest | test("^sha256:[0-9a-fA-F]{64}$"))
+        and ((.docker_fips.tags // []) | length > 0)
+      ' "${manifest}" >/dev/null
+    fi
     echo "Release ${tag} asset check passed."
     exit 0
   fi

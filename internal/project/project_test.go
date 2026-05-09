@@ -4,11 +4,14 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"go.yaml.in/yaml/v3"
 )
+
+var githubActionSHAPinPattern = regexp.MustCompile(`@[0-9a-fA-F]{40}$`)
 
 func repoPath(t *testing.T, parts ...string) string {
 	t.Helper()
@@ -163,6 +166,121 @@ func TestWorkflowAndReleaseYAMLParse(t *testing.T) {
 		}
 		if len(parsed) == 0 {
 			t.Fatalf("%s parsed as empty YAML", file)
+		}
+	}
+}
+
+func TestWorkflowActionsArePinnedBySHA(t *testing.T) {
+	files, err := filepath.Glob(repoPath(t, ".github", "workflows", "*.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) == 0 {
+		t.Fatal("expected workflow files")
+	}
+
+	for _, file := range files {
+		content, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(string(content), "\n")
+		for i, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if !strings.HasPrefix(trimmed, "uses:") {
+				continue
+			}
+			ref := strings.TrimSpace(strings.TrimPrefix(trimmed, "uses:"))
+			if beforeComment, _, ok := strings.Cut(ref, "#"); ok {
+				ref = strings.TrimSpace(beforeComment)
+			}
+			ref = strings.Trim(ref, `"'`)
+			if strings.HasPrefix(ref, "./") || strings.HasPrefix(ref, "docker://") {
+				continue
+			}
+			if !githubActionSHAPinPattern.MatchString(ref) {
+				rel, relErr := filepath.Rel(repoPath(t), file)
+				if relErr != nil {
+					rel = file
+				}
+				t.Fatalf("%s:%d uses %q; external workflow actions must be pinned to a 40-character commit SHA", rel, i+1, ref)
+			}
+		}
+	}
+}
+
+func TestReleaseSafetyWorkflowConfiguration(t *testing.T) {
+	tagWorkflow := readRepoFile(t, ".github", "workflows", "tag.yml")
+	releaseWorkflow := readRepoFile(t, ".github", "workflows", "release.yml")
+	manifestScript := readRepoFile(t, ".github", "scripts", "generate-release-manifest.sh")
+	verifyScript := readRepoFile(t, ".github", "scripts", "verify-release-assets.sh")
+	packageJSON := readRepoFile(t, "package.json")
+	packageLock := readRepoFile(t, "package-lock.json")
+
+	required := map[string][]string{
+		".github/workflows/tag.yml": {
+			"validate:",
+			"name: Validate Release Candidate",
+			"run: make verify",
+			"needs: validate",
+			`node-version: "24.10.0"`,
+			"run: npm ci",
+			"run: npm run semantic-release -- --ci",
+		},
+		".github/workflows/release.yml": {
+			"version: v2.15.4",
+			"DOCKER_FIPS_TAGS: ${{ needs.docker_fips.outputs.docker_fips_tags }}",
+			"DOCKER_FIPS_DIGEST: ${{ needs.docker_fips.outputs.docker_fips_digest }}",
+			`"${REQUIRE_DOCKER_PROVENANCE}" "${REQUIRE_DOCKER_FIPS_PROVENANCE}"`,
+		},
+		".github/scripts/generate-release-manifest.sh": {
+			"docker_fips_image=",
+			"docker_fips_tags_json=",
+			"docker_fips_published=false",
+			"docker_fips: {",
+		},
+		".github/scripts/verify-release-assets.sh": {
+			"require_docker_fips_provenance=",
+			"ai-mr-comment_linux_amd64.sbom.json",
+			".docker_fips.published == true",
+			".docker_fips.digest",
+		},
+		"package.json": {
+			`"node": "24.10.0"`,
+			`"semantic-release": "25.0.3"`,
+			`"@semantic-release/github": "12.0.8"`,
+		},
+		"package-lock.json": {
+			`"semantic-release": "25.0.3"`,
+			`"@semantic-release/commit-analyzer": "13.0.1"`,
+			`"@semantic-release/release-notes-generator": "14.1.1"`,
+			`"@semantic-release/github": "12.0.8"`,
+		},
+	}
+	contents := map[string]string{
+		".github/workflows/tag.yml":                    tagWorkflow,
+		".github/workflows/release.yml":                releaseWorkflow,
+		".github/scripts/generate-release-manifest.sh": manifestScript,
+		".github/scripts/verify-release-assets.sh":     verifyScript,
+		"package.json":      packageJSON,
+		"package-lock.json": packageLock,
+	}
+	for file, wants := range required {
+		for _, want := range wants {
+			if !strings.Contains(contents[file], want) {
+				t.Fatalf("%s missing %q", file, want)
+			}
+		}
+	}
+	for file, content := range contents {
+		for _, stale := range []string{
+			"node-version: lts/*",
+			"npx --yes semantic-release",
+			"version: \"~> v2\"",
+		} {
+			if strings.Contains(content, stale) {
+				t.Fatalf("%s still contains floating release tool reference %q", file, stale)
+			}
 		}
 	}
 }

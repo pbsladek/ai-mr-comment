@@ -7,11 +7,52 @@ on:
 permissions: read-all
 
 jobs:
+  validate:
+    name: Validate Release Candidate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9
+        with:
+          version: v2.9
+
+      - name: Download Dependencies
+        run: go mod download 2>/dev/null
+
+      - name: Verify Dependencies
+        run: make verify-deps
+
+      - name: Validate Installer Scripts
+        run: .github/scripts/validate-installer-scripts.sh
+
+      - name: Install shellcheck
+        run: make install-shellcheck
+
+      - name: Lint Shell Scripts
+        run: make lint-shell
+
+      - name: Run Validation Gate
+        run: make verify
+
+      - name: Check Binary Size
+        run: make check-size
+
   tag:
     name: Create Version Tag
+    needs: validate
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      issues: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -19,9 +60,13 @@ jobs:
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4
         with:
-          node-version: lts/*
+          node-version: "24.10.0"
+          cache: npm
+
+      - name: Install release tooling
+        run: npm ci
 
       - name: Create version tag
-        run: npx --yes semantic-release
+        run: npm run semantic-release -- --ci
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

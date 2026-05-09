@@ -9,6 +9,9 @@ docker_image="${5:-}"
 docker_tags_csv="${6:-}"
 docker_digest="${7:-}"
 output_path="${8:?output path is required}"
+docker_fips_image="${DOCKER_FIPS_IMAGE:-}"
+docker_fips_tags_csv="${DOCKER_FIPS_TAGS:-}"
+docker_fips_digest="${DOCKER_FIPS_DIGEST:-}"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -105,6 +108,21 @@ if [ -n "${docker_digest}" ]; then
   docker_published=true
 fi
 
+docker_fips_tags_json="$(
+  jq -n --arg tags "${docker_fips_tags_csv}" '
+    if ($tags | length) == 0 then
+      []
+    else
+      ($tags | split(",") | map(gsub("^\\s+|\\s+$"; "") | select(length > 0)))
+    end
+  '
+)"
+
+docker_fips_published=false
+if [ -n "${docker_fips_digest}" ]; then
+  docker_fips_published=true
+fi
+
 checksums_sha256="$(sha256_file "${checksums_path}")"
 generated_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 mkdir -p "$(dirname "${output_path}")"
@@ -120,8 +138,12 @@ jq -n \
   --arg checksums_sha256 "${checksums_sha256}" \
   --arg docker_image "${docker_image}" \
   --arg docker_digest "${docker_digest}" \
+  --arg docker_fips_image "${docker_fips_image}" \
+  --arg docker_fips_digest "${docker_fips_digest}" \
   --argjson docker_published "${docker_published}" \
   --argjson docker_tags "${docker_tags_json}" \
+  --argjson docker_fips_published "${docker_fips_published}" \
+  --argjson docker_fips_tags "${docker_fips_tags_json}" \
   --argjson artifacts_from_checksums "${artifacts_from_checksums}" \
   --argjson supplemental_artifacts "${supplemental_artifacts}" \
   '
@@ -146,6 +168,12 @@ jq -n \
       image: $docker_image,
       tags: $docker_tags,
       digest: $docker_digest
+    },
+    docker_fips: {
+      published: $docker_fips_published,
+      image: $docker_fips_image,
+      tags: $docker_fips_tags,
+      digest: $docker_fips_digest
     }
   }
   ' > "${output_path}"

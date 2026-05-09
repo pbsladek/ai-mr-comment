@@ -1,202 +1,47 @@
 package app
 
-import (
-	_ "embed"
+import "github.com/pbsladek/ai-mr-comment/internal/prompts"
 
-	"github.com/pbsladek/ai-mr-comment/internal/prompts"
+var (
+	defaultPromptTemplate = prompts.DefaultTemplate
+	mrCommitPrompt        = prompts.MRCommitTemplate
+
+	commitMsgPrompt              = prompts.CommitMsgPrompt
+	quickCommitPrompt            = prompts.QuickCommitPrompt
+	quickCommitFreePrompt        = prompts.QuickCommitFreePrompt
+	quickCommitChaosPrompt       = prompts.QuickCommitChaosPrompt
+	quickCommitHaikuPrompt       = prompts.QuickCommitHaikuPrompt
+	quickCommitRoastPrompt       = prompts.QuickCommitRoastPrompt
+	quickCommitMondayPrompt      = prompts.QuickCommitMondayPrompt
+	quickCommitJiraPrompt        = prompts.QuickCommitJiraPrompt
+	quickCommitEmojiPrompt       = prompts.QuickCommitEmojiPrompt
+	quickCommitSassyPrompt       = prompts.QuickCommitSassyPrompt
+	quickCommitTechnicalPrompt   = prompts.QuickCommitTechnicalPrompt
+	quickCommitInternPrompt      = prompts.QuickCommitInternPrompt
+	quickCommitShakespearePrompt = prompts.QuickCommitShakespearePrompt
+	quickCommitManagerPrompt     = prompts.QuickCommitManagerPrompt
+	quickCommitYodaPrompt        = prompts.QuickCommitYodaPrompt
+	quickCommitExcusePrompt      = prompts.QuickCommitExcusePrompt
+	commitMsgBodyPrompt          = prompts.CommitMsgBodyPrompt
+	changelogPrompt              = prompts.ChangelogPrompt
+
+	mrChaosPrompt       = prompts.MRChaosPrompt
+	mrHaikuPrompt       = prompts.MRHaikuPrompt
+	mrRoastPrompt       = prompts.MRoastPrompt
+	mrInternPrompt      = prompts.MRInternPrompt
+	mrShakespearePrompt = prompts.MRShakespearePrompt
+	mrManagerPrompt     = prompts.MRManagerPrompt
+	mrYodaPrompt        = prompts.MRYodaPrompt
+	mrExcusePrompt      = prompts.MRExcusePrompt
+
+	fortunePrompt = prompts.FortunePrompt
+	titlePrompt   = prompts.TitlePrompt
 )
 
-// User-facing --template prompts
-//
-//go:embed templates/default.tmpl
-var defaultPromptTemplate string
-
-//go:embed templates/technical.tmpl
-var mrTechnicalPrompt string
-
-//go:embed templates/emoji.tmpl
-var mrEmojiPrompt string
-
-//go:embed templates/jira.tmpl
-var mrJiraPrompt string
-
-//go:embed templates/monday.tmpl
-var mrMondayPrompt string
-
-//go:embed templates/sassy.tmpl
-var mrSassyPrompt string
-
-//go:embed templates/user-focused.tmpl
-var mrUserFocusedPrompt string
-
-//go:embed templates/conventional.tmpl
-var mrConventionalPrompt string
-
-//go:embed templates/commit.tmpl
-var mrCommitPrompt string
-
-//go:embed templates/commit-conventional.tmpl
-var mrConventionalCommitPrompt string
-
-//go:embed templates/commit-emoji.tmpl
-var mrCommitEmojiPrompt string
-
-// Internal prompts — used programmatically, not via --template
-//
-//go:embed templates/internal-commit-msg.tmpl
-var commitMsgPrompt string
-
-//go:embed templates/internal-quick-commit.tmpl
-var quickCommitPrompt string
-
-//go:embed templates/internal-quick-commit-free.tmpl
-var quickCommitFreePrompt string
-
-//go:embed templates/internal-quick-commit-chaos.tmpl
-var quickCommitChaosPrompt string
-
-//go:embed templates/internal-quick-commit-haiku.tmpl
-var quickCommitHaikuPrompt string
-
-//go:embed templates/internal-quick-commit-roast.tmpl
-var quickCommitRoastPrompt string
-
-//go:embed templates/internal-quick-commit-monday.tmpl
-var quickCommitMondayPrompt string
-
-//go:embed templates/internal-quick-commit-jira.tmpl
-var quickCommitJiraPrompt string
-
-//go:embed templates/internal-quick-commit-emoji.tmpl
-var quickCommitEmojiPrompt string
-
-//go:embed templates/internal-quick-commit-sassy.tmpl
-var quickCommitSassyPrompt string
-
-//go:embed templates/internal-quick-commit-technical.tmpl
-var quickCommitTechnicalPrompt string
-
-//go:embed templates/internal-quick-commit-intern.tmpl
-var quickCommitInternPrompt string
-
-//go:embed templates/internal-quick-commit-shakespeare.tmpl
-var quickCommitShakespearePrompt string
-
-//go:embed templates/internal-quick-commit-manager.tmpl
-var quickCommitManagerPrompt string
-
-//go:embed templates/internal-quick-commit-yoda.tmpl
-var quickCommitYodaPrompt string
-
-//go:embed templates/internal-quick-commit-excuse.tmpl
-var quickCommitExcusePrompt string
-
-//go:embed templates/internal-commit-msg-body.tmpl
-var commitMsgBodyPrompt string
-
-//go:embed templates/internal-changelog.tmpl
-var changelogPrompt string
-
-//go:embed templates/chaos.tmpl
-var mrChaosPrompt string
-
-//go:embed templates/haiku.tmpl
-var mrHaikuPrompt string
-
-//go:embed templates/roast.tmpl
-var mrRoastPrompt string
-
-//go:embed templates/intern.tmpl
-var mrInternPrompt string
-
-//go:embed templates/shakespeare.tmpl
-var mrShakespearePrompt string
-
-//go:embed templates/manager.tmpl
-var mrManagerPrompt string
-
-//go:embed templates/yoda.tmpl
-var mrYodaPrompt string
-
-//go:embed templates/excuse.tmpl
-var mrExcusePrompt string
-
-// fortunePrompt is used to generate a short developer-wisdom fortune to append
-// as a commit message trailer when --fortune is set.
-const fortunePrompt = `Generate a single short fortune-cookie-style quote for a software developer.
-Output ONLY the quote — no attribution, no explanation, no quotes around it, no code fences.
-Keep it under 80 characters. It should be witty, wise, or gently humorous.
-Draw from themes like debugging, shipping, complexity, naming things, or the nature of code.
-Generate something original every time.
-
-Examples of the spirit (do NOT copy literally):
-  The best code is the code you didn't have to write.
-  It works on my machine is not a deployment strategy.
-  Naming things is hard. Naming things well is an art.
-  Every comment is an apology for unclear code.
-  Ship it. The bugs will tell you what to fix next.`
-
-// titlePrompt is the system prompt used when --title is set. It instructs the
-// model to produce only a single concise title line with no extra text.
-const titlePrompt = `Generate a single-line MR/PR title for the following diff.
-Output only the title text — no explanation, no punctuation at the end, no quotes.
-Keep it under 72 characters. Use the imperative mood (e.g. "Add", "Fix", "Refactor").
-If the active template follows Conventional Commits style, prefix with the appropriate type (feat, fix, chore, etc.).`
-
-// resolveSystemPrompt interprets the value of a --system-prompt flag.
-//
-// Three forms are accepted:
-//
-//	""           — no override; the caller should use its default prompt.
-//	"@path"      — read the prompt from the file at path (stripped of the leading @).
-//	"any text"   — use the value as the prompt verbatim.
-//
-// An error is returned only when @file syntax is used and the file cannot be read.
 func resolveSystemPrompt(raw string) (string, error) {
 	return prompts.ResolveSystemPrompt(raw)
 }
 
-// builtinTemplates maps named embedded MR prompt templates by their --template flag value.
-// Only user-facing templates are listed here; internal prompts are not included.
-var builtinTemplates = map[string]string{
-	"technical":           mrTechnicalPrompt,
-	"emoji":               mrEmojiPrompt,
-	"jira":                mrJiraPrompt,
-	"monday":              mrMondayPrompt,
-	"sassy":               mrSassyPrompt,
-	"user-focused":        mrUserFocusedPrompt,
-	"conventional":        mrConventionalPrompt,
-	"commit":              mrCommitPrompt,
-	"commit-conventional": mrConventionalCommitPrompt,
-	"commit-emoji":        mrCommitEmojiPrompt,
-	"chaos":               mrChaosPrompt,
-	"haiku":               mrHaikuPrompt,
-	"roast":               mrRoastPrompt,
-	"intern":              mrInternPrompt,
-	"shakespeare":         mrShakespearePrompt,
-	"manager":             mrManagerPrompt,
-	"yoda":                mrYodaPrompt,
-	"excuse":              mrExcusePrompt,
-}
-
-// NewPromptTemplate returns the system prompt for the given template name.
-// For "default" it returns the embedded default template. For known built-in
-// names it returns the corresponding embedded template. For any other name it
-// searches ./templates/<name>.tmpl, ./<name>.tmpl, and
-// ~/.config/ai-mr-comment/templates/<name>.tmpl, falling back to the default
-// if none are found.
 func NewPromptTemplate(templateName string) (string, error) {
-	if templateName == "default" {
-		return defaultPromptTemplate, nil
-	}
-
-	if t, ok := builtinTemplates[templateName]; ok {
-		return t, nil
-	}
-
-	content, err := prompts.FindCustomTemplate(templateName)
-	if err != nil {
-		return defaultPromptTemplate, err
-	}
-	return content, nil
+	return prompts.NewTemplate(templateName)
 }
