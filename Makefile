@@ -15,7 +15,7 @@ PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 win
 # Raise this ceiling deliberately if you add large deps; shrink it to lock in gains.
 MAX_BINARY_BYTES := 36700160
 
-.PHONY: all clean build fetch-tags release test test-cover test-e2e-smoke test-integration test-integration-openai test-integration-gemini test-integration-ollama test-integration-ollama-8b test-fuzz lint lint-shell test-run quick-commit run-debug changelog gen-aliases install install-completion-bash install-completion-zsh check-size help docker-build docker-build-fips docker-smoke docker-scout docker-scout-fips docker-run docker-run-fips docker-quick-commit profile-cpu profile-mem profile-bench
+.PHONY: all clean build fetch-tags release release-check release-snapshot verify test test-cover test-e2e-smoke test-integration test-integration-openai test-integration-gemini test-integration-ollama test-integration-ollama-8b test-fuzz lint lint-shell test-run quick-commit run-debug changelog gen-aliases install install-completion-bash install-completion-zsh check-size help docker-build docker-build-fips docker-smoke docker-scout docker-scout-fips docker-run docker-run-fips docker-quick-commit profile-cpu profile-mem profile-bench
 
 all: build
 
@@ -28,6 +28,13 @@ fetch-tags: ## Fetch all remote tags so VERSION reflects the latest release
 build: ## Build binary to dist/
 	@mkdir -p $(BUILD_DIR)
 	go build $(LDFLAGS) -o $(BUILD_DIR)/$(APP) $(MAIN_PKG)
+
+verify: ## Run the standard local validation gate
+	go test ./...
+	golangci-lint run ./...
+	go build ./...
+	$(MAKE) test-e2e-smoke
+	git diff --check
 
 check-size: ## Verify linux/amd64 binary is within the size limit
 	@mkdir -p $(BUILD_DIR)
@@ -110,8 +117,8 @@ LOCAL_OLLAMA_ENDPOINT ?= http://127.0.0.1:11434/api/generate
 LOCAL_OLLAMA_MODEL ?= llama3.1:8b
 LOCAL_OLLAMA_TIMEOUT_MS ?= 300000
 
-test-integration-anthropic: ## Run only Anthropic CLI e2e tests (requires ANTHROPIC_API_KEY)
-	go test -v -tags=integration -run '^TestIntegration_Anthropic_CLI' -count=1 -timeout 120s ./...
+test-integration-anthropic: ## Run only Anthropic integration tests (requires ANTHROPIC_API_KEY)
+	go test -v -tags=integration -run '^TestIntegration_Anthropic' -count=1 -timeout 120s ./...
 
 test-integration-ollama: ## Run only Ollama integration tests (set OLLAMA_MODEL/OLLAMA_ENDPOINT as needed)
 	go test -v -tags=integration -run '$(INTEGRATION_TEST_PATTERN)' ./...
@@ -256,3 +263,9 @@ release: clean ## Build release binaries for all platforms
 		echo "Building: $$OUTPUT"; \
 		GOOS=$$OS GOARCH=$$ARCH go build $(LDFLAGS) -o $$OUTPUT $(MAIN_PKG); \
 	done
+
+release-check: ## Validate GoReleaser configuration
+	goreleaser check
+
+release-snapshot: ## Build GoReleaser snapshot artifacts without publishing
+	goreleaser release --snapshot --clean --skip=publish

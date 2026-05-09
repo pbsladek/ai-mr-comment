@@ -61,57 +61,84 @@ func TestProcessDiff_NonPositiveMax(t *testing.T) {
 }
 
 func TestGetGitDiff_NoArgs(t *testing.T) {
-	// We're in a git repo, so this should not error
-	_, err := getGitDiff("", false, nil)
+	dir := initRepoWithWorktreeChange(t)
+
+	result, err := getGitDiff("", false, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "changed") || !strings.Contains(result, "tracked.txt") {
+		t.Fatalf("expected working tree diff from %s, got:\n%s", dir, result)
 	}
 }
 
 func TestGetGitDiff_WithCommit(t *testing.T) {
-	// Skip if HEAD has no parent (shallow clone or single-commit repo)
-	if err := exec.Command("git", "rev-parse", "HEAD^").Run(); err != nil {
-		t.Skip("skipping: HEAD has no parent commit")
-	}
+	initRepoWithTwoCommits(t)
+
 	result, err := getGitDiff("HEAD", false, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	_ = result
+	if !strings.Contains(result, "second.txt") {
+		t.Fatalf("expected HEAD commit diff, got:\n%s", result)
+	}
 }
 
 func TestGetGitDiff_WithRange(t *testing.T) {
-	// Skip if HEAD~1 doesn't exist (shallow clone or single-commit repo)
-	if err := exec.Command("git", "rev-parse", "HEAD~1").Run(); err != nil {
-		t.Skip("skipping: HEAD~1 does not exist")
-	}
+	initRepoWithTwoCommits(t)
+
 	result, err := getGitDiff("HEAD~1..HEAD", false, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	_ = result
+	if !strings.Contains(result, "second.txt") {
+		t.Fatalf("expected commit range diff, got:\n%s", result)
+	}
 }
 
 func TestGetGitDiff_Staged(t *testing.T) {
+	dir := initEmptyRepo(t)
+	writeRepoFile(t, dir, "staged.txt", "staged\n")
+	runGit(t, dir, "add", "staged.txt")
+
 	result, err := getGitDiff("", true, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	_ = result
+	if !strings.Contains(result, "staged.txt") {
+		t.Fatalf("expected staged diff, got:\n%s", result)
+	}
 }
 
 func TestGetGitDiff_Exclude(t *testing.T) {
+	dir := initEmptyRepo(t)
+	writeRepoFile(t, dir, "README.md", "before\n")
+	writeRepoFile(t, dir, "main.go", "package main\n")
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "initial")
+	writeRepoFile(t, dir, "README.md", "after\n")
+	writeRepoFile(t, dir, "main.go", "package main\n\nfunc main() {}\n")
+
 	result, err := getGitDiff("", false, []string{"*.md"})
 	if err != nil {
 		t.Fatalf("unexpected error with exclude: %v", err)
 	}
-	_ = result
+	if strings.Contains(result, "README.md") {
+		t.Fatalf("expected markdown file to be excluded, got:\n%s", result)
+	}
+	if !strings.Contains(result, "main.go") {
+		t.Fatalf("expected non-excluded Go file in diff, got:\n%s", result)
+	}
 }
 
 func TestGetAutoMergeBase(t *testing.T) {
+	dir := initRepoWithTwoCommits(t)
+	head := strings.TrimSpace(runGit(t, dir, "rev-parse", "HEAD"))
+	runGit(t, dir, "update-ref", "refs/remotes/origin/main", head)
+
 	base, err := getAutoMergeBase()
 	if err != nil {
-		t.Skip("skipping: no origin/main or origin/master remote found")
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if base == "" {
 		t.Error("expected non-empty merge base")
@@ -119,14 +146,17 @@ func TestGetAutoMergeBase(t *testing.T) {
 }
 
 func TestGetGitDiff_AutoBase(t *testing.T) {
-	if _, err := getAutoMergeBase(); err != nil {
-		t.Skip("skipping: no remote found for auto base-branch detection")
-	}
+	dir := initRepoWithTwoCommits(t)
+	base := strings.TrimSpace(runGit(t, dir, "rev-parse", "HEAD~1"))
+	runGit(t, dir, "update-ref", "refs/remotes/origin/main", base)
+
 	result, err := getGitDiff("", false, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	_ = result
+	if !strings.Contains(result, "second.txt") {
+		t.Fatalf("expected auto-base diff, got:\n%s", result)
+	}
 }
 
 func TestSplitDiffByFile_Empty(t *testing.T) {
@@ -643,41 +673,30 @@ func TestIsGitLabURL(t *testing.T) {
 }
 
 func TestGetCurrentBranch(t *testing.T) {
+	initEmptyRepo(t)
+
 	branch, err := getCurrentBranch()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// In a normal (non-detached) checkout the branch must be non-empty.
-	// In a detached HEAD state getCurrentBranch returns "" with no error — skip.
 	if branch == "" {
-		t.Skip("skipping: detached HEAD state, no branch name available")
+		t.Fatal("expected branch name")
 	}
-	// Branch name must not contain leading/trailing whitespace.
 	if branch != strings.TrimSpace(branch) {
 		t.Errorf("branch name has surrounding whitespace: %q", branch)
 	}
 }
 
 func TestGetCurrentBranch_DetachedHead(t *testing.T) {
-	// Simulate detached HEAD by stubbing: we just verify the function
-	// returns "" and nil error when git output is "HEAD".
-	// We can't easily force a detached state, so we just test the parsing logic
-	// directly by checking that a branch name of "HEAD" is treated as detached.
-	// This is a unit check of the branch == "HEAD" guard, not a git integration test.
-	out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").CombinedOutput()
+	dir := initRepoWithTwoCommits(t)
+	runGit(t, dir, "checkout", "--detach", "HEAD")
+
+	branch, err := getCurrentBranch()
 	if err != nil {
-		t.Skip("skipping: not in a git repo")
+		t.Fatalf("unexpected error in detached HEAD: %v", err)
 	}
-	got := strings.TrimSpace(string(out))
-	// If the repo is in detached HEAD, getCurrentBranch should return "".
-	if got == "HEAD" {
-		branch, branchErr := getCurrentBranch()
-		if branchErr != nil {
-			t.Fatalf("unexpected error in detached HEAD: %v", branchErr)
-		}
-		if branch != "" {
-			t.Errorf("expected empty branch for detached HEAD, got %q", branch)
-		}
+	if branch != "" {
+		t.Errorf("expected empty branch for detached HEAD, got %q", branch)
 	}
 }
 
@@ -691,12 +710,53 @@ func initEmptyRepo(t *testing.T) string {
 		{"init", dir},
 		{"-C", dir, "config", "user.email", "test@example.com"},
 		{"-C", dir, "config", "user.name", "Test"},
+		{"-C", dir, "config", "commit.gpgsign", "false"},
+		{"-C", dir, "config", "tag.gpgSign", "false"},
 	} {
 		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
 	t.Chdir(dir)
+	return dir
+}
+
+func runGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git -C %s %v: %v\n%s", dir, args, err, out)
+	}
+	return string(out)
+}
+
+func writeRepoFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	path := dir + string(os.PathSeparator) + name
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func initRepoWithWorktreeChange(t *testing.T) string {
+	t.Helper()
+	dir := initEmptyRepo(t)
+	writeRepoFile(t, dir, "tracked.txt", "before\n")
+	runGit(t, dir, "add", "tracked.txt")
+	runGit(t, dir, "commit", "-m", "initial")
+	writeRepoFile(t, dir, "tracked.txt", "changed\n")
+	return dir
+}
+
+func initRepoWithTwoCommits(t *testing.T) string {
+	t.Helper()
+	dir := initEmptyRepo(t)
+	writeRepoFile(t, dir, "first.txt", "first\n")
+	runGit(t, dir, "add", "first.txt")
+	runGit(t, dir, "commit", "-m", "first")
+	writeRepoFile(t, dir, "second.txt", "second\n")
+	runGit(t, dir, "add", "second.txt")
+	runGit(t, dir, "commit", "-m", "second")
 	return dir
 }
 
@@ -794,9 +854,8 @@ func TestGetGitDiff_NoCommits_Staged(t *testing.T) {
 // TestGitCommit_EmptyMessageFails verifies that gitCommit with an empty message
 // causes git to return an error (git rejects empty commit messages).
 func TestGitCommit_EmptyMessageFails(t *testing.T) {
-	if !isGitRepo() {
-		t.Skip("skipping: not inside a git repository")
-	}
+	initEmptyRepo(t)
+
 	err := gitCommit("", "")
 	if err == nil {
 		t.Fatal("expected error for empty commit message, got nil")
@@ -805,14 +864,9 @@ func TestGitCommit_EmptyMessageFails(t *testing.T) {
 
 // TestGitPush_NoRemoteFails verifies that gitPush returns an error when there
 // is no remote named "origin" configured (or the branch has nothing to push).
-// This is a best-effort test — it may skip in environments where origin exists
-// and the push would succeed, to avoid accidentally pushing during tests.
 func TestGitPush_NoRemoteFails(t *testing.T) {
-	// Only run this test when there is no "origin" remote, to avoid accidental pushes.
-	out, err := exec.Command("git", "remote", "get-url", "origin").CombinedOutput()
-	if err == nil && strings.TrimSpace(string(out)) != "" {
-		t.Skip("skipping: origin remote exists — would risk an accidental push")
-	}
+	initEmptyRepo(t)
+
 	pushErr := gitPush("non-existent-test-branch")
 	if pushErr == nil {
 		t.Fatal("expected error pushing to non-existent remote, got nil")
@@ -1020,11 +1074,7 @@ func TestUpsertGitLabMRNoteUpdatesManagedNote(t *testing.T) {
 // ── splitDiffByFile edge case tests ───────────────────────────────────────────
 
 func TestSplitDiffByFile_BinaryFiles(t *testing.T) {
-	data, err := os.ReadFile("testdata/binary-files.diff")
-	if err != nil {
-		t.Fatal(err)
-	}
-	chunks := splitDiffByFile(string(data))
+	chunks := splitDiffByFile(readTestdata(t, "binary-files.diff"))
 	if len(chunks) != 5 {
 		t.Errorf("expected 5 chunks for binary-files.diff, got %d", len(chunks))
 	}
@@ -1036,11 +1086,7 @@ func TestSplitDiffByFile_BinaryFiles(t *testing.T) {
 }
 
 func TestSplitDiffByFile_RenameMove(t *testing.T) {
-	data, err := os.ReadFile("testdata/rename-move.diff")
-	if err != nil {
-		t.Fatal(err)
-	}
-	chunks := splitDiffByFile(string(data))
+	chunks := splitDiffByFile(readTestdata(t, "rename-move.diff"))
 	if len(chunks) != 4 {
 		t.Errorf("expected 4 chunks for rename-move.diff, got %d", len(chunks))
 	}
@@ -1053,11 +1099,7 @@ func TestSplitDiffByFile_RenameMove(t *testing.T) {
 }
 
 func TestSplitDiffByFile_ModeChange(t *testing.T) {
-	data, err := os.ReadFile("testdata/mode-change.diff")
-	if err != nil {
-		t.Fatal(err)
-	}
-	chunks := splitDiffByFile(string(data))
+	chunks := splitDiffByFile(readTestdata(t, "mode-change.diff"))
 	if len(chunks) != 5 {
 		t.Errorf("expected 5 chunks for mode-change.diff, got %d", len(chunks))
 	}
@@ -1069,11 +1111,7 @@ func TestSplitDiffByFile_ModeChange(t *testing.T) {
 }
 
 func TestSplitDiffByFile_SubmoduleChanges(t *testing.T) {
-	data, err := os.ReadFile("testdata/submodule-changes.diff")
-	if err != nil {
-		t.Fatal(err)
-	}
-	chunks := splitDiffByFile(string(data))
+	chunks := splitDiffByFile(readTestdata(t, "submodule-changes.diff"))
 	if len(chunks) != 2 {
 		t.Errorf("expected 2 chunks for submodule-changes.diff, got %d", len(chunks))
 	}
@@ -1083,11 +1121,7 @@ func TestSplitDiffByFile_SubmoduleChanges(t *testing.T) {
 }
 
 func TestSplitDiffByFile_SymlinkChanges(t *testing.T) {
-	data, err := os.ReadFile("testdata/symlink-changes.diff")
-	if err != nil {
-		t.Fatal(err)
-	}
-	chunks := splitDiffByFile(string(data))
+	chunks := splitDiffByFile(readTestdata(t, "symlink-changes.diff"))
 	if len(chunks) != 3 {
 		t.Errorf("expected 3 chunks for symlink-changes.diff, got %d", len(chunks))
 	}
@@ -1099,11 +1133,7 @@ func TestSplitDiffByFile_SymlinkChanges(t *testing.T) {
 }
 
 func TestSplitDiffByFile_MultipleHunksOneFile(t *testing.T) {
-	data, err := os.ReadFile("testdata/multiple-hunks-one-file.diff")
-	if err != nil {
-		t.Fatal(err)
-	}
-	chunks := splitDiffByFile(string(data))
+	chunks := splitDiffByFile(readTestdata(t, "multiple-hunks-one-file.diff"))
 	if len(chunks) != 1 {
 		t.Errorf("expected 1 chunk for multiple-hunks-one-file.diff, got %d", len(chunks))
 	}
@@ -1116,11 +1146,7 @@ func TestSplitDiffByFile_MultipleHunksOneFile(t *testing.T) {
 // ── processDiff edge case tests ────────────────────────────────────────────────
 
 func TestProcessDiff_TruncationTrigger(t *testing.T) {
-	data, err := os.ReadFile("testdata/truncation-trigger.diff")
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw := string(data)
+	raw := readTestdata(t, "truncation-trigger.diff")
 	lineCount := strings.Count(raw, "\n") + 1
 	if lineCount <= 4000 {
 		t.Skipf("truncation-trigger.diff has only %d lines, need >4000", lineCount)
@@ -1132,17 +1158,14 @@ func TestProcessDiff_TruncationTrigger(t *testing.T) {
 }
 
 func TestProcessDiff_VeryLargeSingleFile(t *testing.T) {
-	data, err := os.ReadFile("testdata/very-large-single-file.diff")
-	if err != nil {
-		t.Fatal(err)
-	}
+	raw := readTestdata(t, "very-large-single-file.diff")
 	// Should not truncate at max=4000 (file is ~1300 lines).
-	output := processDiff(string(data), 4000)
+	output := processDiff(raw, 4000)
 	if strings.Contains(output, "[...diff truncated...]") {
 		t.Error("did not expect truncation for very-large-single-file.diff at max=4000")
 	}
 	// Should truncate at max=100.
-	outputSmall := processDiff(string(data), 100)
+	outputSmall := processDiff(raw, 100)
 	if !strings.Contains(outputSmall, "[...diff truncated...]") {
 		t.Error("expected truncation for very-large-single-file.diff at max=100")
 	}
@@ -1151,7 +1174,7 @@ func TestProcessDiff_VeryLargeSingleFile(t *testing.T) {
 // ── readDiffFromFile edge case tests ──────────────────────────────────────────
 
 func TestReadDiffFromFile_UnicodeEmoji(t *testing.T) {
-	content, err := readDiffFromFile("testdata/unicode-emoji.diff")
+	content, err := readDiffFromFile(testdataPath(t, "unicode-emoji.diff"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1166,7 +1189,7 @@ func TestReadDiffFromFile_UnicodeEmoji(t *testing.T) {
 }
 
 func TestReadDiffFromFile_CRLFLineEndings(t *testing.T) {
-	content, err := readDiffFromFile("testdata/crlf-line-endings.diff")
+	content, err := readDiffFromFile(testdataPath(t, "crlf-line-endings.diff"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1180,7 +1203,7 @@ func TestReadDiffFromFile_CRLFLineEndings(t *testing.T) {
 }
 
 func TestReadDiffFromFile_NoNewlineAtEOF(t *testing.T) {
-	content, err := readDiffFromFile("testdata/no-newline-at-eof.diff")
+	content, err := readDiffFromFile(testdataPath(t, "no-newline-at-eof.diff"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

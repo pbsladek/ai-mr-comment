@@ -49,8 +49,24 @@ func callOpenAI(ctx context.Context, client *openai.Client, cfg *Config, systemP
 	return providers.CallOpenAI(ctx, client, cfg, systemPrompt, diffContent)
 }
 
+func callOpenAIProvider(ctx context.Context, cfg *Config, systemPrompt, diffContent string) (string, error) {
+	client := openai.NewClient(
+		openaiopt.WithAPIKey(cfg.OpenAIAPIKey),
+		openaiopt.WithBaseURL(cfg.OpenAIEndpoint),
+	)
+	return callOpenAI(ctx, &client, cfg, systemPrompt, diffContent)
+}
+
 func callAnthropic(ctx context.Context, client *anthropic.Client, cfg *Config, systemPrompt, diffContent string) (string, error) {
 	return providers.CallAnthropic(ctx, client, cfg, systemPrompt, diffContent)
+}
+
+func callAnthropicProvider(ctx context.Context, cfg *Config, systemPrompt, diffContent string) (string, error) {
+	client := anthropic.NewClient(
+		anthropicopt.WithAPIKey(cfg.AnthropicAPIKey),
+		anthropicopt.WithBaseURL(strings.TrimRight(cfg.AnthropicEndpoint, "/")+"/"),
+	)
+	return callAnthropic(ctx, &client, cfg, systemPrompt, diffContent)
 }
 
 func callOllama(ctx context.Context, cfg *Config, systemPrompt, diffContent string) (string, error) {
@@ -130,45 +146,31 @@ func validateAPIKey(provider ApiProvider, cfg *Config) error {
 	return providers.ValidateAPIKey(provider, cfg)
 }
 
+func debugProviderCall(cfg *Config, meta providerMetadata, mode string) {
+	switch meta.Provider {
+	case OpenAI:
+		debugLog(cfg, "api: calling %s model=%s endpoint=%s mode=%s", meta.Name, meta.ModelName(cfg), cfg.OpenAIEndpoint, mode)
+	case Anthropic:
+		debugLog(cfg, "api: calling %s model=%s endpoint=%s mode=%s", meta.Name, meta.ModelName(cfg), cfg.AnthropicEndpoint, mode)
+	case Ollama:
+		debugLog(cfg, "api: calling %s model=%s endpoint=%s mode=%s", meta.Name, meta.ModelName(cfg), cfg.OllamaEndpoint, mode)
+	default:
+		debugLog(cfg, "api: calling %s model=%s mode=%s", meta.Name, meta.ModelName(cfg), mode)
+	}
+}
+
 // chatCompletions dispatches a prompt and diff to the appropriate provider and
 // returns the generated comment.
 func chatCompletions(ctx context.Context, cfg *Config, provider ApiProvider, systemPrompt, diffContent string) (string, error) {
 	if err := validateAPIKey(provider, cfg); err != nil {
 		return "", err
 	}
-	switch provider {
-	case OpenAI:
-		debugLog(cfg, "api: calling openai model=%s endpoint=%s mode=buffered", cfg.OpenAIModel, cfg.OpenAIEndpoint)
-		client := openai.NewClient(
-			openaiopt.WithAPIKey(cfg.OpenAIAPIKey),
-			openaiopt.WithBaseURL(cfg.OpenAIEndpoint),
-		)
-		return callOpenAI(ctx, &client, cfg, systemPrompt, diffContent)
-	case Anthropic:
-		debugLog(cfg, "api: calling anthropic model=%s endpoint=%s mode=buffered", cfg.AnthropicModel, cfg.AnthropicEndpoint)
-		client := anthropic.NewClient(
-			anthropicopt.WithAPIKey(cfg.AnthropicAPIKey),
-			anthropicopt.WithBaseURL(strings.TrimRight(cfg.AnthropicEndpoint, "/")+"/"),
-		)
-		return callAnthropic(ctx, &client, cfg, systemPrompt, diffContent)
-	case Ollama:
-		debugLog(cfg, "api: calling ollama model=%s endpoint=%s mode=buffered", cfg.OllamaModel, cfg.OllamaEndpoint)
-		return callOllama(ctx, cfg, systemPrompt, diffContent)
-	case Gemini:
-		debugLog(cfg, "api: calling gemini model=%s mode=buffered", cfg.GeminiModel)
-		return callGemini(ctx, cfg, systemPrompt, diffContent)
-	case ClaudeCLI:
-		debugLog(cfg, "api: calling claude-cli model=%s mode=buffered", cfg.ClaudeCLIModel)
-		return callClaudeCLI(ctx, cfg, systemPrompt, diffContent)
-	case GeminiCLI:
-		debugLog(cfg, "api: calling gemini-cli model=%s mode=buffered", cfg.GeminiCLIModel)
-		return callGeminiCLI(ctx, cfg, systemPrompt, diffContent)
-	case CodexCLI:
-		debugLog(cfg, "api: calling codex-cli model=%s mode=buffered", cfg.CodexCLIModel)
-		return callCodexCLI(ctx, cfg, systemPrompt, diffContent)
-	default:
+	meta, ok := providerInfo(provider)
+	if !ok || meta.Call == nil {
 		return "", errors.New("unsupported provider")
 	}
+	debugProviderCall(cfg, meta, "buffered")
+	return meta.Call(ctx, cfg, systemPrompt, diffContent)
 }
 
 // streamToWriter streams tokens from the AI provider to w as they arrive and
@@ -177,47 +179,36 @@ func streamToWriter(ctx context.Context, cfg *Config, provider ApiProvider, syst
 	if err := validateAPIKey(provider, cfg); err != nil {
 		return "", err
 	}
-	switch provider {
-	case OpenAI:
-		debugLog(cfg, "api: calling openai model=%s endpoint=%s mode=stream", cfg.OpenAIModel, cfg.OpenAIEndpoint)
-		client := openai.NewClient(
-			openaiopt.WithAPIKey(cfg.OpenAIAPIKey),
-			openaiopt.WithBaseURL(cfg.OpenAIEndpoint),
-		)
-		return streamOpenAI(ctx, &client, cfg, systemPrompt, diffContent, w)
-	case Anthropic:
-		debugLog(cfg, "api: calling anthropic model=%s endpoint=%s mode=stream", cfg.AnthropicModel, cfg.AnthropicEndpoint)
-		client := anthropic.NewClient(
-			anthropicopt.WithAPIKey(cfg.AnthropicAPIKey),
-			anthropicopt.WithBaseURL(strings.TrimRight(cfg.AnthropicEndpoint, "/")+"/"),
-		)
-		return streamAnthropic(ctx, &client, cfg, systemPrompt, diffContent, w)
-	case Ollama:
-		debugLog(cfg, "api: calling ollama model=%s endpoint=%s mode=stream", cfg.OllamaModel, cfg.OllamaEndpoint)
-		return streamOllama(ctx, cfg, systemPrompt, diffContent, w)
-	case Gemini:
-		debugLog(cfg, "api: calling gemini model=%s mode=stream", cfg.GeminiModel)
-		return streamGemini(ctx, cfg, systemPrompt, diffContent, w)
-	case ClaudeCLI:
-		debugLog(cfg, "api: calling claude-cli model=%s mode=stream", cfg.ClaudeCLIModel)
-		return streamClaudeCLI(ctx, cfg, systemPrompt, diffContent, w)
-	case GeminiCLI:
-		debugLog(cfg, "api: calling gemini-cli model=%s mode=stream", cfg.GeminiCLIModel)
-		return streamGeminiCLI(ctx, cfg, systemPrompt, diffContent, w)
-	case CodexCLI:
-		debugLog(cfg, "api: calling codex-cli model=%s mode=stream", cfg.CodexCLIModel)
-		return streamCodexCLI(ctx, cfg, systemPrompt, diffContent, w)
-	default:
+	meta, ok := providerInfo(provider)
+	if !ok || meta.Stream == nil {
 		return "", errors.New("unsupported provider")
 	}
+	debugProviderCall(cfg, meta, "stream")
+	return meta.Stream(ctx, cfg, systemPrompt, diffContent, w)
 }
 
 func streamOpenAI(ctx context.Context, client *openai.Client, cfg *Config, systemPrompt, diffContent string, w io.Writer) (string, error) {
 	return providers.StreamOpenAI(ctx, client, cfg, systemPrompt, diffContent, w)
 }
 
+func streamOpenAIProvider(ctx context.Context, cfg *Config, systemPrompt, diffContent string, w io.Writer) (string, error) {
+	client := openai.NewClient(
+		openaiopt.WithAPIKey(cfg.OpenAIAPIKey),
+		openaiopt.WithBaseURL(cfg.OpenAIEndpoint),
+	)
+	return streamOpenAI(ctx, &client, cfg, systemPrompt, diffContent, w)
+}
+
 func streamAnthropic(ctx context.Context, client *anthropic.Client, cfg *Config, systemPrompt, diffContent string, w io.Writer) (string, error) {
 	return providers.StreamAnthropic(ctx, client, cfg, systemPrompt, diffContent, w)
+}
+
+func streamAnthropicProvider(ctx context.Context, cfg *Config, systemPrompt, diffContent string, w io.Writer) (string, error) {
+	client := anthropic.NewClient(
+		anthropicopt.WithAPIKey(cfg.AnthropicAPIKey),
+		anthropicopt.WithBaseURL(strings.TrimRight(cfg.AnthropicEndpoint, "/")+"/"),
+	)
+	return streamAnthropic(ctx, &client, cfg, systemPrompt, diffContent, w)
 }
 
 func streamGemini(ctx context.Context, cfg *Config, systemPrompt, diffContent string, w io.Writer) (string, error) {

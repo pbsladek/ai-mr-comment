@@ -21,10 +21,7 @@ func TestE2ESmoke_BinaryCommands(t *testing.T) {
 		t.Fatalf("getwd: %v", err)
 	}
 
-	bin := filepath.Join(t.TempDir(), "ai-mr-comment")
-	if runtime.GOOS == "windows" {
-		bin += ".exe"
-	}
+	bin := filepath.Join(t.TempDir(), binaryNameForGOOS("ai-mr-comment", runtime.GOOS))
 	if out, buildErr := exec.Command("go", "build", "-o", bin, "./cmd/ai-mr-comment").CombinedOutput(); buildErr != nil {
 		t.Fatalf("go build failed: %v\n%s", buildErr, out)
 	}
@@ -125,6 +122,8 @@ func initSmokeGitRepo(t *testing.T) string {
 		{"init", dir},
 		{"-C", dir, "config", "user.email", "smoke@example.com"},
 		{"-C", dir, "config", "user.name", "Smoke Test"},
+		{"-C", dir, "config", "commit.gpgsign", "false"},
+		{"-C", dir, "config", "tag.gpgSign", "false"},
 	} {
 		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)

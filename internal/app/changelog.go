@@ -27,9 +27,8 @@ type changelogArgs struct {
 	dryRun           bool
 }
 
-// runChangelog executes the changelog generation logic.
-func runChangelog(cmd *cobra.Command, a changelogArgs, chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) error {
-	cfg, err := loadConfigForProfile(a.profile)
+func runChangelogWithDeps(cmd *cobra.Command, a changelogArgs, chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error), deps commandDeps) error {
+	cfg, err := deps.loadConfig(a.profile)
 	if err != nil {
 		return err
 	}
@@ -63,7 +62,7 @@ func runChangelog(cmd *cobra.Command, a changelogArgs, chatFn func(context.Conte
 		return withExitCode(4, errors.New("changelog --dry-run cannot be combined with --estimate"))
 	}
 
-	diffContent, err := resolveDiff(cmd, a.commit, a.diffFilePath)
+	diffContent, err := resolveDiffWithDeps(cmd, a.commit, a.diffFilePath, deps)
 	if err != nil {
 		return err
 	}
@@ -100,7 +99,7 @@ func runChangelog(cmd *cobra.Command, a changelogArgs, chatFn func(context.Conte
 	}
 	entry = strings.TrimSpace(entry)
 
-	return writeChangelogOutput(cmd, cfg, a.outputPath, a.format, entry)
+	return writeChangelogOutputWithDeps(cmd, cfg, a.outputPath, a.format, entry, deps)
 }
 
 func writeChangelogDryRun(cmd *cobra.Command, cfg *Config, a changelogArgs, summary diffSummary, prompt string) error {
@@ -141,8 +140,7 @@ func writeChangelogDryRun(cmd *cobra.Command, cfg *Config, a changelogArgs, summ
 	return nil
 }
 
-// resolveDiff obtains diff content from a file path, commit range, or working tree.
-func resolveDiff(cmd *cobra.Command, commit, diffFilePath string) (string, error) {
+func resolveDiffWithDeps(cmd *cobra.Command, commit, diffFilePath string, deps commandDeps) (string, error) {
 	var diffContent string
 	var err error
 	if diffFilePath != "" {
@@ -150,10 +148,10 @@ func resolveDiff(cmd *cobra.Command, commit, diffFilePath string) (string, error
 	} else if commandStdinIsPiped(cmd) {
 		diffContent, err = readCommandInput(cmd, "-")
 	} else {
-		if !isGitRepo() {
+		if !deps.isGitRepo() {
 			return "", fmt.Errorf("not a git repository. Run from inside a git repo or use --file to provide a diff")
 		}
-		diffContent, err = getGitDiff(commit, false, nil)
+		diffContent, err = deps.getGitDiff(commit, false, nil)
 	}
 	if err != nil {
 		return "", err
@@ -175,16 +173,14 @@ func resolveChangelogPrompt(systemPromptFlag string) (string, error) {
 	return resolveSystemPrompt(systemPromptFlag)
 }
 
-// writeChangelogOutput writes the generated entry to a file or stdout.
-func writeChangelogOutput(cmd *cobra.Command, cfg *Config, outputPath, format, entry string) error {
+func writeChangelogOutputWithDeps(cmd *cobra.Command, cfg *Config, outputPath, format, entry string, deps commandDeps) error {
 	if outputPath != "" {
-		return writeChangelogFile(cfg, outputPath, format, entry)
+		return writeChangelogFileWithDeps(cfg, outputPath, format, entry, deps)
 	}
 	return writeChangelogStdout(cmd, cfg, format, entry)
 }
 
-// writeChangelogFile persists the changelog entry to disk.
-func writeChangelogFile(cfg *Config, outputPath, format, entry string) error {
+func writeChangelogFileWithDeps(cfg *Config, outputPath, format, entry string, deps commandDeps) error {
 	var fileContent []byte
 	if format == "json" {
 		var buf strings.Builder
@@ -195,7 +191,7 @@ func writeChangelogFile(cfg *Config, outputPath, format, entry string) error {
 	} else {
 		fileContent = []byte(entry + "\n")
 	}
-	return os.WriteFile(outputPath, fileContent, 0600) //nolint:gosec // G306: 0600 is intentional for user-owned output
+	return deps.writeFile(outputPath, fileContent, 0600) //nolint:gosec // G306: 0600 is intentional for user-owned output
 }
 
 // writeChangelogStdout writes the changelog entry to the command's stdout.
@@ -223,7 +219,7 @@ func changelogPayload(cfg *Config, entry string) any {
 
 // newChangelogCmd returns the changelog subcommand, which generates a
 // user-facing changelog entry from a commit range using AI.
-func newChangelogCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
+func newChangelogCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error), deps commandDeps) *cobra.Command {
 	var a changelogArgs
 
 	cmd := &cobra.Command{
@@ -238,7 +234,7 @@ Examples:
   ai-mr-comment changelog --commit="v1.2.0..HEAD" --format=json
   ai-mr-comment changelog --file=my.diff --provider=anthropic`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runChangelog(cmd, a, chatFn)
+			return runChangelogWithDeps(cmd, a, chatFn, deps)
 		},
 	}
 

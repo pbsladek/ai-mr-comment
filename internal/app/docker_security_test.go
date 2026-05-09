@@ -52,11 +52,15 @@ func TestReleaseWorkflowScansImagesBeforePublish(t *testing.T) {
 
 	required := []string{
 		"platforms: linux/amd64,linux/arm64",
-		"Build Docker image for vulnerability scan",
-		"Build Docker FIPS image for vulnerability scan",
-		"uses: docker/scout-action@v1.20.4",
-		"image: local://pwbsladek/ai-mr-comment:scan",
-		"image: local://pwbsladek/ai-mr-comment:scan-fips",
+		"Build Docker amd64 image for vulnerability scan",
+		"Build Docker arm64 image for vulnerability scan",
+		"Build Docker FIPS amd64 image for vulnerability scan",
+		"Build Docker FIPS arm64 image for vulnerability scan",
+		"uses: docker/scout-action@bacf462e8d090c09660de30a6ccc718035f961e3 # v1.20.4",
+		"image: local://pwbsladek/ai-mr-comment:scan-amd64",
+		"image: local://pwbsladek/ai-mr-comment:scan-arm64",
+		"image: local://pwbsladek/ai-mr-comment:scan-fips-amd64",
+		"image: local://pwbsladek/ai-mr-comment:scan-fips-arm64",
 		"only-fixed: true",
 		"only-severities: critical,high",
 		"exit-code: true",
@@ -67,8 +71,10 @@ func TestReleaseWorkflowScansImagesBeforePublish(t *testing.T) {
 		}
 	}
 
-	assertBefore(t, workflow, "Scan Docker image vulnerabilities", "Build and push Docker image")
-	assertBefore(t, workflow, "Scan Docker FIPS image vulnerabilities", "Build and push Docker FIPS image")
+	assertBefore(t, workflow, "Scan Docker amd64 image vulnerabilities", "Build and push Docker image")
+	assertBefore(t, workflow, "Scan Docker arm64 image vulnerabilities", "Build and push Docker image")
+	assertBefore(t, workflow, "Scan Docker FIPS amd64 image vulnerabilities", "Build and push Docker FIPS image")
+	assertBefore(t, workflow, "Scan Docker FIPS arm64 image vulnerabilities", "Build and push Docker FIPS image")
 }
 
 func TestReleaseArtifactsCoverOSAndArchitectureMatrix(t *testing.T) {
@@ -93,6 +99,12 @@ func TestReleaseArtifactsCoverOSAndArchitectureMatrix(t *testing.T) {
 		"ai-mr-comment_Darwin_arm64.tar.gz",
 		"ai-mr-comment_Windows_x86_64.zip",
 		"ai-mr-comment_Windows_arm64.zip",
+		"ai-mr-comment_linux_amd64.sbom.json",
+		"ai-mr-comment_linux_arm64.sbom.json",
+		"ai-mr-comment_darwin_amd64.sbom.json",
+		"ai-mr-comment_darwin_arm64.sbom.json",
+		"ai-mr-comment_windows_amd64.sbom.json",
+		"ai-mr-comment_windows_arm64.sbom.json",
 	}
 	for _, want := range requiredArchives {
 		if !strings.Contains(verifyScript, want) {
@@ -230,7 +242,7 @@ func assertBefore(t *testing.T, haystack, first, second string) {
 
 func readRepoFile(t *testing.T, path string) string {
 	t.Helper()
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(repoPath(t, path))
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
