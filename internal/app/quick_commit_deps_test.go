@@ -31,6 +31,14 @@ func fakeQuickCommitDeps(actions *[]string) commandDeps {
 		}
 		return "diff --git a/file.txt b/file.txt\n+changed\n", nil
 	}
+	deps.getQuickDryRunDiff = func(trackedOnly bool) (string, error) {
+		if trackedOnly {
+			*actions = append(*actions, "diff:dry-run-tracked")
+		} else {
+			*actions = append(*actions, "diff:dry-run")
+		}
+		return "diff --git a/file.txt b/file.txt\n+changed\n", nil
+	}
 	deps.stageAll = func() error {
 		*actions = append(*actions, "stage:all")
 		return nil

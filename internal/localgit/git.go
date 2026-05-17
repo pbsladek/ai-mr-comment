@@ -1,9 +1,12 @@
 package localgit
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -174,4 +177,145 @@ func Diff(commit string, staged bool, exclude []string) (string, error) {
 
 	out, err := exec.Command("git", args...).CombinedOutput() //nolint:gosec // G204: git is a fixed binary, args are controlled by internal logic.
 	return string(out), err
+}
+
+// QuickCommitDryRunDiff returns the diff used for quick-commit previews.
+// Unlike plain git diff, it includes untracked files when trackedOnly is false
+// so dry-run previews match the default git add . behaviour without mutating
+// the index.
+func QuickCommitDryRunDiff(trackedOnly bool) (string, error) {
+	diff, err := Diff("", false, nil)
+	if err != nil {
+		return "", err
+	}
+	if trackedOnly {
+		return diff, nil
+	}
+
+	files, err := UntrackedFiles()
+	if err != nil {
+		return "", err
+	}
+	if len(files) == 0 {
+		return diff, nil
+	}
+
+	var b strings.Builder
+	b.WriteString(diff)
+	if b.Len() > 0 && !strings.HasSuffix(diff, "\n") {
+		b.WriteByte('\n')
+	}
+	for _, file := range files {
+		chunk, err := formatUntrackedFileDiff(file)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(chunk)
+	}
+	return b.String(), nil
+}
+
+// UntrackedFiles returns untracked, non-ignored files from the working tree.
+func UntrackedFiles() ([]string, error) {
+	out, err := exec.Command("git", "ls-files", "--others", "--exclude-standard", "-z").Output() //nolint:gosec // G204: git is a fixed binary, args are internal constants.
+	if err != nil {
+		return nil, fmt.Errorf("listing untracked files: %w", err)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	rawFiles := bytes.Split(out, []byte{0})
+	files := make([]string, 0, len(rawFiles))
+	for _, raw := range rawFiles {
+		if len(raw) == 0 {
+			continue
+		}
+		files = append(files, string(raw))
+	}
+	return files, nil
+}
+
+func formatUntrackedFileDiff(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", fmt.Errorf("reading untracked file %q: %w", path, err)
+	}
+	if info.IsDir() {
+		return "", nil
+	}
+
+	displayPath := filepath.ToSlash(path)
+	mode := gitFileMode(info.Mode())
+	var content []byte
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(path)
+		if err != nil {
+			return "", fmt.Errorf("reading untracked symlink %q: %w", path, err)
+		}
+		content = []byte(target)
+	} else {
+		content, err = os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("reading untracked file %q: %w", path, err)
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString("diff --git ")
+	b.WriteString(formatDiffPath("a/", displayPath))
+	b.WriteByte(' ')
+	b.WriteString(formatDiffPath("b/", displayPath))
+	b.WriteByte('\n')
+	b.WriteString("new file mode ")
+	b.WriteString(mode)
+	b.WriteByte('\n')
+	if bytes.IndexByte(content, 0) >= 0 {
+		b.WriteString("Binary files /dev/null and ")
+		b.WriteString(formatDiffPath("b/", displayPath))
+		b.WriteString(" differ\n")
+		return b.String(), nil
+	}
+	b.WriteString("--- /dev/null\n")
+	b.WriteString("+++ ")
+	b.WriteString(formatDiffPath("b/", displayPath))
+	b.WriteByte('\n')
+	if len(content) == 0 {
+		return b.String(), nil
+	}
+
+	lineCount := bytes.Count(content, []byte{'\n'})
+	if !bytes.HasSuffix(content, []byte{'\n'}) {
+		lineCount++
+	}
+	_, _ = fmt.Fprintf(&b, "@@ -0,0 +1,%d @@\n", lineCount)
+	for _, line := range strings.SplitAfter(string(content), "\n") {
+		if line == "" {
+			continue
+		}
+		b.WriteByte('+')
+		b.WriteString(line)
+		if !strings.HasSuffix(line, "\n") {
+			b.WriteByte('\n')
+			b.WriteString("\\ No newline at end of file\n")
+		}
+	}
+	return b.String(), nil
+}
+
+func gitFileMode(mode os.FileMode) string {
+	if mode&os.ModeSymlink != 0 {
+		return "120000"
+	}
+	if mode&0o111 != 0 {
+		return "100755"
+	}
+	return "100644"
+}
+
+func formatDiffPath(prefix, path string) string {
+	path = prefix + path
+	if strings.ContainsAny(path, " \t\n\r\"\\") {
+		return strconv.Quote(path)
+	}
+	return path
 }

@@ -33,7 +33,7 @@ func TestAppendEmojiPreservesBody(t *testing.T) {
 
 func TestEnforceBreaking(t *testing.T) {
 	got := EnforceBreaking("feat(api): add v2\n\nBody")
-	want := "feat!(api): add v2\n\nBody"
+	want := "feat(api)!: add v2\n\nBody"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}

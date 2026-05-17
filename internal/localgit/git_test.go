@@ -116,3 +116,26 @@ func TestLocalGitRemoteAndSignoff(t *testing.T) {
 		t.Fatalf("SignoffIdentity = %q, %v", identity, err)
 	}
 }
+
+func TestQuickCommitDryRunDiffIncludesUntrackedFiles(t *testing.T) {
+	dir := withGitRepo(t)
+	chdir(t, dir)
+
+	writeFile(t, dir, "new.txt", "new\n")
+
+	diff, err := QuickCommitDryRunDiff(false)
+	if err != nil {
+		t.Fatalf("QuickCommitDryRunDiff failed: %v", err)
+	}
+	if !strings.Contains(diff, "diff --git a/new.txt b/new.txt") || !strings.Contains(diff, "+new") {
+		t.Fatalf("expected untracked file diff, got:\n%s", diff)
+	}
+
+	trackedOnlyDiff, err := QuickCommitDryRunDiff(true)
+	if err != nil {
+		t.Fatalf("QuickCommitDryRunDiff tracked-only failed: %v", err)
+	}
+	if strings.Contains(trackedOnlyDiff, "new.txt") {
+		t.Fatalf("tracked-only dry-run diff included untracked file:\n%s", trackedOnlyDiff)
+	}
+}

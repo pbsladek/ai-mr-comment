@@ -118,7 +118,11 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			// (staged + unstaged) so the preview is still meaningful.
 			var diffContent string
 			if dryRun {
-				diffContent, err = deps.getGitDiff("", false, nil)
+				if deps.getQuickDryRunDiff != nil {
+					diffContent, err = deps.getQuickDryRunDiff(trackedOnly)
+				} else {
+					diffContent, err = deps.getGitDiff("", false, nil)
+				}
 			} else {
 				diffContent, err = deps.getGitDiff("", true, nil)
 			}
@@ -200,7 +204,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 				prompt = quickCommitPrompt
 			}
 			if breaking {
-				prompt += "\n\nThis is a BREAKING CHANGE release. You MUST use the 'feat!' type (with an exclamation mark) to signal a breaking change, e.g. \"feat!(scope): description\" or \"feat!: description\"."
+				prompt += "\n\nThis is a BREAKING CHANGE release. You MUST use the 'feat!' type (with an exclamation mark) to signal a breaking change, e.g. \"feat(scope)!: description\" or \"feat!: description\"."
 				diffContent += "\n\nBREAKING CHANGE: this release introduces a breaking change and must use the feat! conventional commit type."
 			}
 			prompt = appendCommitGuidance(prompt, commitType, commitScope, messageTemplate)

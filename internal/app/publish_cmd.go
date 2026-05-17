@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -104,7 +105,11 @@ find or create one from the current branch and origin remote.`,
 			reviewers = cleanStringList(reviewers)
 
 			if targetURL == "" {
-				targetURL, err = findOrCreatePublishTargetWithDeps(cmd.Context(), cfg, title, deps)
+				if dryRun {
+					targetURL, err = plannedPublishTargetWithDeps(cfg, deps)
+				} else {
+					targetURL, err = findOrCreatePublishTargetWithDeps(cmd.Context(), cfg, title, deps)
+				}
 				if err != nil {
 					return err
 				}
@@ -117,6 +122,9 @@ find or create one from the current branch and origin remote.`,
 			if updateTitle {
 				updateTitleValue = &title
 			}
+			if dryRun {
+				return writePublishDryRun(cmd, cfg, targetURL, title, description, updateTitle, updateDescription, postSummary, appliedLabels, reviewers)
+			}
 			if updateDescription {
 				body := description
 				if !replaceDescription {
@@ -127,10 +135,6 @@ find or create one from the current branch and origin remote.`,
 					body = mergeManagedSection(metadata.Description, description)
 				}
 				updateDescriptionValue = &body
-			}
-
-			if dryRun {
-				return writePublishDryRun(cmd, cfg, targetURL, title, description, updateTitle, updateDescription, postSummary, appliedLabels, reviewers)
 			}
 
 			if updateTitle || updateDescription {
@@ -250,6 +254,40 @@ func findOrCreatePublishTargetWithDeps(ctx context.Context, cfg *Config, title s
 		return deps.findOrCreateTarget(ctx, cfg, info, branch, title)
 	}
 	return "", fmt.Errorf("unrecognised remote host %q; set github_base_url or gitlab_base_url in config", info.Host)
+}
+
+func plannedPublishTargetWithDeps(cfg *Config, deps commandDeps) (string, error) {
+	branch, err := deps.getCurrentBranch()
+	if err != nil {
+		return "", fmt.Errorf("could not determine current branch: %w", err)
+	}
+	if branch == "" {
+		return "", errors.New("cannot publish from detached HEAD without --pr")
+	}
+	remoteURL, err := deps.getRemoteURL()
+	if err != nil {
+		return "", fmt.Errorf("getting remote URL: %w", err)
+	}
+	if createURL := prCreateURL(remoteURL, branch); createURL != "" {
+		return createURL, nil
+	}
+	info, err := deps.parseRemoteInfo(remoteURL)
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case deps.isGitHubHost(info.Host, cfg.GitHubBaseURL):
+		if len(info.PathParts) < 2 {
+			return "", fmt.Errorf("could not parse owner/repo from remote URL")
+		}
+		return "https://" + info.Host + "/" + strings.Join(info.PathParts[:2], "/") + "/compare/" + url.PathEscape(branch) + "?expand=1", nil
+	case deps.isGitLabHost(info.Host, cfg.GitLabBaseURL):
+		q := url.Values{}
+		q.Set("merge_request[source_branch]", branch)
+		return "https://" + info.Host + "/" + strings.Join(info.PathParts, "/") + "/-/merge_requests/new?" + q.Encode(), nil
+	default:
+		return "", fmt.Errorf("unrecognised remote host %q; set github_base_url or gitlab_base_url in config", info.Host)
+	}
 }
 
 func getRemoteMetadata(ctx context.Context, cfg *Config, targetURL string) (prMetadata, error) {

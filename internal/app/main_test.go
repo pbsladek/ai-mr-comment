@@ -2185,14 +2185,14 @@ func TestEnforceBreakingChange(t *testing.T) {
 	}{
 		// Already has ! — unchanged
 		{"feat!: add profiles", "feat!: add profiles"},
-		{"feat!(config)!: add profiles", "feat!(config)!: add profiles"},
+		{"feat(config)!: add profiles", "feat(config)!: add profiles"},
 		// Plain type: rewrite
 		{"feat: add profiles", "feat!: add profiles"},
 		{"fix: correct typo", "fix!: correct typo"},
 		{"chore: bump deps", "chore!: bump deps"},
 		// type(scope): rewrite
-		{"feat(config): add profiles", "feat!(config): add profiles"},
-		{"fix(api): handle error", "fix!(api): handle error"},
+		{"feat(config): add profiles", "feat(config)!: add profiles"},
+		{"fix(api): handle error", "fix(api)!: handle error"},
 		// Non-conventional — prefix
 		{"add named config profiles", "feat!: add named config profiles"},
 	}
@@ -2237,8 +2237,8 @@ func TestQuickCommit_Breaking_DryRun(t *testing.T) {
 		t.Errorf("expected diff to contain BREAKING CHANGE footer, got:\n%s", capturedDiff)
 	}
 	// Output message must have ! even though AI omitted it
-	if !strings.Contains(buf.String(), "feat!(config): add named profiles") {
-		t.Errorf("expected feat!(config) in output, got:\n%s", buf.String())
+	if !strings.Contains(buf.String(), "feat(config)!: add named profiles") {
+		t.Errorf("expected feat(config)! in output, got:\n%s", buf.String())
 	}
 }
 
@@ -3557,7 +3557,7 @@ func TestNormalizeCommitBody_NonConventionalSubject(t *testing.T) {
 func TestEnforceBreakingChange_MultiLine(t *testing.T) {
 	msg := "feat(config): add profiles\n\n## What Changed\n- Added --profile flag"
 	got := enforceBreakingChange(msg)
-	want := "feat!(config): add profiles\n\n## What Changed\n- Added --profile flag"
+	want := "feat(config)!: add profiles\n\n## What Changed\n- Added --profile flag"
 	if got != want {
 		t.Errorf("expected:\n%q\ngot:\n%q", want, got)
 	}
@@ -3565,7 +3565,7 @@ func TestEnforceBreakingChange_MultiLine(t *testing.T) {
 
 func TestEnforceBreakingChange_MultiLine_BodyUnchanged(t *testing.T) {
 	// Body already has ! in subject — should be a no-op
-	msg := "feat!(config): add profiles\n\n## Why\nBreaking."
+	msg := "feat(config)!: add profiles\n\n## Why\nBreaking."
 	got := enforceBreakingChange(msg)
 	if got != msg {
 		t.Errorf("expected no change when ! already present, got:\n%q", got)
@@ -3806,7 +3806,7 @@ func TestApplyCommitTypeScope(t *testing.T) {
 			name:       "breaking marker is preserved",
 			msg:        "feat!: remove legacy config",
 			forceScope: "config",
-			want:       "feat!(config): remove legacy config",
+			want:       "feat(config)!: remove legacy config",
 		},
 	}
 	for _, tc := range cases {
@@ -3933,6 +3933,34 @@ func TestQuickCommit_TrackedOnlyLeavesUntrackedFiles(t *testing.T) {
 	}
 }
 
+func TestQuickCommit_DryRunIncludesUntrackedOnlyChanges(t *testing.T) {
+	dir := initEmptyRepo(t)
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var capturedDiff string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, diff string) (string, error) {
+		capturedDiff = diff
+		return "feat(repo): add untracked file", nil
+	}
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--dry-run", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("quick-commit dry-run failed: %v", err)
+	}
+	if !strings.Contains(capturedDiff, "diff --git a/untracked.txt b/untracked.txt") || !strings.Contains(capturedDiff, "+new") {
+		t.Fatalf("expected untracked file in dry-run diff, got:\n%s", capturedDiff)
+	}
+}
+
 func TestQuickCommit_NewFlagValidation(t *testing.T) {
 	initEmptyRepo(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
@@ -4010,7 +4038,7 @@ func TestAppendCommitEmoji_Types(t *testing.T) {
 		{"ci: fix workflow", "ci: fix workflow 👷"},
 		{"build: upgrade go", "build: upgrade go 🏗️"},
 		{"feat!: breaking api change", "feat!: breaking api change 💥"},
-		{"feat!(scope): breaking", "feat!(scope): breaking 💥"},
+		{"feat(scope)!: breaking", "feat(scope)!: breaking 💥"},
 		{"unknown: something", "unknown: something 🚀"},
 	}
 	for _, tc := range cases {

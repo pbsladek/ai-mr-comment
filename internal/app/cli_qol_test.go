@@ -314,6 +314,60 @@ func TestChangelogDryRunSkipsProviderAndFileWrite(t *testing.T) {
 	}
 }
 
+func TestPublishDryRunDoesNotCreateTargetOrFetchMetadata(t *testing.T) {
+	deps := defaultCommandDeps()
+	deps.loadConfig = func(string) (*Config, error) {
+		return &Config{Provider: OpenAI, OpenAIAPIKey: "dummy", OpenAIModel: "gpt-5.5"}, nil
+	}
+	deps.isGitRepo = func() bool { return true }
+	deps.getCurrentBranch = func() (string, error) { return "feat/test", nil }
+	deps.getGitDiff = func(string, bool, []string) (string, error) {
+		return "diff --git a/file.txt b/file.txt\n+changed\n", nil
+	}
+	deps.getRemoteURL = func() (string, error) { return "git@github.com:owner/repo.git", nil }
+
+	created := false
+	deps.findOrCreateTarget = func(context.Context, *Config, remoteInfo, string, string) (string, error) {
+		created = true
+		return "", errors.New("must not create target during dry-run")
+	}
+	fetchedMetadata := false
+	deps.getRemoteMetadata = func(context.Context, *Config, string) (prMetadata, error) {
+		fetchedMetadata = true
+		return prMetadata{}, errors.New("must not fetch metadata during dry-run")
+	}
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		if prompt == titlePrompt {
+			return "Generated title", nil
+		}
+		return "Generated description", nil
+	}
+
+	var buf strings.Builder
+	cmd := newPublishCmdWithDeps(fn, deps)
+	cmd.SetArgs([]string{"--dry-run", "--format=json", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("publish dry-run failed: %v", err)
+	}
+	if created || fetchedMetadata {
+		t.Fatalf("dry-run side effects: created=%v fetchedMetadata=%v", created, fetchedMetadata)
+	}
+	var payload struct {
+		DryRun bool   `json:"dry_run"`
+		URL    string `json:"url"`
+	}
+	if err := json.Unmarshal([]byte(buf.String()), &payload); err != nil {
+		t.Fatalf("invalid publish dry-run json: %v\n%s", err, buf.String())
+	}
+	if !payload.DryRun || payload.URL == "" {
+		t.Fatalf("unexpected publish dry-run payload: %+v", payload)
+	}
+}
+
 func TestRootDryRunPostWithoutPRReportsMissingTarget(t *testing.T) {
 	var buf strings.Builder
 	cmd := newRootCmd(dummyChatFn)
