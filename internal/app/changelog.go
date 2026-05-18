@@ -241,7 +241,7 @@ Examples:
 	cmd.Flags().StringVar(&a.commit, "commit", "", "Commit or commit range to diff (e.g. v1.2.0..HEAD)")
 	cmd.Flags().StringVar(&a.diffFilePath, "file", "", "Path to diff file instead of running git diff")
 	cmd.Flags().StringVar(&a.outputPath, "output", "", "Write changelog to this file instead of stdout")
-	cmd.Flags().StringVar(&a.provider, "provider", "openai", "AI provider (openai, anthropic, gemini, ollama)")
+	cmd.Flags().StringVar(&a.provider, "provider", "", "AI provider (openai, anthropic, gemini, ollama, claude-cli, gemini-cli, codex-cli)")
 	cmd.Flags().StringVar(&a.modelOverride, "model", "", "Override the model for this run")
 	cmd.Flags().StringVar(&a.format, "format", "text", "Output format: text or json")
 	cmd.Flags().StringVar(&a.systemPromptFlag, "system-prompt", "", `Override the system prompt for this run. Use @path to read from a file (e.g. --system-prompt=@notes.txt).`)

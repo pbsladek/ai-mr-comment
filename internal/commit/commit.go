@@ -62,10 +62,16 @@ func IsConventionalLine(line string) bool {
 		if strings.HasPrefix(l, typ+":") {
 			return true
 		}
+		if strings.HasPrefix(l, typ+"!:") {
+			return true
+		}
 		prefix := typ + "("
 		if strings.HasPrefix(l, prefix) {
 			rest := l[len(prefix):]
 			if close := strings.Index(rest, ")"); close > 0 && close+1 < len(rest) && rest[close+1] == ':' {
+				return true
+			}
+			if close := strings.Index(rest, ")"); close > 0 && close+2 < len(rest) && rest[close+1] == '!' && rest[close+2] == ':' {
 				return true
 			}
 		}
@@ -201,7 +207,7 @@ var typeEmoji = map[string]string{
 func AppendEmoji(msg string) string {
 	subject, rest, hasRest := strings.Cut(msg, "\n")
 	emoji := "🚀"
-	if strings.Contains(subject, "!") {
+	if _, _, _, breaking, ok := ParseConventionalSubject(strings.TrimSpace(subject)); ok && breaking {
 		emoji = "💥"
 	} else {
 		for t, e := range typeEmoji {

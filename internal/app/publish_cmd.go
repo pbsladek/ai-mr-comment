@@ -51,7 +51,7 @@ find or create one from the current branch and origin remote.`,
 			if format != "text" && format != "json" {
 				return withExitCode(4, fmt.Errorf("unsupported format %q: must be text or json", format))
 			}
-			if noUpdateTitle && noUpdateDescription && !postSummary && len(labels) == 0 && len(reviewers) == 0 && !autoLabels {
+			if noUpdateTitle && noUpdateDescription && !postSummary && len(cleanStringList(labels)) == 0 && len(cleanStringList(reviewers)) == 0 && !autoLabels {
 				return withExitCode(4, errors.New("publish has no remote actions enabled"))
 			}
 			if cancel := applyRequestTimeout(cmd, cfg); cancel != nil {
@@ -122,6 +122,9 @@ find or create one from the current branch and origin remote.`,
 			if updateTitle {
 				updateTitleValue = &title
 			}
+			if !publishHasActions(updateTitle, updateDescription, postSummary, appliedLabels, reviewers) {
+				return withExitCode(4, errors.New("publish has no remote actions enabled"))
+			}
 			if dryRun {
 				return writePublishDryRun(cmd, cfg, targetURL, title, description, updateTitle, updateDescription, postSummary, appliedLabels, reviewers)
 			}
@@ -185,7 +188,7 @@ find or create one from the current branch and origin remote.`,
 	}
 
 	cmd.Flags().StringVar(&prURL, "pr", "", "GitHub PR or GitLab MR URL; omitted means find or create from the current branch")
-	cmd.Flags().StringVar(&provider, "provider", "openai", "AI provider to use")
+	cmd.Flags().StringVar(&provider, "provider", "", "AI provider to use")
 	cmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this run")
 	cmd.Flags().StringVarP(&templateName, "template", "t", "default", "Prompt template to use")
 	cmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate")
@@ -204,6 +207,10 @@ find or create one from the current branch and origin remote.`,
 	_ = cmd.RegisterFlagCompletionFunc("profile", completeProfiles)
 	_ = cmd.RegisterFlagCompletionFunc("format", completeValues([]string{"text", "json"}))
 	return cmd
+}
+
+func publishHasActions(updateTitle, updateDescription, postSummary bool, labels, reviewers []string) bool {
+	return updateTitle || updateDescription || postSummary || len(labels) > 0 || len(reviewers) > 0
 }
 
 func resolvePublishDiffWithDeps(ctx context.Context, cfg *Config, prURL string, deps commandDeps) (diffContent, targetURL string, err error) {
@@ -268,7 +275,7 @@ func plannedPublishTargetWithDeps(cfg *Config, deps commandDeps) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("getting remote URL: %w", err)
 	}
-	if createURL := prCreateURL(remoteURL, branch); createURL != "" {
+	if createURL := prCreateURLWithConfig(remoteURL, branch, cfg); createURL != "" {
 		return createURL, nil
 	}
 	info, err := deps.parseRemoteInfo(remoteURL)

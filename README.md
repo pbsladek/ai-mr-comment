@@ -198,7 +198,7 @@ provider = "anthropic"
 anthropic_api_key = "xxxx"
 anthropic_model = "claude-sonnet-4-6"
 anthropic_endpoint = "https://api.anthropic.com/"
-# Other Anthropic models: claude-opus-4-6, claude-haiku-4-5-20251001
+# Other Anthropic models: claude-opus-4-7, claude-opus-4-6, claude-haiku-4-5-20251001
 
 # === Claude CLI Settings ===
 # No API key needed — auth is delegated to the local claude CLI process.
@@ -210,12 +210,12 @@ claude_cli_model = "claude-sonnet-4-6"
 openai_api_key = "xxxx"
 openai_model = "gpt-5.5"
 openai_endpoint = "https://api.openai.com/v1/"
-# Other OpenAI models: gpt-5.4, gpt-5.4-mini, gpt-5.4-nano, gpt-4.1, gpt-4.1-mini
+# Other OpenAI models: gpt-5.5-pro, gpt-5.4, gpt-5.4-pro, gpt-5.4-mini, gpt-5.4-nano, gpt-5.3-codex
 
 # === Gemini Settings ===
 gemini_api_key = "xxxx"
 gemini_model = "gemini-2.5-flash"
-# Other Gemini models: gemini-2.5-pro, gemini-2.5-flash-lite, gemini-3
+# Other Gemini models: gemini-3.1-pro-preview, gemini-3-flash-preview, gemini-3.1-flash-lite, gemini-2.5-pro, gemini-2.5-flash-lite
 
 # === Gemini CLI Settings ===
 # No API key needed — auth is delegated to the local gemini CLI process (Google OAuth).
@@ -262,7 +262,7 @@ openai_model = "gpt-5.5"
 
 [profile.anthropic]
 provider        = "anthropic"
-anthropic_model = "claude-opus-4-6"
+anthropic_model = "claude-opus-4-7"
 template        = "technical"
 
 [profile.gemini]
@@ -551,7 +551,7 @@ Exit codes are stable for automation: `0` success/pass, `1` tool or runtime erro
 - `--print-request`: Print the resolved provider request as JSON and exit without calling the provider
 - `--preset <NAME>`: Apply built-in defaults: `ci` (JSON + exit-code + technical), `local-fast` (Ollama + plain), `security` (security-focused technical review), or `release-notes` (user-focused title/description).
 - `--provider <PROVIDER>`: Provider (`openai`, `anthropic`, `gemini`, `ollama`, `claude-cli`, `gemini-cli`, `codex-cli`)
-- `--model <NAME>`: Override the model for this run (e.g. `gpt-5.5`, `claude-opus-4-6`, `gemini-2.5-flash`)
+- `--model <NAME>`: Override the model for this run (e.g. `gpt-5.5`, `claude-opus-4-7`, `gemini-3.1-pro-preview`)
 - `-t, --template <NAME>`: Template style — `default`, `conventional`, `technical`, `user-focused`, `emoji`, `sassy`, `monday`, `jira`, `commit`, `commit-emoji`, `commit-conventional`, `chaos`, `haiku`, `roast`, `intern`, `shakespeare`, `manager`, `yoda`, `excuse` (`commit`, `commit-emoji`, and `commit-conventional` require `--commit-msg`; style templates cannot be combined with `--commit-msg`)
 - `--system-prompt <TEXT|@FILE>`: Override the system prompt for this run. Pass the prompt inline (`--system-prompt="Focus on security"`) or read it from a file with an `@` prefix (`--system-prompt=@review.txt`). Mutually exclusive with `--template`.
 - `--chaos`: Generate a chaotic, dramatically over-the-top MR/PR description (still technically accurate). Mutually exclusive with `--template`, `--system-prompt`, `--commit-msg`.
@@ -755,7 +755,7 @@ ai-mr-comment quick-commit --tracked-only
 ai-mr-comment quick-commit --signoff
 
 # Use a specific provider or model
-ai-mr-comment quick-commit --provider anthropic --model claude-opus-4-6
+ai-mr-comment quick-commit --provider anthropic --model claude-opus-4-7
 
 # Use a named profile
 ai-mr-comment quick-commit --profile anthropic
@@ -1115,12 +1115,12 @@ template     = "technical"
 
 [profile.anthropic]
 provider        = "anthropic"
-anthropic_model = "claude-opus-4-6"
+anthropic_model = "claude-opus-4-7"
 template        = "technical"
 
 [profile.gemini]
 provider     = "gemini"
-gemini_model = "gemini-3-pro-preview"
+gemini_model = "gemini-3.1-pro-preview"
 template     = "technical"
 
 [profile.local]

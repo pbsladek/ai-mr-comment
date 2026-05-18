@@ -155,6 +155,9 @@ func Diff(commit string, staged bool, exclude []string) (string, error) {
 	if staged {
 		args = []string{"diff", "--cached"}
 	} else if commit != "" {
+		if err := validateRevisionSpec(commit); err != nil {
+			return "", err
+		}
 		if strings.Contains(commit, "..") {
 			args = []string{"diff", commit}
 		} else {
@@ -177,6 +180,30 @@ func Diff(commit string, staged bool, exclude []string) (string, error) {
 
 	out, err := exec.Command("git", args...).CombinedOutput() //nolint:gosec // G204: git is a fixed binary, args are controlled by internal logic.
 	return string(out), err
+}
+
+func validateRevisionSpec(spec string) error {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return nil
+	}
+	if strings.HasPrefix(spec, "-") {
+		return fmt.Errorf("invalid commit/range %q: revision must not start with '-'", spec)
+	}
+
+	parts := []string{spec}
+	if strings.Contains(spec, "...") {
+		parts = strings.Split(spec, "...")
+	} else if strings.Contains(spec, "..") {
+		parts = strings.Split(spec, "..")
+	}
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "-") {
+			return fmt.Errorf("invalid commit/range %q: revision component %q must not start with '-'", spec, part)
+		}
+	}
+	return nil
 }
 
 // QuickCommitDryRunDiff returns the diff used for quick-commit previews.

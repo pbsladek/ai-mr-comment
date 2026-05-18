@@ -34,6 +34,13 @@ func TestCLIPromptStripsNullBytes(t *testing.T) {
 	}
 }
 
+func TestGeminiGenerateConfigDoesNotCapOutputTokens(t *testing.T) {
+	cfg := geminiGenerateConfig("system")
+	if cfg.MaxOutputTokens != 0 {
+		t.Fatalf("expected Gemini max output tokens to be unset, got %d", cfg.MaxOutputTokens)
+	}
+}
+
 func TestCLIExecErrorContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -226,6 +233,19 @@ func TestStreamOllama(t *testing.T) {
 	}
 }
 
+func TestStreamOllamaReturnsWriterError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = fmt.Fprintln(w, `{"response":"hello","done":true}`)
+	}))
+	defer ts.Close()
+
+	_, err := StreamOllama(context.Background(), &config.Config{OllamaModel: "llama3", OllamaEndpoint: ts.URL}, "system", "diff", errWriter{err: errors.New("closed pipe")})
+	if err == nil || !strings.Contains(err.Error(), "closed pipe") {
+		t.Fatalf("expected writer error, got %v", err)
+	}
+}
+
 func TestStreamOllamaMalformedChunk(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/x-ndjson")
@@ -242,6 +262,12 @@ func TestStreamOllamaMalformedChunk(t *testing.T) {
 type ioDiscard struct{}
 
 func (ioDiscard) Write(p []byte) (int, error) { return len(p), nil }
+
+type errWriter struct {
+	err error
+}
+
+func (w errWriter) Write([]byte) (int, error) { return 0, w.err }
 
 func writeExecutable(t *testing.T, dir, name, body string) string {
 	t.Helper()

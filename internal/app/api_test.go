@@ -15,7 +15,7 @@ import (
 	anthropicopt "github.com/anthropics/anthropic-sdk-go/option"
 	openai "github.com/openai/openai-go"
 	openaiopt "github.com/openai/openai-go/option"
-	"google.golang.org/api/option"
+	"github.com/pbsladek/ai-mr-comment/internal/providers"
 )
 
 func openAIResponsePayload(text string) map[string]any {
@@ -144,6 +144,32 @@ func TestCallAnthropic_Success(t *testing.T) {
 	}
 }
 
+func TestCallAnthropic_CombinesTextBlocks(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_1", "type": "message", "role": "assistant", "model": "test",
+			"content": []map[string]string{
+				{"type": "text", "text": "first "},
+				{"type": "text", "text": "second"},
+			},
+			"stop_reason": "end_turn",
+		})
+	}))
+	defer ts.Close()
+
+	client := anthropic.NewClient(anthropicopt.WithBaseURL(ts.URL), anthropicopt.WithAPIKey("test"))
+	cfg := &Config{AnthropicModel: "claude-3-5-sonnet-20240620"}
+
+	result, err := callAnthropic(context.Background(), &client, cfg, "prompt", "diff")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "first second" {
+		t.Errorf("expected combined text blocks, got %q", result)
+	}
+}
+
 func TestCallAnthropic_NoContent(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -162,8 +188,8 @@ func TestCallAnthropic_NoContent(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for no content")
 	}
-	if !strings.Contains(err.Error(), "no content") {
-		t.Errorf("expected 'no content' error, got %q", err.Error())
+	if !strings.Contains(err.Error(), "no text content") {
+		t.Errorf("expected 'no text content' error, got %q", err.Error())
 	}
 }
 
@@ -172,6 +198,43 @@ func TestCallAnthropic_NoContent(t *testing.T) {
 func TestCallGemini_Success(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "streamGenerateContent") || strings.Contains(r.URL.Path, "generateContent") {
+			var req map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode request: %v", err)
+			}
+			system, ok := req["systemInstruction"].(map[string]any)
+			if !ok {
+				t.Fatalf("expected Gemini systemInstruction, got %#v", req["systemInstruction"])
+			}
+			systemParts, ok := system["parts"].([]any)
+			if !ok || len(systemParts) != 1 {
+				t.Fatalf("expected one systemInstruction part, got %#v", system["parts"])
+			}
+			systemText, ok := systemParts[0].(map[string]any)
+			if !ok || systemText["text"] != "prompt" {
+				t.Fatalf("expected system prompt text, got %#v", systemParts[0])
+			}
+			contents, ok := req["contents"].([]any)
+			if !ok || len(contents) != 1 {
+				t.Fatalf("expected one Gemini content, got %#v", req["contents"])
+			}
+			content, ok := contents[0].(map[string]any)
+			if !ok {
+				t.Fatalf("expected content object, got %#v", contents[0])
+			}
+			parts, ok := content["parts"].([]any)
+			if !ok || len(parts) != 1 {
+				t.Fatalf("expected one content part, got %#v", content["parts"])
+			}
+			part, ok := parts[0].(map[string]any)
+			if !ok || part["text"] != "diff" {
+				t.Fatalf("expected diff content text, got %#v", parts[0])
+			}
+			if generation, ok := req["generationConfig"].(map[string]any); ok {
+				if _, capped := generation["maxOutputTokens"]; capped {
+					t.Fatalf("expected maxOutputTokens to be unset, got %#v", req["generationConfig"])
+				}
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"candidates": []map[string]any{
@@ -187,9 +250,8 @@ func TestCallGemini_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	geminiClientOptions = []option.ClientOption{
-		option.WithEndpoint(ts.URL),
-		option.WithHTTPClient(ts.Client()),
+	geminiClientOptions = []providers.GeminiClientOption{
+		providers.GeminiEndpointOption(ts.URL, ts.Client()),
 	}
 	defer func() { geminiClientOptions = nil }()
 
@@ -238,8 +300,8 @@ func TestCallAnthropic_NonTextBlock(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-text block")
 	}
-	if !strings.Contains(err.Error(), "not text") {
-		t.Errorf("expected 'not text' error, got %q", err.Error())
+	if !strings.Contains(err.Error(), "no text content") {
+		t.Errorf("expected 'no text content' error, got %q", err.Error())
 	}
 }
 
@@ -252,9 +314,8 @@ func TestCallGemini_NoContent(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	geminiClientOptions = []option.ClientOption{
-		option.WithEndpoint(ts.URL),
-		option.WithHTTPClient(ts.Client()),
+	geminiClientOptions = []providers.GeminiClientOption{
+		providers.GeminiEndpointOption(ts.URL, ts.Client()),
 	}
 	defer func() { geminiClientOptions = nil }()
 
@@ -280,9 +341,8 @@ func TestCallGemini_NilCandidateContent(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	geminiClientOptions = []option.ClientOption{
-		option.WithEndpoint(ts.URL),
-		option.WithHTTPClient(ts.Client()),
+	geminiClientOptions = []providers.GeminiClientOption{
+		providers.GeminiEndpointOption(ts.URL, ts.Client()),
 	}
 	defer func() { geminiClientOptions = nil }()
 
@@ -297,12 +357,55 @@ func TestCallGemini_NilCandidateContent(t *testing.T) {
 	}
 }
 
+func TestCallGemini_NoTextContent(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"candidates": []map[string]any{
+				{"content": map[string]any{
+					"parts": []map[string]any{{"inlineData": map[string]string{"mimeType": "text/plain", "data": "dGVzdA=="}}},
+					"role":  "model",
+				}},
+			},
+		})
+	}))
+	defer ts.Close()
+
+	geminiClientOptions = []providers.GeminiClientOption{
+		providers.GeminiEndpointOption(ts.URL, ts.Client()),
+	}
+	defer func() { geminiClientOptions = nil }()
+
+	cfg := &Config{GeminiAPIKey: "test", GeminiModel: "gemini-2.5-flash"}
+
+	_, err := callGemini(context.Background(), cfg, "prompt", "diff")
+	if err == nil {
+		t.Fatal("expected error for no text content")
+	}
+	if !strings.Contains(err.Error(), "no text content") {
+		t.Errorf("expected 'no text content' error, got %q", err.Error())
+	}
+}
+
 // --- callOllama tests ---
 
 func TestCallOllama_Success(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			t.Errorf("expected POST, got %s", r.Method)
+		}
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req["system"] != "system prompt" {
+			t.Fatalf("expected native Ollama system prompt, got %#v", req["system"])
+		}
+		if req["prompt"] != "diff content" {
+			t.Fatalf("expected Ollama prompt to contain only diff content, got %#v", req["prompt"])
+		}
+		if req["stream"] != false {
+			t.Fatalf("expected non-streaming request, got %#v", req["stream"])
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"response": "test comment"})
@@ -400,6 +503,24 @@ func TestCallOllama_BadJSON(t *testing.T) {
 	_, err := callOllama(context.Background(), cfg, "prompt", "diff")
 	if err == nil {
 		t.Fatal("expected error for bad JSON")
+	}
+}
+
+func TestCallOllama_EmptyTextFails(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"response": ""})
+	}))
+	defer ts.Close()
+
+	cfg := &Config{
+		OllamaModel:    "llama3",
+		OllamaEndpoint: ts.URL,
+	}
+
+	_, err := callOllama(context.Background(), cfg, "prompt", "diff")
+	if err == nil || !strings.Contains(err.Error(), "no text content returned from Ollama") {
+		t.Fatalf("expected empty Ollama response error, got %v", err)
 	}
 }
 
@@ -502,9 +623,8 @@ func TestChatCompletions_Gemini(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	geminiClientOptions = []option.ClientOption{
-		option.WithEndpoint(ts.URL),
-		option.WithHTTPClient(ts.Client()),
+	geminiClientOptions = []providers.GeminiClientOption{
+		providers.GeminiEndpointOption(ts.URL, ts.Client()),
 	}
 	defer func() { geminiClientOptions = nil }()
 
@@ -556,8 +676,98 @@ func TestStreamOpenAI_Success(t *testing.T) {
 	}
 }
 
+func TestStreamOpenAI_EmptyTextFails(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"sequence_number\":1,\"response\":{\"id\":\"resp_1\",\"object\":\"response\",\"created_at\":0,\"status\":\"completed\",\"model\":\"test\",\"output\":[]}}\n\n")
+	}))
+	defer ts.Close()
+
+	client := openai.NewClient(
+		openaiopt.WithAPIKey("test"),
+		openaiopt.WithBaseURL(ts.URL+"/"),
+	)
+	cfg := &Config{OpenAIModel: "gpt-5.5"}
+
+	_, err := streamOpenAI(context.Background(), &client, cfg, "sys", "diff", io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "no output text") {
+		t.Fatalf("expected empty OpenAI stream error, got %v", err)
+	}
+}
+
+func TestStreamGemini_Success(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "streamGenerateContent") {
+			t.Fatalf("expected streamGenerateContent path, got %s", r.URL.Path)
+		}
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if _, ok := req["systemInstruction"].(map[string]any); !ok {
+			t.Fatalf("expected Gemini systemInstruction, got %#v", req["systemInstruction"])
+		}
+		if _, ok := req["generationConfig"].(map[string]any); !ok {
+			t.Fatalf("expected Gemini generationConfig, got %#v", req["generationConfig"])
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"gem\"}],\"role\":\"model\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ini\"}],\"role\":\"model\"}}]}\n\n")
+	}))
+	defer ts.Close()
+
+	geminiClientOptions = []providers.GeminiClientOption{
+		providers.GeminiEndpointOption(ts.URL, ts.Client()),
+	}
+	defer func() { geminiClientOptions = nil }()
+
+	cfg := &Config{GeminiAPIKey: "test", GeminiModel: "gemini-2.5-flash"}
+
+	var buf strings.Builder
+	result, err := streamGemini(context.Background(), cfg, "sys", "diff", &buf)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "gemini" || buf.String() != result {
+		t.Fatalf("stream result mismatch: got=%q writer=%q", result, buf.String())
+	}
+}
+
+func TestStreamGemini_EmptyTextFails(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"candidates\":[{\"content\":{\"parts\":[{\"inlineData\":{\"mimeType\":\"text/plain\",\"data\":\"dGVzdA==\"}}],\"role\":\"model\"}}]}\n\n")
+	}))
+	defer ts.Close()
+
+	geminiClientOptions = []providers.GeminiClientOption{
+		providers.GeminiEndpointOption(ts.URL, ts.Client()),
+	}
+	defer func() { geminiClientOptions = nil }()
+
+	cfg := &Config{GeminiAPIKey: "test", GeminiModel: "gemini-2.5-flash"}
+
+	_, err := streamGemini(context.Background(), cfg, "sys", "diff", io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "no text content returned from Gemini stream") {
+		t.Fatalf("expected empty Gemini stream error, got %v", err)
+	}
+}
+
 func TestStreamOllama_Success(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req["system"] != "sys" {
+			t.Fatalf("expected native Ollama system prompt, got %#v", req["system"])
+		}
+		if req["prompt"] != "diff" {
+			t.Fatalf("expected Ollama prompt to contain only diff content, got %#v", req["prompt"])
+		}
+		if req["stream"] != true {
+			t.Fatalf("expected streaming request, got %#v", req["stream"])
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, "{\"response\":\"chunk1\",\"done\":false}\n")
 		_, _ = fmt.Fprint(w, "{\"response\":\" chunk2\",\"done\":true}\n")
@@ -579,6 +789,24 @@ func TestStreamOllama_Success(t *testing.T) {
 	}
 	if buf.String() != "chunk1 chunk2" {
 		t.Errorf("expected writer to receive 'chunk1 chunk2', got %q", buf.String())
+	}
+}
+
+func TestStreamOllama_EmptyTextFails(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, "{\"response\":\"\",\"done\":true}\n")
+	}))
+	defer ts.Close()
+
+	cfg := &Config{
+		OllamaModel:    "llama3",
+		OllamaEndpoint: ts.URL,
+	}
+
+	_, err := streamOllama(context.Background(), cfg, "sys", "diff", io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "no text content returned from Ollama stream") {
+		t.Fatalf("expected empty Ollama stream error, got %v", err)
 	}
 }
 
@@ -676,6 +904,26 @@ func TestStreamAnthropic_Success(t *testing.T) {
 	}
 	if buf.String() != "Hello stream" {
 		t.Errorf("expected writer to receive 'Hello stream', got %q", buf.String())
+	}
+}
+
+func TestStreamAnthropic_EmptyTextFails(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-3-5-sonnet-20240620\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}\n\n")
+		_, _ = fmt.Fprint(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	}))
+	defer ts.Close()
+
+	client := anthropic.NewClient(
+		anthropicopt.WithAPIKey("test"),
+		anthropicopt.WithBaseURL(ts.URL),
+	)
+	cfg := &Config{AnthropicModel: "claude-3-5-sonnet-20240620"}
+
+	_, err := streamAnthropic(context.Background(), &client, cfg, "sys", "diff", io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "no text content returned from Anthropic stream") {
+		t.Fatalf("expected empty Anthropic stream error, got %v", err)
 	}
 }
 

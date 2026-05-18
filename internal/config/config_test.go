@@ -70,6 +70,40 @@ template = "technical"
 	}
 }
 
+func TestLoadWithProfileDoesNotOverrideEnv(t *testing.T) {
+	t.Setenv("AI_MR_COMMENT_PROVIDER", "gemini")
+	t.Setenv("OPENAI_API_KEY", "env-openai-key")
+
+	path := writeConfig(t, `
+provider = "openai"
+openai_api_key = "file-key"
+
+[profile.review]
+provider = "anthropic"
+openai_api_key = "profile-key"
+anthropic_model = "claude-opus-4-6"
+`)
+
+	v := viperFromFile(path)
+	v.AutomaticEnv()
+	v.SetEnvPrefix("AI_MR_COMMENT")
+	_ = v.BindEnv("openai_api_key", "OPENAI_API_KEY")
+
+	cfg, err := LoadWith(v, "review")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Provider != Gemini {
+		t.Fatalf("expected env provider to win over profile, got %q", cfg.Provider)
+	}
+	if cfg.OpenAIAPIKey != "env-openai-key" {
+		t.Fatalf("expected env API key to win over profile, got %q", cfg.OpenAIAPIKey)
+	}
+	if cfg.AnthropicModel != "claude-opus-4-6" {
+		t.Fatalf("expected non-env profile value to apply, got %q", cfg.AnthropicModel)
+	}
+}
+
 func TestLoadWithMissingProfile(t *testing.T) {
 	path := writeConfig(t, `provider = "openai"`)
 

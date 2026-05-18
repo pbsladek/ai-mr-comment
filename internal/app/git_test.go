@@ -306,10 +306,10 @@ func TestResolveGitHubBaseURL(t *testing.T) {
 			want:           "",
 		},
 		{
-			name:           "self-hosted without configured base",
+			name:           "self-hosted without configured base returns error",
 			prURL:          "https://github.myco.com/owner/repo/pull/1",
 			configuredBase: "",
-			want:           "https://github.myco.com",
+			wantErr:        true,
 		},
 		{
 			name:           "matching configured base with path is normalized",
@@ -359,10 +359,10 @@ func TestResolveGitLabBaseURL(t *testing.T) {
 			want:           "",
 		},
 		{
-			name:           "self-hosted without configured base",
+			name:           "self-hosted without configured base returns error",
 			mrURL:          "https://gitlab.myco.com/group/project/-/merge_requests/1",
 			configuredBase: "",
-			want:           "https://gitlab.myco.com",
+			wantErr:        true,
 		},
 		{
 			name:           "matching configured base with path is normalized",
@@ -1262,6 +1262,18 @@ func TestPRCreateURL(t *testing.T) {
 			want:      "",
 		},
 		{
+			name:      "spoofed github substring",
+			remoteURL: "https://evilgithub.example/owner/repo.git",
+			branch:    "main",
+			want:      "",
+		},
+		{
+			name:      "spoofed gitlab substring",
+			remoteURL: "https://notgitlab.example/group/project.git",
+			branch:    "main",
+			want:      "",
+		},
+		{
 			name:      "invalid url",
 			remoteURL: "not-a-url",
 			branch:    "main",
@@ -1323,14 +1335,14 @@ func TestIsGitHubHost(t *testing.T) {
 	if !isGitHubHost("github.com", "") {
 		t.Error("github.com should be detected as GitHub")
 	}
-	if !isGitHubHost("mygithubenterprise.com", "") {
-		t.Error("host containing 'github' should be detected as GitHub")
-	}
 	if !isGitHubHost("git.myco.com", "https://git.myco.com") {
 		t.Error("host matching configuredBaseURL should be detected as GitHub")
 	}
 	if isGitHubHost("git.myco.com", "") {
 		t.Error("unknown host with no config should not be GitHub")
+	}
+	if isGitHubHost("mygithubenterprise.com", "") {
+		t.Error("substring host with no config should not be GitHub")
 	}
 }
 
@@ -1343,6 +1355,9 @@ func TestIsGitLabHost(t *testing.T) {
 	}
 	if isGitLabHost("git.myco.com", "") {
 		t.Error("unknown host with no config should not be GitLab")
+	}
+	if isGitLabHost("notgitlab.example", "") {
+		t.Error("substring host with no config should not be GitLab")
 	}
 }
 

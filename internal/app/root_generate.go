@@ -10,12 +10,14 @@ import (
 )
 
 type rootChatFunc func(context.Context, *Config, ApiProvider, string, string) (string, error)
+type rootStreamFunc func(context.Context, *Config, ApiProvider, string, string, io.Writer) (string, error)
 
 type rootGenerationRequest struct {
 	Context      context.Context
 	Config       *Config
 	Options      RootOptions
 	Chat         rootChatFunc
+	Stream       rootStreamFunc
 	SystemPrompt string
 	DiffContent  string
 	SmartChunk   bool
@@ -62,10 +64,18 @@ func generateRootProviderOutput(req rootGenerationRequest) (rootGenerationResult
 	case req.SmartChunk:
 		result.Comment, err = generateSmartChunkComment(req)
 	case req.ShouldStream:
+		streamFn := req.Stream
+		if streamFn == nil {
+			streamFn = streamToWriter
+		}
+		streamOut := &countingWriter{w: req.Out}
 		result.Comment, err = timedCall(cfg, "comment (stream)", func() (string, error) {
-			return streamToWriter(ctx, cfg, cfg.Provider, req.SystemPrompt, req.DiffContent, req.Out)
+			return streamFn(ctx, cfg, cfg.Provider, req.SystemPrompt, req.DiffContent, streamOut)
 		})
 		if err != nil {
+			if streamOut.Written() > 0 {
+				return result, err
+			}
 			result.Comment, err = timedCall(cfg, "comment (fallback)", func() (string, error) {
 				return req.Chat(ctx, cfg, cfg.Provider, req.SystemPrompt, req.DiffContent)
 			})
@@ -91,6 +101,24 @@ func generateRootProviderOutput(req rootGenerationRequest) (rootGenerationResult
 		result.Title = strings.TrimSpace(result.Title)
 	}
 	return result, nil
+}
+
+type countingWriter struct {
+	w io.Writer
+	n int64
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	n, err := w.w.Write(p)
+	w.n += int64(n)
+	return n, err
+}
+
+func (w *countingWriter) Written() int64 {
+	if w == nil {
+		return 0
+	}
+	return w.n
 }
 
 func generateSmartChunkComment(req rootGenerationRequest) (string, error) {

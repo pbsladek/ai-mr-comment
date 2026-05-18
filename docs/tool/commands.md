@@ -97,7 +97,7 @@ ai-mr-comment quick-commit --type fix --scope api
 ai-mr-comment quick-commit --message-template detailed
 ai-mr-comment quick-commit --tracked-only
 ai-mr-comment quick-commit --signoff
-ai-mr-comment quick-commit --provider anthropic --model claude-opus-4-6
+ai-mr-comment quick-commit --provider anthropic --model claude-opus-4-7
 ai-mr-comment quick-commit --profile local
 ai-mr-comment quick-commit --format json
 ```

@@ -178,6 +178,27 @@ func TestSummarizeDiffCountsPlusPlusAndMinusMinusContent(t *testing.T) {
 	}
 }
 
+func TestSummarizeDiffIgnoresPrefixedDescriptionBullets(t *testing.T) {
+	diff := "PR Title: Example\n" +
+		"PR Description: Notes\n" +
+		"+ markdown addition-looking bullet\n" +
+		"- markdown deletion-looking bullet\n\n" +
+		"diff --git a/app.go b/app.go\n" +
+		"--- a/app.go\n" +
+		"+++ b/app.go\n" +
+		"@@ -1 +1 @@\n" +
+		"-old\n" +
+		"+new\n"
+
+	summary := summarizeDiff(diff, "test", "model", false)
+	if summary.Additions != 1 || summary.Deletions != 1 {
+		t.Fatalf("expected only real diff lines to count, got +%d/-%d", summary.Additions, summary.Deletions)
+	}
+	if summary.Files[0].Additions != 1 || summary.Files[0].Deletions != 1 {
+		t.Fatalf("unexpected file counts: %+v", summary.Files[0])
+	}
+}
+
 func TestSummarizeDiffHandlesGitBinaryPatch(t *testing.T) {
 	diff := "diff --git a/image.png b/image.png\n" +
 		"index 111..222 100644\n" +

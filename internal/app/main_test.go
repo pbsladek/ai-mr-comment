@@ -186,6 +186,42 @@ func TestNewRootCmd_OutputToFile(t *testing.T) {
 	}
 }
 
+func TestNewRootCmd_OutputToFileIncludesGeneratedTitle(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	outputFile := filepath.Join(t.TempDir(), "review.md")
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, systemPrompt, _ string) (string, error) {
+		if strings.HasPrefix(systemPrompt, "Generate a single-line MR/PR title") {
+			return "Add generated title", nil
+		}
+		return "Generated description", nil
+	}
+
+	var stdoutBuf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--title", "--file=testdata/diff.txt", "--provider=openai", "--output=" + outputFile})
+	cmd.SetOut(&stdoutBuf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if stdoutBuf.Len() > 0 {
+		t.Errorf("expected no stdout output when --output is set, got: %q", stdoutBuf.String())
+	}
+
+	data, err := os.ReadFile(outputFile)
+	if err != nil {
+		t.Fatalf("expected output file, got error %v", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "Add generated title") || !strings.Contains(got, "Generated description") {
+		t.Fatalf("expected title and description in output file, got %q", got)
+	}
+}
+
 func TestNewRootCmd_CustomTemplateFlagUsesTemplateFile(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
@@ -402,11 +438,21 @@ func TestRootCmd_JSONLStream(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
 	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "fallback review", nil
+	}
+	deps := defaultCommandDeps()
+	deps.streamToWriter = func(_ context.Context, _ *Config, _ ApiProvider, _, _ string, w io.Writer) (string, error) {
+		if _, err := io.WriteString(w, "streamed "); err != nil {
+			return "", err
+		}
+		if _, err := io.WriteString(w, "review"); err != nil {
+			return "", err
+		}
 		return "streamed review", nil
 	}
 
 	var out strings.Builder
-	cmd := newRootCmd(fn)
+	cmd := newRootCmdWithDeps(fn, deps)
 	cmd.SetArgs([]string{"--stream=jsonl", "--file=-", "--provider=openai"})
 	cmd.SetIn(strings.NewReader("diff --git a/a b/a\n+stream\n"))
 	cmd.SetOut(&out)
@@ -418,8 +464,8 @@ func TestRootCmd_JSONLStream(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 JSONL events, got %d: %q", len(lines), out.String())
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 JSONL events, got %d: %q", len(lines), out.String())
 	}
 	var events []map[string]any
 	for _, line := range lines {
@@ -429,11 +475,11 @@ func TestRootCmd_JSONLStream(t *testing.T) {
 		}
 		events = append(events, event)
 	}
-	if events[0]["type"] != "start" || events[1]["type"] != "token" || events[2]["type"] != "done" {
+	if events[0]["type"] != "start" || events[1]["type"] != "token" || events[2]["type"] != "token" || events[3]["type"] != "done" {
 		t.Fatalf("unexpected event types: %#v", events)
 	}
-	if events[1]["text"] != "streamed review" {
-		t.Fatalf("expected token text, got %#v", events[1])
+	if events[1]["text"] != "streamed " || events[2]["text"] != "review" {
+		t.Fatalf("expected streamed token text, got %#v", events)
 	}
 }
 
@@ -1728,6 +1774,27 @@ func TestModelsCmd(t *testing.T) {
 	}
 }
 
+func TestModelsCmdDefaultsToConfiguredProvider(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, ".ai-mr-comment.toml"), []byte(`provider = "gemini"`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("HOME", tmpDir)
+
+	var buf strings.Builder
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"models"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !strings.Contains(buf.String(), "Models for provider gemini") {
+		t.Fatalf("expected configured provider in output, got:\n%s", buf.String())
+	}
+}
+
 func TestModelsCmd_InvalidProvider(t *testing.T) {
 	cmd := newRootCmd(dummyChatFn)
 	cmd.SetArgs([]string{"models", "--provider=invalid"})
@@ -2576,6 +2643,29 @@ func TestUpdatePRMetadataFlags_UpdateGitHubTitleAndDescription(t *testing.T) {
 	}
 	if updated.Title != "feat: Generated title" || !strings.Contains(updated.Body, "Generated PR description") {
 		t.Fatalf("unexpected updated metadata: %+v", updated)
+	}
+}
+
+func TestPublishRejectsNoActionsAfterCleaningLists(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{
+		"publish",
+		"--provider=openai",
+		"--no-update-title",
+		"--no-update-description",
+		"--post-summary=false",
+		"--label= , ",
+	})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "publish has no remote actions enabled") {
+		t.Fatalf("expected no-actions error, got %v", err)
 	}
 }
 

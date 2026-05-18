@@ -36,6 +36,13 @@ func prCreateURL(remoteURL, branch string) string {
 	return remote.CreateURL(remoteURL, branch)
 }
 
+func prCreateURLWithConfig(remoteURL, branch string, cfg *Config) string {
+	if cfg == nil {
+		return prCreateURL(remoteURL, branch)
+	}
+	return remote.CreateURLWithBase(remoteURL, branch, cfg.GitHubBaseURL, cfg.GitLabBaseURL)
+}
+
 // getAutoMergeBase returns the common ancestor commit between HEAD and the
 // remote default branch, trying origin/main then origin/master.
 func getAutoMergeBase() (string, error) {

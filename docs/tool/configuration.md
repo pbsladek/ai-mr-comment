@@ -15,21 +15,17 @@ Example config:
 
 ```toml
 provider = "openai"
-model = "gpt-5.5"
+openai_model = "gpt-5.5"
 template = "default"
-format = "plain"
 
 [profile.fast]
 provider = "ollama"
-model = "llama3.1"
-format = "plain"
+ollama_model = "llama3.1"
 
 [profile.ci]
 provider = "openai"
-model = "gpt-5.4-mini"
+openai_model = "gpt-5.4-mini"
 template = "technical"
-format = "json"
-exit_code = true
 ```
 
 Use a profile with any command:

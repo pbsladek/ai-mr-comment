@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"google.golang.org/api/option"
+	"github.com/pbsladek/ai-mr-comment/internal/providers"
 )
 
 func TestHeuristicTokenEstimator(t *testing.T) {
@@ -75,9 +75,8 @@ func TestGeminiTokenEstimator_Mock(t *testing.T) {
 
 	// Inject the mock client options
 	// Note: We use the package-level geminiClientOptions var in api.go/token_estimator.go
-	geminiClientOptions = []option.ClientOption{
-		option.WithEndpoint(ts.URL),
-		option.WithHTTPClient(ts.Client()),
+	geminiClientOptions = []providers.GeminiClientOption{
+		providers.GeminiEndpointOption(ts.URL, ts.Client()),
 	}
 	defer func() { geminiClientOptions = nil }()
 

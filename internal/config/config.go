@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/go-viper/mapstructure/v2"
@@ -125,9 +127,46 @@ func ApplyProfile(v *viper.Viper, profile string) error {
 		return fmt.Errorf("profile %q not found in config", profile)
 	}
 	for key, val := range sub.AllSettings() {
+		if hasEnvOverride(key) {
+			continue
+		}
 		v.Set(key, val)
 	}
 	return nil
+}
+
+func hasEnvOverride(key string) bool {
+	envKey := "AI_MR_COMMENT_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
+	if _, ok := os.LookupEnv(envKey); ok {
+		return true
+	}
+	for _, bare := range bareEnvKeys(key) {
+		if _, ok := os.LookupEnv(bare); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func bareEnvKeys(key string) []string {
+	switch key {
+	case "openai_api_key":
+		return []string{"OPENAI_API_KEY"}
+	case "anthropic_api_key":
+		return []string{"ANTHROPIC_API_KEY"}
+	case "gemini_api_key":
+		return []string{"GEMINI_API_KEY"}
+	case "github_token":
+		return []string{"GITHUB_TOKEN"}
+	case "gitlab_token":
+		return []string{"GITLAB_TOKEN"}
+	case "github_base_url":
+		return []string{"GITHUB_BASE_URL"}
+	case "gitlab_base_url":
+		return []string{"GITLAB_BASE_URL"}
+	default:
+		return nil
+	}
 }
 
 // LoadWith applies defaults, reads the config file (if present), overlays the

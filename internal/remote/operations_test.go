@@ -146,6 +146,58 @@ func TestGitHubOperationsWithClient(t *testing.T) {
 	}
 }
 
+func TestGitHubUpsertCommentChecksAllPages(t *testing.T) {
+	var updatedBody string
+	var postedBody string
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/owner/repo/issues/42/comments", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			if r.URL.Query().Get("page") == "2" {
+				_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 123, "body": "<!-- marker -->\nold"}})
+				return
+			}
+			w.Header().Set("Link", `</repos/owner/repo/issues/42/comments?page=2>; rel="next"`)
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 1, "body": "unmanaged"}})
+		case http.MethodPost:
+			var payload struct {
+				Body string `json:"body"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			postedBody = payload.Body
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 999, "body": payload.Body})
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/repos/owner/repo/issues/comments/123", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var payload struct {
+			Body string `json:"body"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		updatedBody = payload.Body
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": 123, "body": payload.Body})
+	})
+
+	gh := newRemoteTestGitHubClient(t, mux)
+	if err := UpsertGitHubPRCommentWithClient(context.Background(), gh, "https://github.com/owner/repo/pull/42", "<!-- marker -->", "replacement"); err != nil {
+		t.Fatalf("UpsertGitHubPRCommentWithClient failed: %v", err)
+	}
+	if updatedBody != "replacement" {
+		t.Fatalf("expected page-2 comment update, got %q", updatedBody)
+	}
+	if postedBody != "" {
+		t.Fatalf("expected no duplicate post, got %q", postedBody)
+	}
+}
+
 func TestGitHubFindOrCreatePR(t *testing.T) {
 	t.Run("finds existing", func(t *testing.T) {
 		mux := http.NewServeMux()
@@ -298,6 +350,59 @@ func TestGitLabOperationsWithClient(t *testing.T) {
 	}
 	if upsertedNote != "replacement note" {
 		t.Fatalf("upserted note = %q", upsertedNote)
+	}
+}
+
+func TestGitLabUpsertNoteChecksAllPages(t *testing.T) {
+	var updatedNote string
+	var postedNote string
+	targetURL := "https://gitlab.com/group/repo/-/merge_requests/5"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/group%2Frepo/merge_requests/5/notes", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			if r.URL.Query().Get("page") == "2" {
+				_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 88, "body": "<!-- marker -->\nold"}})
+				return
+			}
+			w.Header().Set("X-Next-Page", "2")
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 1, "body": "unmanaged"}})
+		case http.MethodPost:
+			var payload struct {
+				Body string `json:"body"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			postedNote = payload.Body
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 999, "body": payload.Body})
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/v4/projects/group%2Frepo/merge_requests/5/notes/88", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var payload struct {
+			Body string `json:"body"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		updatedNote = payload.Body
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": 88, "body": payload.Body})
+	})
+
+	gl := newRemoteTestGitLabClient(t, mux)
+	if err := UpsertGitLabMRNoteWithClient(context.Background(), gl, targetURL, "<!-- marker -->", "replacement"); err != nil {
+		t.Fatalf("UpsertGitLabMRNoteWithClient failed: %v", err)
+	}
+	if updatedNote != "replacement" {
+		t.Fatalf("expected page-2 note update, got %q", updatedNote)
+	}
+	if postedNote != "" {
+		t.Fatalf("expected no duplicate post, got %q", postedNote)
 	}
 }
 

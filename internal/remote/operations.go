@@ -278,20 +278,27 @@ func UpsertGitHubPRCommentWithClient(ctx context.Context, gh *gogithub.Client, p
 	if err != nil {
 		return err
 	}
-	comments, _, err := gh.Issues.ListComments(ctx, owner, repo, number, &gogithub.IssueListCommentsOptions{
+	opts := &gogithub.IssueListCommentsOptions{
 		ListOptions: gogithub.ListOptions{PerPage: 100},
-	})
-	if err != nil {
-		return fmt.Errorf("listing GitHub PR comments: %w", err)
 	}
-	for _, comment := range comments {
-		if strings.Contains(comment.GetBody(), marker) {
-			_, _, err = gh.Issues.EditComment(ctx, owner, repo, comment.GetID(), &gogithub.IssueComment{Body: &body})
-			if err != nil {
-				return fmt.Errorf("updating GitHub PR comment: %w", err)
-			}
-			return nil
+	for {
+		comments, resp, err := gh.Issues.ListComments(ctx, owner, repo, number, opts)
+		if err != nil {
+			return fmt.Errorf("listing GitHub PR comments: %w", err)
 		}
+		for _, comment := range comments {
+			if strings.Contains(comment.GetBody(), marker) {
+				_, _, err = gh.Issues.EditComment(ctx, owner, repo, comment.GetID(), &gogithub.IssueComment{Body: &body})
+				if err != nil {
+					return fmt.Errorf("updating GitHub PR comment: %w", err)
+				}
+				return nil
+			}
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
 	}
 	return PostGitHubPRCommentWithClient(ctx, gh, prURL, body)
 }
@@ -455,22 +462,29 @@ func UpsertGitLabMRNoteWithClient(ctx context.Context, gl *gogitlab.Client, mrUR
 		return err
 	}
 	projectPath := namespace + "/" + project
-	notes, _, err := gl.Notes.ListMergeRequestNotes(projectPath, iid, &gogitlab.ListMergeRequestNotesOptions{
+	opts := &gogitlab.ListMergeRequestNotesOptions{
 		ListOptions: gogitlab.ListOptions{PerPage: 100},
-	}, gogitlab.WithContext(ctx))
-	if err != nil {
-		return fmt.Errorf("listing GitLab MR notes: %w", err)
 	}
-	for _, note := range notes {
-		if strings.Contains(note.Body, marker) {
-			_, _, err = gl.Notes.UpdateMergeRequestNote(projectPath, iid, note.ID, &gogitlab.UpdateMergeRequestNoteOptions{
-				Body: &body,
-			}, gogitlab.WithContext(ctx))
-			if err != nil {
-				return fmt.Errorf("updating GitLab MR note: %w", err)
-			}
-			return nil
+	for {
+		notes, resp, err := gl.Notes.ListMergeRequestNotes(projectPath, iid, opts, gogitlab.WithContext(ctx))
+		if err != nil {
+			return fmt.Errorf("listing GitLab MR notes: %w", err)
 		}
+		for _, note := range notes {
+			if strings.Contains(note.Body, marker) {
+				_, _, err = gl.Notes.UpdateMergeRequestNote(projectPath, iid, note.ID, &gogitlab.UpdateMergeRequestNoteOptions{
+					Body: &body,
+				}, gogitlab.WithContext(ctx))
+				if err != nil {
+					return fmt.Errorf("updating GitLab MR note: %w", err)
+				}
+				return nil
+			}
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
 	}
 	return PostGitLabMRNoteWithClient(ctx, gl, mrURL, body)
 }

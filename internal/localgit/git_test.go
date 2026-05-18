@@ -139,3 +139,19 @@ func TestQuickCommitDryRunDiffIncludesUntrackedFiles(t *testing.T) {
 		t.Fatalf("tracked-only dry-run diff included untracked file:\n%s", trackedOnlyDiff)
 	}
 }
+
+func TestDiffRejectsOptionLikeRevision(t *testing.T) {
+	tests := []string{
+		"--stat",
+		"HEAD..--stat",
+		"main...--stat",
+	}
+	for _, commit := range tests {
+		t.Run(commit, func(t *testing.T) {
+			_, err := Diff(commit, false, nil)
+			if err == nil || !strings.Contains(err.Error(), "must not start with '-'") {
+				t.Fatalf("expected option-like revision error, got %v", err)
+			}
+		})
+	}
+}

@@ -319,7 +319,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			if format != "json" {
 				_, _ = fmt.Fprintln(out, "Done.")
 				if remoteURL, remErr := deps.getRemoteURL(); remErr == nil {
-					if createURL := prCreateURL(remoteURL, branch); createURL != "" {
+					if createURL := prCreateURLWithConfig(remoteURL, branch, cfg); createURL != "" {
 						_, _ = fmt.Fprintf(out, "\nOpen PR/MR: %s\n", createURL)
 					}
 				}
@@ -371,7 +371,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&provider, "provider", "openai", "AI provider to use (openai, anthropic, gemini, ollama)")
+	cmd.Flags().StringVar(&provider, "provider", "", "AI provider to use (openai, anthropic, gemini, ollama, claude-cli, gemini-cli, codex-cli)")
 	cmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this run")
 	cmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Generate and print the commit message without staging, committing, or pushing")

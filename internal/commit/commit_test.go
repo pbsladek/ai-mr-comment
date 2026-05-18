@@ -15,6 +15,14 @@ func TestNormalizeMessagePrefersConventionalLine(t *testing.T) {
 	}
 }
 
+func TestNormalizeMessagePrefersBreakingConventionalLine(t *testing.T) {
+	raw := "Here is the commit:\nfeat(api)!: remove legacy endpoint\nextra note"
+	got := NormalizeMessage(raw)
+	if got != "feat(api)!: remove legacy endpoint" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestApplyTypeScope(t *testing.T) {
 	got := ApplyTypeScope("feat: add endpoint\n\nBody", "fix", "api")
 	want := "fix(api): add endpoint\n\nBody"
@@ -26,6 +34,22 @@ func TestApplyTypeScope(t *testing.T) {
 func TestAppendEmojiPreservesBody(t *testing.T) {
 	got := AppendEmoji("fix: repair bug\n\nBody")
 	want := "fix: repair bug 🐛\n\nBody"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestAppendEmojiDoesNotTreatDescriptionExclamationAsBreaking(t *testing.T) {
+	got := AppendEmoji("fix: handle timeout!")
+	want := "fix: handle timeout! 🐛"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestAppendEmojiUsesBreakingEmojiForConventionalBreakingSubject(t *testing.T) {
+	got := AppendEmoji("feat(api)!: remove v1")
+	want := "feat(api)!: remove v1 💥"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}

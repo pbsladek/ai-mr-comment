@@ -318,25 +318,43 @@ func newRootCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, strin
 				}
 			}
 
-			// Stream tokens directly to the terminal when output is a real TTY,
-			// text format is selected, smart-chunk is off, and no output file is set.
-			// All other paths use the buffered chatFn to get the full response first.
+			// Stream tokens directly for interactive text output, or as JSONL token
+			// events when requested. All other paths use the buffered chatFn.
 			isTTY := fileIsTerminal(os.Stdout)
-			shouldStream := isTTY && format == "text" && streamMode == "" && !smartChunk && outputPath == ""
+			jsonlStream := streamMode == "jsonl" && !titleOnly && !generateCommitMsg && !smartChunk
+			shouldStream := (isTTY && format == "text" && streamMode == "" && !smartChunk && outputPath == "") || jsonlStream
 			debugLog(cfg, "streaming: tty=%v format=%s smart-chunk=%v output-file=%q → enabled=%v",
 				isTTY, format, smartChunk, outputPath, shouldStream)
+			generationOut := out
+			if streamMode == "jsonl" {
+				if err := encodeJSONLine(out, "start", map[string]any{
+					"provider":    string(cfg.Provider),
+					"model":       getModelName(cfg),
+					"diff_source": diffSource,
+					"truncated":   diffTruncated,
+				}); err != nil {
+					return err
+				}
+				if jsonlStream {
+					generationOut = jsonlTokenWriter{out: out}
+				}
+			}
 			generation, err := generateRootProviderOutput(rootGenerationRequest{
 				Context:      cmd.Context(),
 				Config:       cfg,
 				Options:      rootOpts,
 				Chat:         chatFn,
+				Stream:       deps.streamToWriter,
 				SystemPrompt: systemPrompt,
 				DiffContent:  diffContent,
 				SmartChunk:   smartChunk,
 				ShouldStream: shouldStream,
-				Out:          out,
+				Out:          generationOut,
 			})
 			if err != nil {
+				if streamMode == "jsonl" {
+					_ = encodeJSONLine(out, "error", map[string]any{"message": err.Error()})
+				}
 				return err
 			}
 			comment := generation.Comment
@@ -385,15 +403,9 @@ func newRootCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, strin
 					_, _ = fmt.Fprintln(out, verdict)
 				}
 			} else if streamMode == "jsonl" {
-				if err := encodeJSONLine(out, "start", map[string]any{
-					"provider":    string(cfg.Provider),
-					"model":       getModelName(cfg),
-					"diff_source": diffSource,
-					"truncated":   diffTruncated,
-				}); err != nil {
-					return err
-				}
-				if titleOnly {
+				if streamedOK {
+					// Token events were emitted by jsonlTokenWriter during generation.
+				} else if titleOnly {
 					if err := encodeJSONLine(out, "token", map[string]any{"text": title}); err != nil {
 						return err
 					}
@@ -486,6 +498,8 @@ func newRootCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, strin
 					fileContent = []byte(title + "\n")
 				} else if generateCommitMsg {
 					fileContent = []byte(commitMessage + "\n")
+				} else if title != "" {
+					fileContent = []byte(title + "\n\n" + comment + "\n")
 				} else {
 					fileContent = []byte(comment)
 				}
@@ -538,8 +552,8 @@ func newRootCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, strin
 	rootCmd.Flags().StringVar(&diffFilePath, "file", "", "Path to diff file")
 	rootCmd.Flags().StringVar(&prURL, "pr", "", "GitHub PR or GitLab MR URL (e.g. https://github.com/owner/repo/pull/123 or https://gitlab.com/group/project/-/merge_requests/42)")
 	rootCmd.Flags().StringVar(&outputPath, "output", "", "Output file path")
-	rootCmd.Flags().StringVar(&provider, "provider", "openai", "API provider (openai, anthropic, gemini, ollama)")
-	rootCmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this run (e.g. gpt-5.5, claude-opus-4-6, gemini-2.5-flash)")
+	rootCmd.Flags().StringVar(&provider, "provider", "", "API provider (openai, anthropic, gemini, ollama, claude-cli, gemini-cli, codex-cli)")
+	rootCmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this run (e.g. gpt-5.5, claude-opus-4-7, gemini-3.1-pro-preview)")
 	rootCmd.Flags().StringVarP(&templateName, "template", "t", "default", "Prompt template to use (e.g., default, conventional, technical)")
 	rootCmd.Flags().BoolVar(&debug, "debug", false, "Show token/cost estimate and exit without calling the API")
 	rootCmd.Flags().BoolVar(&verbose, "verbose", false, "Enable verbose debug logging to stderr (provider, model, timing, errors)")
@@ -653,4 +667,18 @@ func newAgentAliasCmdWithDeps(name, short string, prefix []string, chatFn func(c
 			return root.Execute()
 		},
 	}
+}
+
+type jsonlTokenWriter struct {
+	out io.Writer
+}
+
+func (w jsonlTokenWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if err := encodeJSONLine(w.out, "token", map[string]any{"text": string(p)}); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }

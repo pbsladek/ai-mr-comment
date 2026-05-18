@@ -9,16 +9,15 @@ import (
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	anthropicopt "github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/google/generative-ai-go/genai"
 	openai "github.com/openai/openai-go"
 	openaiopt "github.com/openai/openai-go/option"
 	"github.com/pbsladek/ai-mr-comment/internal/providers"
-	"google.golang.org/api/option"
+	"google.golang.org/genai"
 )
 
 // geminiClientOptions allows tests to inject a custom endpoint and HTTP client
 // for the Gemini SDK without modifying call sites.
-var geminiClientOptions []option.ClientOption
+var geminiClientOptions []providers.GeminiClientOption
 
 var geminiOptionsActive bool
 

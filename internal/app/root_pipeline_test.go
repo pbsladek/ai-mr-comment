@@ -101,6 +101,67 @@ func TestGenerateRootProviderOutputCommitMessageUsesCommitTemplate(t *testing.T)
 	}
 }
 
+func TestGenerateRootProviderOutputDoesNotFallbackAfterPartialStream(t *testing.T) {
+	cfg := &Config{Provider: OpenAI, OpenAIModel: "gpt-5.5"}
+	var out strings.Builder
+	chatCalled := false
+	streamErr := errors.New("stream failed")
+
+	_, err := generateRootProviderOutput(rootGenerationRequest{
+		Context: context.Background(),
+		Config:  cfg,
+		Options: RootOptions{Format: "text", EffectiveTemplate: "default"},
+		Chat: func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+			chatCalled = true
+			return "fallback", nil
+		},
+		Stream: func(_ context.Context, _ *Config, _ ApiProvider, _, _ string, w io.Writer) (string, error) {
+			_, _ = io.WriteString(w, "partial")
+			return "", streamErr
+		},
+		SystemPrompt: defaultPromptTemplate,
+		DiffContent:  "diff",
+		ShouldStream: true,
+		Out:          &out,
+	})
+	if !errors.Is(err, streamErr) {
+		t.Fatalf("expected stream error, got %v", err)
+	}
+	if chatCalled {
+		t.Fatal("fallback chat should not run after partial stream output")
+	}
+	if out.String() != "partial" {
+		t.Fatalf("expected partial output only, got %q", out.String())
+	}
+}
+
+func TestGenerateRootProviderOutputFallbackBeforeStreamOutput(t *testing.T) {
+	cfg := &Config{Provider: OpenAI, OpenAIModel: "gpt-5.5"}
+	var out strings.Builder
+
+	got, err := generateRootProviderOutput(rootGenerationRequest{
+		Context: context.Background(),
+		Config:  cfg,
+		Options: RootOptions{Format: "text", EffectiveTemplate: "default"},
+		Chat: func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+			return "fallback", nil
+		},
+		Stream: func(_ context.Context, _ *Config, _ ApiProvider, _, _ string, _ io.Writer) (string, error) {
+			return "", errors.New("stream failed before output")
+		},
+		SystemPrompt: defaultPromptTemplate,
+		DiffContent:  "diff",
+		ShouldStream: true,
+		Out:          &out,
+	})
+	if err != nil {
+		t.Fatalf("expected fallback success, got %v", err)
+	}
+	if got.Comment != "fallback" || out.String() != "" {
+		t.Fatalf("generation = %+v, out=%q", got, out.String())
+	}
+}
+
 func TestNormalizeProviderConnectionError(t *testing.T) {
 	cfg := &Config{Provider: Ollama, OllamaEndpoint: "http://localhost:11434/api/generate"}
 	err := normalizeProviderConnectionError(cfg, errors.New("dial tcp: connection refused"))
