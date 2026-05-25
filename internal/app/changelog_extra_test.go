@@ -131,7 +131,11 @@ func TestResolveDiffWithDepsGitErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer devNull.Close()
+	defer func() {
+		if err := devNull.Close(); err != nil {
+			t.Errorf("closing dev null: %v", err)
+		}
+	}()
 	cmd.SetIn(devNull)
 
 	deps := defaultCommandDeps()
