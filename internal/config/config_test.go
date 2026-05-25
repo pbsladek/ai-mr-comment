@@ -22,14 +22,32 @@ func TestLoadWithDefaultsWhenMissingFile(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if cfg.Provider != Anthropic {
-		t.Errorf("expected provider %q, got %q", Anthropic, cfg.Provider)
+	if cfg.Provider != DefaultProvider {
+		t.Errorf("expected provider %q, got %q", DefaultProvider, cfg.Provider)
 	}
-	if cfg.OpenAIModel != "gpt-5.5" {
-		t.Errorf("expected OpenAI default model gpt-5.5, got %q", cfg.OpenAIModel)
+	if cfg.OpenAIModel != DefaultOpenAIModel {
+		t.Errorf("expected OpenAI default model %q, got %q", DefaultOpenAIModel, cfg.OpenAIModel)
 	}
-	if cfg.AnthropicModel != "claude-sonnet-4-6" {
-		t.Errorf("expected Anthropic default model claude-sonnet-4-6, got %q", cfg.AnthropicModel)
+	if cfg.AnthropicModel != DefaultAnthropicModel {
+		t.Errorf("expected Anthropic default model %q, got %q", DefaultAnthropicModel, cfg.AnthropicModel)
+	}
+	if cfg.GeminiModel != DefaultGeminiModel {
+		t.Errorf("expected Gemini default model %q, got %q", DefaultGeminiModel, cfg.GeminiModel)
+	}
+	if cfg.OllamaModel != DefaultOllamaModel {
+		t.Errorf("expected Ollama default model %q, got %q", DefaultOllamaModel, cfg.OllamaModel)
+	}
+	if cfg.ClaudeCLIModel != DefaultClaudeCLIModel {
+		t.Errorf("expected Claude CLI default model %q, got %q", DefaultClaudeCLIModel, cfg.ClaudeCLIModel)
+	}
+	if cfg.GeminiCLIModel != DefaultGeminiCLIModel {
+		t.Errorf("expected Gemini CLI default model %q, got %q", DefaultGeminiCLIModel, cfg.GeminiCLIModel)
+	}
+	if cfg.CodexCLIModel != DefaultCodexCLIModel {
+		t.Errorf("expected Codex CLI default model %q, got %q", DefaultCodexCLIModel, cfg.CodexCLIModel)
+	}
+	if cfg.Template != DefaultTemplate {
+		t.Errorf("expected template default %q, got %q", DefaultTemplate, cfg.Template)
 	}
 	if cfg.RequestTimeout != 0 {
 		t.Errorf("expected zero request timeout, got %v", cfg.RequestTimeout)

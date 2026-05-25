@@ -86,6 +86,49 @@ func TestFindOrCreatePublishTargetWithDeps(t *testing.T) {
 	})
 }
 
+func TestPlanPublishActions(t *testing.T) {
+	plan, err := planPublishActions(publishActionRequest{
+		Title:               "  Title  ",
+		Description:         "  docs and tests with security risk  ",
+		NoUpdateTitle:       false,
+		NoUpdateDescription: true,
+		PostSummary:         true,
+		AutoLabels:          true,
+		Labels:              []string{"manual, docs", "manual"},
+		Reviewers:           []string{"alice,bob", "alice"},
+		Summary: diffSummary{Files: []diffFileSummary{
+			{Path: "docs/readme.md"},
+			{Path: "internal/app/app_test.go"},
+			{Path: ".github/workflows/test.yml"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("planPublishActions failed: %v", err)
+	}
+	if plan.Title != "Title" || plan.Description != "docs and tests with security risk" {
+		t.Fatalf("unexpected trimmed title/description: %+v", plan)
+	}
+	if !plan.UpdateTitle || plan.UpdateDescription || !plan.PostSummary {
+		t.Fatalf("unexpected update flags: %+v", plan)
+	}
+	if strings.Join(plan.Labels, ",") != "manual,docs,security,tests" {
+		t.Fatalf("labels = %v", plan.Labels)
+	}
+	if strings.Join(plan.Reviewers, ",") != "alice,bob" {
+		t.Fatalf("reviewers = %v", plan.Reviewers)
+	}
+
+	if hasRequestedPublishActions(true, true, false, false, nil, nil) {
+		t.Fatal("expected no requested actions")
+	}
+	if !hasRequestedPublishActions(true, true, false, true, nil, nil) {
+		t.Fatal("expected auto-labels to count as an action")
+	}
+	if _, err := planPublishActions(publishActionRequest{NoUpdateTitle: true, NoUpdateDescription: true}); err == nil || !strings.Contains(err.Error(), "no remote actions") {
+		t.Fatalf("expected no-action error, got %v", err)
+	}
+}
+
 func TestPlannedPublishTargetWithDeps(t *testing.T) {
 	t.Run("create url", func(t *testing.T) {
 		deps := defaultCommandDeps()

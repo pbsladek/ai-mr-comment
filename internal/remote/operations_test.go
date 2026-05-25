@@ -665,3 +665,132 @@ func TestGitLabRemoteWrapperOperations(t *testing.T) {
 		t.Fatalf("expected invalid reviewer error, got %v", err)
 	}
 }
+
+func TestGitHubFindOrCreatePRRequestContract(t *testing.T) {
+	var sawList, sawRepo, sawCreate bool
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		path := strings.TrimPrefix(r.URL.Path, "/api/v3")
+		if !strings.Contains(r.Header.Get("Authorization"), "token") {
+			t.Errorf("missing token auth header on %s %s: %q", r.Method, path, r.Header.Get("Authorization"))
+		}
+		switch path {
+		case "/repos/owner/repo/pulls":
+			switch r.Method {
+			case http.MethodGet:
+				sawList = true
+				if r.URL.Query().Get("state") != "open" || r.URL.Query().Get("head") != "owner:feat/branch" {
+					t.Errorf("unexpected list query: %s", r.URL.RawQuery)
+				}
+				_ = json.NewEncoder(w).Encode([]map[string]any{})
+			case http.MethodPost:
+				sawCreate = true
+				var payload struct {
+					Title string `json:"title"`
+					Head  string `json:"head"`
+					Base  string `json:"base"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					t.Errorf("decoding create payload: %v", err)
+				}
+				if payload.Title != "Generated title" || payload.Head != "feat/branch" || payload.Base != "main" {
+					t.Errorf("unexpected create payload: %+v", payload)
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"html_url": "https://github.example/owner/repo/pull/9"})
+			default:
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			}
+		case "/repos/owner/repo":
+			sawRepo = true
+			if r.Method != http.MethodGet {
+				t.Errorf("repo method = %s", r.Method)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"default_branch": "main"})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	gh, err := NewGitHubClient(context.Background(), "token", srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := FindOrCreateGitHubPR(context.Background(), gh, "owner", "repo", "feat/branch", "Generated title")
+	if err != nil {
+		t.Fatalf("FindOrCreateGitHubPR failed: %v", err)
+	}
+	if got != "https://github.example/owner/repo/pull/9" {
+		t.Fatalf("created URL = %q", got)
+	}
+	if !sawList || !sawRepo || !sawCreate {
+		t.Fatalf("missing requests: list=%v repo=%v create=%v", sawList, sawRepo, sawCreate)
+	}
+}
+
+func TestGitLabFindOrCreateMRRequestContract(t *testing.T) {
+	var sawList, sawProject, sawCreate bool
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/group%2Frepo/merge_requests", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Header.Get("PRIVATE-TOKEN") != "token" {
+			t.Errorf("PRIVATE-TOKEN = %q", r.Header.Get("PRIVATE-TOKEN"))
+		}
+		switch r.Method {
+		case http.MethodGet:
+			sawList = true
+			if r.URL.Query().Get("state") != "opened" || r.URL.Query().Get("source_branch") != "feat/branch" {
+				t.Errorf("unexpected MR list query: %s", r.URL.RawQuery)
+			}
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		case http.MethodPost:
+			sawCreate = true
+			var payload struct {
+				Title        string `json:"title"`
+				SourceBranch string `json:"source_branch"`
+				TargetBranch string `json:"target_branch"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Errorf("decoding create MR payload: %v", err)
+			}
+			if payload.Title != "Generated title" || payload.SourceBranch != "feat/branch" || payload.TargetBranch != "main" {
+				t.Errorf("unexpected create MR payload: %+v", payload)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"web_url": "https://gitlab.example/group/repo/-/merge_requests/9"})
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/v4/projects/group%2Frepo", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodGet {
+			t.Errorf("project method = %s", r.Method)
+		}
+		if r.Header.Get("PRIVATE-TOKEN") != "token" {
+			t.Errorf("PRIVATE-TOKEN = %q", r.Header.Get("PRIVATE-TOKEN"))
+		}
+		sawProject = true
+		_ = json.NewEncoder(w).Encode(map[string]any{"default_branch": "main"})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	gl, err := NewGitLabClient("token", srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := FindOrCreateGitLabMR(context.Background(), gl, "group/repo", "feat/branch", "Generated title")
+	if err != nil {
+		t.Fatalf("FindOrCreateGitLabMR failed: %v", err)
+	}
+	if got != "https://gitlab.example/group/repo/-/merge_requests/9" {
+		t.Fatalf("created URL = %q", got)
+	}
+	if !sawList || !sawProject || !sawCreate {
+		t.Fatalf("missing requests: list=%v project=%v create=%v", sawList, sawProject, sawCreate)
+	}
+}

@@ -245,3 +245,40 @@ func TestNormalizeProviderConnectionError(t *testing.T) {
 		t.Fatalf("expected Ollama connection hint, got %v", err)
 	}
 }
+
+func TestRootStylePromptCoversAllStyles(t *testing.T) {
+	for _, name := range []string{"chaos", "haiku", "roast", "intern", "shakespeare", "manager", "yoda", "excuse"} {
+		t.Run(name, func(t *testing.T) {
+			got, ok := rootStylePrompt(name)
+			if !ok || got == "" {
+				t.Fatalf("rootStylePrompt(%q) = %q, %v", name, got, ok)
+			}
+		})
+	}
+	if got, ok := rootStylePrompt("plain"); ok || got != "" {
+		t.Fatalf("unknown style = %q, %v", got, ok)
+	}
+}
+
+func TestBuildRootDryRunPlan(t *testing.T) {
+	cfg := &Config{Provider: OpenAI, OpenAIModel: "gpt-5.5", Template: "technical"}
+	plan := buildRootDryRunPlan(cfg, RootOptions{
+		PRURL:             "https://github.com/owner/repo/pull/1",
+		OutputPath:        "out.md",
+		Clipboard:         "all",
+		Post:              true,
+		UpdateTitle:       true,
+		UpdateDescription: true,
+	}, "ci", "remote", diffSummary{FileCount: 2, Additions: 3, Deletions: 1})
+	if !plan.DryRun || !plan.WouldCallProvider || !plan.WouldWriteOutput || !plan.WouldCopyClipboard || !plan.WouldPostComment || !plan.WouldUpdateTitle || !plan.WouldUpdateBody {
+		t.Fatalf("unexpected dry-run plan: %+v", plan)
+	}
+	if plan.MissingPostTarget || plan.MissingUpdateTarget || plan.PostTarget == "" {
+		t.Fatalf("unexpected target fields: %+v", plan)
+	}
+
+	missing := buildRootDryRunPlan(cfg, RootOptions{Post: true, UpdateDescription: true}, "", "local", diffSummary{})
+	if !missing.MissingPostTarget || !missing.MissingUpdateTarget || missing.WouldCallProvider {
+		t.Fatalf("missing-target plan = %+v", missing)
+	}
+}

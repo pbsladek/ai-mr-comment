@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	internalconfig "github.com/pbsladek/ai-mr-comment/internal/config"
 )
 
 var presetNames = []string{"ci", "local-fast", "security", "release-notes"}
@@ -30,7 +32,7 @@ var providerRegistry = []providerMetadata{
 	{
 		Name:         "openai",
 		Provider:     OpenAI,
-		DefaultModel: "gpt-5.5",
+		DefaultModel: internalconfig.DefaultOpenAIModel,
 		RequiresKey:  true,
 		Streaming:    true,
 		ModelName:    func(cfg *Config) string { return cfg.OpenAIModel },
@@ -40,7 +42,7 @@ var providerRegistry = []providerMetadata{
 	{
 		Name:         "anthropic",
 		Provider:     Anthropic,
-		DefaultModel: "claude-sonnet-4-6",
+		DefaultModel: internalconfig.DefaultAnthropicModel,
 		RequiresKey:  true,
 		Streaming:    true,
 		ModelName:    func(cfg *Config) string { return cfg.AnthropicModel },
@@ -50,7 +52,7 @@ var providerRegistry = []providerMetadata{
 	{
 		Name:         "gemini",
 		Provider:     Gemini,
-		DefaultModel: "gemini-2.5-pro",
+		DefaultModel: internalconfig.DefaultGeminiModel,
 		RequiresKey:  true,
 		Streaming:    true,
 		ModelName:    func(cfg *Config) string { return cfg.GeminiModel },
@@ -60,7 +62,7 @@ var providerRegistry = []providerMetadata{
 	{
 		Name:         "ollama",
 		Provider:     Ollama,
-		DefaultModel: "llama3.2",
+		DefaultModel: internalconfig.DefaultOllamaModel,
 		Streaming:    true,
 		ModelName:    func(cfg *Config) string { return cfg.OllamaModel },
 		Call:         callOllama,
@@ -69,7 +71,7 @@ var providerRegistry = []providerMetadata{
 	{
 		Name:         "claude-cli",
 		Provider:     ClaudeCLI,
-		DefaultModel: "claude-sonnet-4-6",
+		DefaultModel: internalconfig.DefaultClaudeCLIModel,
 		Streaming:    true,
 		ModelName:    func(cfg *Config) string { return cfg.ClaudeCLIModel },
 		Call:         callClaudeCLI,
@@ -78,7 +80,7 @@ var providerRegistry = []providerMetadata{
 	{
 		Name:         "gemini-cli",
 		Provider:     GeminiCLI,
-		DefaultModel: "gemini-2.5-flash",
+		DefaultModel: internalconfig.DefaultGeminiCLIModel,
 		Streaming:    true,
 		ModelName:    func(cfg *Config) string { return cfg.GeminiCLIModel },
 		Call:         callGeminiCLI,
@@ -87,7 +89,7 @@ var providerRegistry = []providerMetadata{
 	{
 		Name:         "codex-cli",
 		Provider:     CodexCLI,
-		DefaultModel: "gpt-5.5",
+		DefaultModel: internalconfig.DefaultCodexCLIModel,
 		Streaming:    true,
 		ModelName:    func(cfg *Config) string { return cfg.CodexCLIModel },
 		Call:         callCodexCLI,

@@ -26,6 +26,18 @@ const (
 	CodexCLI  Provider = "codex-cli"
 )
 
+const (
+	DefaultProvider       = Anthropic
+	DefaultTemplate       = "default"
+	DefaultOpenAIModel    = "gpt-5.5"
+	DefaultAnthropicModel = "claude-sonnet-4-6"
+	DefaultOllamaModel    = "llama3.2"
+	DefaultGeminiModel    = "gemini-2.5-flash"
+	DefaultClaudeCLIModel = "claude-sonnet-4-6"
+	DefaultGeminiCLIModel = "gemini-2.5-flash"
+	DefaultCodexCLIModel  = ""
+)
+
 // Config holds all runtime settings, populated from the TOML config file,
 // environment variables, and CLI flags.
 type Config struct {
@@ -173,21 +185,21 @@ func bareEnvKeys(key string) []string {
 // named profile (if any), and unmarshals the result into a Config.
 // It is split from LoadForProfile to allow tests to inject a pre-configured Viper instance.
 func LoadWith(v *viper.Viper, profile string) (*Config, error) {
-	v.SetDefault("provider", Anthropic)
-	v.SetDefault("openai_model", "gpt-5.5")
+	v.SetDefault("provider", DefaultProvider)
+	v.SetDefault("openai_model", DefaultOpenAIModel)
 	v.SetDefault("openai_endpoint", "https://api.openai.com/v1/")
-	v.SetDefault("anthropic_model", "claude-sonnet-4-6")
+	v.SetDefault("anthropic_model", DefaultAnthropicModel)
 	v.SetDefault("anthropic_endpoint", "https://api.anthropic.com/")
-	v.SetDefault("ollama_model", "llama3.2")
+	v.SetDefault("ollama_model", DefaultOllamaModel)
 	v.SetDefault("ollama_endpoint", "http://localhost:11434/api/generate")
-	v.SetDefault("gemini_model", "gemini-2.5-flash")
-	v.SetDefault("claude_cli_model", "claude-sonnet-4-6")
+	v.SetDefault("gemini_model", DefaultGeminiModel)
+	v.SetDefault("claude_cli_model", DefaultClaudeCLIModel)
 	v.SetDefault("claude_cli_path", "")
-	v.SetDefault("gemini_cli_model", "gemini-2.5-flash")
+	v.SetDefault("gemini_cli_model", DefaultGeminiCLIModel)
 	v.SetDefault("gemini_cli_path", "")
-	v.SetDefault("codex_cli_model", "")
+	v.SetDefault("codex_cli_model", DefaultCodexCLIModel)
 	v.SetDefault("codex_cli_path", "")
-	v.SetDefault("template", "default")
+	v.SetDefault("template", DefaultTemplate)
 	v.SetDefault("request_timeout", "0s")
 
 	if err := v.ReadInConfig(); err != nil {
