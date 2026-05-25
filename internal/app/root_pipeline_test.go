@@ -8,6 +8,12 @@ import (
 	"testing"
 )
 
+type testErrWriter struct {
+	err error
+}
+
+func (w testErrWriter) Write([]byte) (int, error) { return 0, w.err }
+
 func TestResolveRootPromptPipeline(t *testing.T) {
 	result, err := resolveRootPrompt(rootPromptRequest{
 		Template:     "default",
@@ -159,6 +165,76 @@ func TestGenerateRootProviderOutputFallbackBeforeStreamOutput(t *testing.T) {
 	}
 	if got.Comment != "fallback" || out.String() != "" {
 		t.Fatalf("generation = %+v, out=%q", got, out.String())
+	}
+}
+
+func TestGenerateRootProviderOutputTitleOnlyAndSmartChunk(t *testing.T) {
+	cfg := &Config{Provider: OpenAI, OpenAIModel: "gpt-5.5"}
+	title, err := generateRootProviderOutput(rootGenerationRequest{
+		Context: context.Background(),
+		Config:  cfg,
+		Options: RootOptions{TitleOnly: true},
+		Chat: func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+			if prompt != titlePrompt {
+				t.Fatalf("unexpected title prompt %q", prompt)
+			}
+			return "  Generated title  ", nil
+		},
+		SystemPrompt: defaultPromptTemplate,
+		DiffContent:  "diff",
+		Out:          io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("title-only generation failed: %v", err)
+	}
+	if title.Title != "Generated title" {
+		t.Fatalf("title = %q", title.Title)
+	}
+
+	var prompts []string
+	got, err := generateRootProviderOutput(rootGenerationRequest{
+		Context: context.Background(),
+		Config:  cfg,
+		Options: RootOptions{},
+		Chat: func(_ context.Context, _ *Config, _ ApiProvider, prompt, diff string) (string, error) {
+			prompts = append(prompts, prompt)
+			if strings.Contains(prompt, "Summarize the changes") {
+				return "summary for " + firstLine(diff), nil
+			}
+			if strings.Contains(diff, "---") {
+				return "synthesized comment", nil
+			}
+			return "single comment", nil
+		},
+		SystemPrompt: defaultPromptTemplate,
+		DiffContent: "diff --git a/a.go b/a.go\n+one\n" +
+			"diff --git a/b.go b/b.go\n+two\n",
+		SmartChunk: true,
+		Out:        io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("smart-chunk generation failed: %v", err)
+	}
+	if got.Comment != "synthesized comment" {
+		t.Fatalf("smart-chunk comment = %q", got.Comment)
+	}
+	if len(prompts) != 3 {
+		t.Fatalf("expected two chunk prompts and synthesis, got %d: %v", len(prompts), prompts)
+	}
+}
+
+func TestCountingWriterNilAndWriterError(t *testing.T) {
+	if (&countingWriter{}).Written() != 0 {
+		t.Fatal("empty countingWriter should report zero")
+	}
+	var nilWriter *countingWriter
+	if nilWriter.Written() != 0 {
+		t.Fatal("nil countingWriter should report zero")
+	}
+	cw := &countingWriter{w: testErrWriter{err: errors.New("closed")}}
+	n, err := cw.Write([]byte("hello"))
+	if err == nil || n != 0 || cw.Written() != 0 {
+		t.Fatalf("Write = %d, %v, written=%d", n, err, cw.Written())
 	}
 }
 

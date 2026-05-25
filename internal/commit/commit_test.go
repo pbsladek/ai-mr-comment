@@ -205,3 +205,49 @@ func TestValidateScopeEmpty(t *testing.T) {
 		t.Fatalf("expected empty scope error, got %v", err)
 	}
 }
+
+func TestCommitFormattingEdgeCases(t *testing.T) {
+	if got := NormalizeMessage("```\n- message: fix: labeled value\n```"); got != "fix: labeled value" {
+		t.Fatalf("NormalizeMessage = %q", got)
+	}
+	if got := NormalizeMessage("* chore: from bullet"); got != "chore: from bullet" {
+		t.Fatalf("NormalizeMessage bullet = %q", got)
+	}
+	if got := NormalizeMessage(""); got != "" {
+		t.Fatalf("NormalizeMessage empty = %q", got)
+	}
+
+	for _, line := range []string{"docs: update", "feat!: break", "fix(api)!: break"} {
+		if !IsConventionalLine(line) {
+			t.Fatalf("expected conventional line %q", line)
+		}
+	}
+	if IsConventionalLine("feature: no") {
+		t.Fatal("unexpected conventional line")
+	}
+
+	if got := ApplyTypeScope("plain subject", "", "cli"); got != "feat(cli): plain subject" {
+		t.Fatalf("ApplyTypeScope non-conventional = %q", got)
+	}
+	if got := FormatConventionalSubject("feat", "", " add thing ", false); got != "feat: add thing" {
+		t.Fatalf("FormatConventionalSubject = %q", got)
+	}
+	if got := AppendEmoji("docs: update docs"); !strings.Contains(got, "📝") {
+		t.Fatalf("AppendEmoji docs = %q", got)
+	}
+	if got := AppendEmoji("unknown: change"); !strings.Contains(got, "🚀") {
+		t.Fatalf("AppendEmoji default = %q", got)
+	}
+	if got := EnforceBreakingSubject("plain subject"); got != "feat!: plain subject" {
+		t.Fatalf("EnforceBreakingSubject = %q", got)
+	}
+	if got := EnforceBreaking("plain subject"); got != "feat!: plain subject" {
+		t.Fatalf("EnforceBreaking = %q", got)
+	}
+	if got := NormalizeBody("feat: only subject"); got != "feat: only subject" {
+		t.Fatalf("NormalizeBody subject = %q", got)
+	}
+	if got := AppendSignedOffBy("", "A User <a@example.com>"); got != "Signed-off-by: A User <a@example.com>" {
+		t.Fatalf("AppendSignedOffBy empty = %q", got)
+	}
+}

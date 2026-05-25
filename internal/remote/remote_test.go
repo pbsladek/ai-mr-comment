@@ -87,6 +87,9 @@ func TestResolveGitHubBaseURL(t *testing.T) {
 		{"enterprise requires config", "https://github.myco.com/o/r/pull/1", "", "", true},
 		{"enterprise configured", "https://github.myco.com/o/r/pull/1", "https://github.myco.com/api/v3/", "https://github.myco.com", false},
 		{"mismatch", "https://github.myco.com/o/r/pull/1", "https://github.com", "", true},
+		{"bad configured", "https://github.myco.com/o/r/pull/1", "://bad", "", true},
+		{"bad scheme configured", "https://github.myco.com/o/r/pull/1", "ssh://github.myco.com", "", true},
+		{"bad pr url", "://bad", "", "", true},
 	}
 
 	for _, tc := range tests {
@@ -115,6 +118,9 @@ func TestResolveGitLabBaseURL(t *testing.T) {
 		{"self hosted requires config", "https://gitlab.myco.com/g/p/-/merge_requests/1", "", "", true},
 		{"self hosted configured", "https://gitlab.myco.com/g/p/-/merge_requests/1", "https://gitlab.myco.com/api/v4/", "https://gitlab.myco.com", false},
 		{"mismatch", "https://gitlab.myco.com/g/p/-/merge_requests/1", "https://gitlab.com", "", true},
+		{"bad configured", "https://gitlab.myco.com/g/p/-/merge_requests/1", "://bad", "", true},
+		{"bad scheme configured", "https://gitlab.myco.com/g/p/-/merge_requests/1", "ssh://gitlab.myco.com", "", true},
+		{"bad mr url", "://bad", "", "", true},
 	}
 
 	for _, tc := range tests {
@@ -144,6 +150,8 @@ func TestCreateURL(t *testing.T) {
 		{"spoofed github substring", "https://evilgithub.example/owner/repo.git", "main", ""},
 		{"spoofed gitlab substring", "https://notgitlab.example/group/project.git", "main", ""},
 		{"unknown", "https://bitbucket.org/owner/repo.git", "main", ""},
+		{"invalid", "://bad", "main", ""},
+		{"empty path", "https://github.com", "main", ""},
 	}
 
 	for _, tc := range tests {

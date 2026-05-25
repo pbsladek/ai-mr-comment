@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -153,5 +154,128 @@ func TestDiffRejectsOptionLikeRevision(t *testing.T) {
 				t.Fatalf("expected option-like revision error, got %v", err)
 			}
 		})
+	}
+}
+
+func TestLocalGitDiffExplicitRevisionRangeAndExclude(t *testing.T) {
+	dir := withGitRepo(t)
+	chdir(t, dir)
+
+	writeFile(t, dir, "keep.txt", "one\n")
+	writeFile(t, dir, "skip.txt", "one\n")
+	if err := Add(); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+	if err := CommitMessage("feat: initial"); err != nil {
+		t.Fatalf("CommitMessage failed: %v", err)
+	}
+	base := runGit(t, dir, "rev-parse", "HEAD")
+
+	writeFile(t, dir, "keep.txt", "two\n")
+	writeFile(t, dir, "skip.txt", "two\n")
+	if err := Add(); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+	if err := CommitMessage("feat: update"); err != nil {
+		t.Fatalf("CommitMessage failed: %v", err)
+	}
+	head := runGit(t, dir, "rev-parse", "HEAD")
+
+	show, err := Diff(head, false, nil)
+	if err != nil || !strings.Contains(show, "keep.txt") || !strings.Contains(show, "skip.txt") {
+		t.Fatalf("Diff(head) = %q, %v", show, err)
+	}
+	ranged, err := Diff(base+".."+head, false, []string{"skip.txt"})
+	if err != nil {
+		t.Fatalf("Diff(range) failed: %v", err)
+	}
+	if !strings.Contains(ranged, "keep.txt") || strings.Contains(ranged, "skip.txt") {
+		t.Fatalf("expected excluded path to be absent:\n%s", ranged)
+	}
+}
+
+func TestCurrentBranchDetachedHead(t *testing.T) {
+	dir := withGitRepo(t)
+	chdir(t, dir)
+
+	writeFile(t, dir, "file.txt", "one\n")
+	if err := Add(); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+	if err := CommitMessage("feat: initial"); err != nil {
+		t.Fatalf("CommitMessage failed: %v", err)
+	}
+	runGit(t, dir, "checkout", "--detach", "HEAD")
+
+	branch, err := CurrentBranch()
+	if err != nil {
+		t.Fatalf("CurrentBranch failed: %v", err)
+	}
+	if branch != "" {
+		t.Fatalf("expected detached HEAD branch to be empty, got %q", branch)
+	}
+}
+
+func TestFormatUntrackedFileDiffVariants(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+
+	if err := os.Mkdir("dir", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := formatUntrackedFileDiff("dir"); err != nil || got != "" {
+		t.Fatalf("directory diff = %q, %v", got, err)
+	}
+
+	writeFile(t, dir, "empty.txt", "")
+	if got, err := formatUntrackedFileDiff("empty.txt"); err != nil || !strings.Contains(got, "+++ b/empty.txt") {
+		t.Fatalf("empty file diff = %q, %v", got, err)
+	}
+
+	writeFile(t, dir, "no-newline.txt", "one")
+	if got, err := formatUntrackedFileDiff("no-newline.txt"); err != nil || !strings.Contains(got, "\\ No newline at end of file") {
+		t.Fatalf("no-newline diff = %q, %v", got, err)
+	}
+
+	writeFile(t, dir, "binary.bin", "a\x00b")
+	if got, err := formatUntrackedFileDiff("binary.bin"); err != nil || !strings.Contains(got, "Binary files /dev/null") {
+		t.Fatalf("binary diff = %q, %v", got, err)
+	}
+
+	writeFile(t, dir, "script.sh", "#!/bin/sh\n")
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(filepath.Join(dir, "script.sh"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := formatUntrackedFileDiff("script.sh"); err != nil || !strings.Contains(got, "new file mode 100755") {
+		t.Fatalf("executable diff = %q, %v", got, err)
+	}
+
+	if runtime.GOOS != "windows" {
+		if err := os.Symlink("empty.txt", filepath.Join(dir, "link.txt")); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := formatUntrackedFileDiff("link.txt"); err != nil || !strings.Contains(got, "new file mode 120000") || !strings.Contains(got, "+empty.txt") {
+			t.Fatalf("symlink diff = %q, %v", got, err)
+		}
+	}
+}
+
+func TestFormatDiffPathQuotesSpecialCharacters(t *testing.T) {
+	got := formatDiffPath("a/", "space name.txt")
+	if !strings.HasPrefix(got, `"a/space name.txt"`) {
+		t.Fatalf("expected quoted diff path, got %q", got)
+	}
+}
+
+func TestPushFailureIncludesGitOutput(t *testing.T) {
+	dir := withGitRepo(t)
+	chdir(t, dir)
+	runGit(t, dir, "remote", "add", "origin", filepath.Join(dir, "missing.git"))
+
+	err := Push("main")
+	if err == nil || !strings.Contains(err.Error(), "git push") {
+		t.Fatalf("expected push failure, got %v", err)
 	}
 }

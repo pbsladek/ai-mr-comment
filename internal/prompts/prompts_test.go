@@ -92,3 +92,40 @@ func TestFindCustomTemplate_NotFound(t *testing.T) {
 		t.Fatalf("expected not-found error, got %v", err)
 	}
 }
+
+func TestNewTemplateBuiltinsAndFallback(t *testing.T) {
+	if got, err := NewTemplate("default"); err != nil || got != DefaultTemplate {
+		t.Fatalf("default template = %q, %v", got, err)
+	}
+	for name, want := range BuiltinTemplates {
+		got, err := NewTemplate(name)
+		if err != nil {
+			t.Fatalf("NewTemplate(%q) failed: %v", name, err)
+		}
+		if got != want {
+			t.Fatalf("NewTemplate(%q) mismatch", name)
+		}
+	}
+
+	dir := t.TempDir()
+	if err := os.Mkdir(dir+"/templates", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir+"/templates/custom.tmpl", []byte("custom body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	origWD, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(origWD) }()
+
+	got, err := NewTemplate("custom")
+	if err != nil || got != "custom body" {
+		t.Fatalf("custom template = %q, %v", got, err)
+	}
+	got, err = NewTemplate("missing")
+	if err == nil || got != DefaultTemplate {
+		t.Fatalf("missing template should return default and error, got %q, %v", got, err)
+	}
+}
