@@ -2,9 +2,10 @@
 
 FROM dhi.io/golang:1.26-debian13-dev@sha256:086c893153f92793f3a1541793cd4a8e8b23bfd4ccaf70c8f4261f496080fb0e AS builder
 
-RUN apt-get update && \
-    apt-get upgrade -y --no-install-recommends && \
-    apt-get install -y --no-install-recommends git ca-certificates && \
+RUN export DEBIAN_FRONTEND=noninteractive && \
+    apt-get update && \
+    apt-get -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" upgrade -y --no-install-recommends && \
+    apt-get -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" install -y --no-install-recommends git ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -41,9 +42,10 @@ LABEL org.opencontainers.image.title="ai-mr-comment" \
       org.opencontainers.image.created="${CREATED}" \
       org.opencontainers.image.base.name="dhi.io/debian-base:trixie-debian13-dev"
 
-RUN apt-get update && \
-    apt-get upgrade -y --no-install-recommends && \
-    apt-get install -y --no-install-recommends git ca-certificates && \
+RUN export DEBIAN_FRONTEND=noninteractive && \
+    apt-get update && \
+    apt-get -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" upgrade -y --no-install-recommends && \
+    apt-get -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" install -y --no-install-recommends git ca-certificates && \
     rm -rf /var/lib/apt/lists/* && \
     sed -i '/^nonroot:/d' /etc/passwd && \
     sed -i '/^nonroot:/d' /etc/group && \
