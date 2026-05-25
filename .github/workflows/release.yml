@@ -24,7 +24,7 @@ jobs:
       tag_commit: ${{ steps.resolve_tag.outputs.tag_commit }}
       tag_commit_short: ${{ steps.resolve_tag.outputs.tag_commit_short }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
           ref: refs/heads/main
@@ -46,7 +46,7 @@ jobs:
       source_url: ${{ steps.release_meta.outputs.source_url }}
       source_sha256: ${{ steps.release_meta.outputs.source_sha256 }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
           ref: ${{ needs.validate.outputs.tag_commit }}
@@ -60,10 +60,10 @@ jobs:
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Install syft
-        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@1a80836c5c9d9e5755a25cb59ec6f45a3b5f41a8 # v7.2.1
+        uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7.2.2
         with:
           distribution: goreleaser
           version: v2.15.4
@@ -104,7 +104,7 @@ jobs:
       docker_tags: ${{ steps.docker_tags.outputs.tags }}
       docker_enabled: ${{ steps.docker_creds.outputs.enabled }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
           ref: ${{ needs.validate.outputs.tag_commit }}
@@ -122,18 +122,18 @@ jobs:
 
       - name: Set up Docker Buildx
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
       - name: Log in to Docker Hub
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to DHI registry
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           registry: dhi.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -149,7 +149,7 @@ jobs:
 
       - name: Build Docker amd64 image for vulnerability scan
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
           file: Dockerfile
@@ -165,7 +165,7 @@ jobs:
 
       - name: Scan Docker amd64 image vulnerabilities
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/scout-action@bacf462e8d090c09660de30a6ccc718035f961e3 # v1.20.4
+        uses: docker/scout-action@cd72f264beff1cd72735de31148b9d3244a0234a # v1.21.0
         with:
           command: cves
           image: local://pwbsladek/ai-mr-comment:scan-amd64
@@ -175,7 +175,7 @@ jobs:
 
       - name: Build Docker arm64 image for vulnerability scan
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
           file: Dockerfile
@@ -191,7 +191,7 @@ jobs:
 
       - name: Scan Docker arm64 image vulnerabilities
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/scout-action@bacf462e8d090c09660de30a6ccc718035f961e3 # v1.20.4
+        uses: docker/scout-action@cd72f264beff1cd72735de31148b9d3244a0234a # v1.21.0
         with:
           command: cves
           image: local://pwbsladek/ai-mr-comment:scan-arm64
@@ -202,7 +202,7 @@ jobs:
       - name: Build and push Docker image
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
         id: docker_build
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
           file: Dockerfile
@@ -248,7 +248,7 @@ jobs:
       docker_fips_tags: ${{ steps.docker_tags_fips.outputs.tags }}
       docker_fips_enabled: ${{ steps.docker_creds.outputs.enabled }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
           ref: ${{ needs.validate.outputs.tag_commit }}
@@ -266,18 +266,18 @@ jobs:
 
       - name: Set up Docker Buildx
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
       - name: Log in to Docker Hub
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to DHI registry
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           registry: dhi.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -293,7 +293,7 @@ jobs:
 
       - name: Build Docker FIPS amd64 image for vulnerability scan
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
           file: Dockerfile
@@ -310,7 +310,7 @@ jobs:
 
       - name: Scan Docker FIPS amd64 image vulnerabilities
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/scout-action@bacf462e8d090c09660de30a6ccc718035f961e3 # v1.20.4
+        uses: docker/scout-action@cd72f264beff1cd72735de31148b9d3244a0234a # v1.21.0
         with:
           command: cves
           image: local://pwbsladek/ai-mr-comment:scan-fips-amd64
@@ -320,7 +320,7 @@ jobs:
 
       - name: Build Docker FIPS arm64 image for vulnerability scan
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
           file: Dockerfile
@@ -337,7 +337,7 @@ jobs:
 
       - name: Scan Docker FIPS arm64 image vulnerabilities
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/scout-action@bacf462e8d090c09660de30a6ccc718035f961e3 # v1.20.4
+        uses: docker/scout-action@cd72f264beff1cd72735de31148b9d3244a0234a # v1.21.0
         with:
           command: cves
           image: local://pwbsladek/ai-mr-comment:scan-fips-arm64
@@ -348,7 +348,7 @@ jobs:
       - name: Build and push Docker FIPS image
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
         id: docker_build_fips
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
           file: Dockerfile
@@ -390,7 +390,7 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
           ref: ${{ needs.validate.outputs.tag_commit }}
@@ -447,7 +447,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 1
           ref: ${{ needs.validate.outputs.tag_commit }}
