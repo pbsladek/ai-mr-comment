@@ -34,18 +34,18 @@ request_timeout = "0s"
 # openai_api_key = ""   # or set OPENAI_API_KEY env var
 openai_model    = "gpt-5.5"
 openai_endpoint = "https://api.openai.com/v1/"
-# Other OpenAI models: gpt-5.4, gpt-5.4-mini, gpt-5.4-nano, gpt-4.1, gpt-4.1-mini
+# Other OpenAI models: gpt-5.5-pro, gpt-5.4, gpt-5.4-pro, gpt-5.4-mini, gpt-5.4-nano, gpt-5.3-codex
 
 # --- Anthropic ---
 # anthropic_api_key = ""   # or set ANTHROPIC_API_KEY env var
 anthropic_model    = "claude-sonnet-4-6"
 anthropic_endpoint = "https://api.anthropic.com/"
-# Other Anthropic models: claude-opus-4-6, claude-haiku-4-5-20251001
+# Other Anthropic models: claude-opus-4-7, claude-opus-4-6, claude-haiku-4-5-20251001
 
 # --- Google Gemini ---
 # gemini_api_key = ""   # or set GEMINI_API_KEY env var
 gemini_model = "gemini-2.5-flash"
-# Other Gemini models: gemini-2.5-pro, gemini-2.5-flash-lite, gemini-3-flash-preview, gemini-3-pro-preview
+# Other Gemini models: gemini-3.1-pro-preview, gemini-3-flash-preview, gemini-3.1-flash-lite, gemini-2.5-pro, gemini-2.5-flash-lite
 
 # --- Ollama (local) ---
 ollama_model    = "llama3.2"
@@ -81,7 +81,8 @@ gemini_cli_model = "gemini-2.5-flash"
 # ---------------------------------------------------------------------------
 # Named Profiles
 # Switch profiles with: ai-mr-comment --profile <name>
-# A profile overrides any top-level setting for that invocation only.
+# A profile overrides top-level file settings for that invocation only.
+# Environment variables still take precedence over profile values.
 # ---------------------------------------------------------------------------
 
 # Fast / cheap — gpt-5.4-nano for quick reviews and commit messages
@@ -96,16 +97,16 @@ provider     = "openai"
 openai_model = "gpt-5.5"
 template     = "technical"
 
-# Anthropic — claude-opus-4-6 with technical template
+# Anthropic — claude-opus-4-7 with technical template
 [profile.anthropic]
 provider        = "anthropic"
-anthropic_model = "claude-opus-4-6"
+anthropic_model = "claude-opus-4-7"
 template        = "technical"
 
-# Gemini — gemini-3-pro-preview with technical template
+# Gemini — gemini-3.1-pro-preview with technical template
 [profile.gemini]
 provider     = "gemini"
-gemini_model = "gemini-3-pro-preview"
+gemini_model = "gemini-3.1-pro-preview"
 template     = "technical"
 
 # Local / offline — Ollama, no API key required

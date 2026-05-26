@@ -118,7 +118,11 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			// (staged + unstaged) so the preview is still meaningful.
 			var diffContent string
 			if dryRun {
-				diffContent, err = deps.getGitDiff("", false, nil)
+				if deps.getQuickDryRunDiff != nil {
+					diffContent, err = deps.getQuickDryRunDiff(trackedOnly)
+				} else {
+					diffContent, err = deps.getGitDiff("", false, nil)
+				}
 			} else {
 				diffContent, err = deps.getGitDiff("", true, nil)
 			}
@@ -200,7 +204,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 				prompt = quickCommitPrompt
 			}
 			if breaking {
-				prompt += "\n\nThis is a BREAKING CHANGE release. You MUST use the 'feat!' type (with an exclamation mark) to signal a breaking change, e.g. \"feat!(scope): description\" or \"feat!: description\"."
+				prompt += "\n\nThis is a BREAKING CHANGE release. You MUST use the 'feat!' type (with an exclamation mark) to signal a breaking change, e.g. \"feat(scope)!: description\" or \"feat!: description\"."
 				diffContent += "\n\nBREAKING CHANGE: this release introduces a breaking change and must use the feat! conventional commit type."
 			}
 			prompt = appendCommitGuidance(prompt, commitType, commitScope, messageTemplate)
@@ -315,7 +319,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			if format != "json" {
 				_, _ = fmt.Fprintln(out, "Done.")
 				if remoteURL, remErr := deps.getRemoteURL(); remErr == nil {
-					if createURL := prCreateURL(remoteURL, branch); createURL != "" {
+					if createURL := prCreateURLWithConfig(remoteURL, branch, cfg); createURL != "" {
 						_, _ = fmt.Fprintf(out, "\nOpen PR/MR: %s\n", createURL)
 					}
 				}
@@ -367,7 +371,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&provider, "provider", "openai", "AI provider to use (openai, anthropic, gemini, ollama)")
+	cmd.Flags().StringVar(&provider, "provider", "", "AI provider to use (openai, anthropic, gemini, ollama, claude-cli, gemini-cli, codex-cli)")
 	cmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this run")
 	cmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Generate and print the commit message without staging, committing, or pushing")

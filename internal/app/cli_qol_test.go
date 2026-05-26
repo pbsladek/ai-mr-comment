@@ -178,6 +178,27 @@ func TestSummarizeDiffCountsPlusPlusAndMinusMinusContent(t *testing.T) {
 	}
 }
 
+func TestSummarizeDiffIgnoresPrefixedDescriptionBullets(t *testing.T) {
+	diff := "PR Title: Example\n" +
+		"PR Description: Notes\n" +
+		"+ markdown addition-looking bullet\n" +
+		"- markdown deletion-looking bullet\n\n" +
+		"diff --git a/app.go b/app.go\n" +
+		"--- a/app.go\n" +
+		"+++ b/app.go\n" +
+		"@@ -1 +1 @@\n" +
+		"-old\n" +
+		"+new\n"
+
+	summary := summarizeDiff(diff, "test", "model", false)
+	if summary.Additions != 1 || summary.Deletions != 1 {
+		t.Fatalf("expected only real diff lines to count, got +%d/-%d", summary.Additions, summary.Deletions)
+	}
+	if summary.Files[0].Additions != 1 || summary.Files[0].Deletions != 1 {
+		t.Fatalf("unexpected file counts: %+v", summary.Files[0])
+	}
+}
+
 func TestSummarizeDiffHandlesGitBinaryPatch(t *testing.T) {
 	diff := "diff --git a/image.png b/image.png\n" +
 		"index 111..222 100644\n" +
@@ -311,6 +332,60 @@ func TestChangelogDryRunSkipsProviderAndFileWrite(t *testing.T) {
 	}
 	if !payload.DryRun {
 		t.Fatalf("expected dry_run=true, got %+v", payload)
+	}
+}
+
+func TestPublishDryRunDoesNotCreateTargetOrFetchMetadata(t *testing.T) {
+	deps := defaultCommandDeps()
+	deps.loadConfig = func(string) (*Config, error) {
+		return &Config{Provider: OpenAI, OpenAIAPIKey: "dummy", OpenAIModel: "gpt-5.5"}, nil
+	}
+	deps.isGitRepo = func() bool { return true }
+	deps.getCurrentBranch = func() (string, error) { return "feat/test", nil }
+	deps.getGitDiff = func(string, bool, []string) (string, error) {
+		return "diff --git a/file.txt b/file.txt\n+changed\n", nil
+	}
+	deps.getRemoteURL = func() (string, error) { return "git@github.com:owner/repo.git", nil }
+
+	created := false
+	deps.findOrCreateTarget = func(context.Context, *Config, remoteInfo, string, string) (string, error) {
+		created = true
+		return "", errors.New("must not create target during dry-run")
+	}
+	fetchedMetadata := false
+	deps.getRemoteMetadata = func(context.Context, *Config, string) (prMetadata, error) {
+		fetchedMetadata = true
+		return prMetadata{}, errors.New("must not fetch metadata during dry-run")
+	}
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		if prompt == titlePrompt {
+			return "Generated title", nil
+		}
+		return "Generated description", nil
+	}
+
+	var buf strings.Builder
+	cmd := newPublishCmdWithDeps(fn, deps)
+	cmd.SetArgs([]string{"--dry-run", "--format=json", "--provider=openai"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("publish dry-run failed: %v", err)
+	}
+	if created || fetchedMetadata {
+		t.Fatalf("dry-run side effects: created=%v fetchedMetadata=%v", created, fetchedMetadata)
+	}
+	var payload struct {
+		DryRun bool   `json:"dry_run"`
+		URL    string `json:"url"`
+	}
+	if err := json.Unmarshal([]byte(buf.String()), &payload); err != nil {
+		t.Fatalf("invalid publish dry-run json: %v\n%s", err, buf.String())
+	}
+	if !payload.DryRun || payload.URL == "" {
+		t.Fatalf("unexpected publish dry-run payload: %+v", payload)
 	}
 }
 

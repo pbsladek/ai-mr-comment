@@ -84,9 +84,12 @@ func TestResolveGitHubBaseURL(t *testing.T) {
 		wantErr    bool
 	}{
 		{"public", "https://github.com/o/r/pull/1", "", "", false},
-		{"enterprise inferred", "https://github.myco.com/o/r/pull/1", "", "https://github.myco.com", false},
+		{"enterprise requires config", "https://github.myco.com/o/r/pull/1", "", "", true},
 		{"enterprise configured", "https://github.myco.com/o/r/pull/1", "https://github.myco.com/api/v3/", "https://github.myco.com", false},
 		{"mismatch", "https://github.myco.com/o/r/pull/1", "https://github.com", "", true},
+		{"bad configured", "https://github.myco.com/o/r/pull/1", "://bad", "", true},
+		{"bad scheme configured", "https://github.myco.com/o/r/pull/1", "ssh://github.myco.com", "", true},
+		{"bad pr url", "://bad", "", "", true},
 	}
 
 	for _, tc := range tests {
@@ -112,9 +115,12 @@ func TestResolveGitLabBaseURL(t *testing.T) {
 		wantErr    bool
 	}{
 		{"public", "https://gitlab.com/g/p/-/merge_requests/1", "", "", false},
-		{"self hosted inferred", "https://gitlab.myco.com/g/p/-/merge_requests/1", "", "https://gitlab.myco.com", false},
+		{"self hosted requires config", "https://gitlab.myco.com/g/p/-/merge_requests/1", "", "", true},
 		{"self hosted configured", "https://gitlab.myco.com/g/p/-/merge_requests/1", "https://gitlab.myco.com/api/v4/", "https://gitlab.myco.com", false},
 		{"mismatch", "https://gitlab.myco.com/g/p/-/merge_requests/1", "https://gitlab.com", "", true},
+		{"bad configured", "https://gitlab.myco.com/g/p/-/merge_requests/1", "://bad", "", true},
+		{"bad scheme configured", "https://gitlab.myco.com/g/p/-/merge_requests/1", "ssh://gitlab.myco.com", "", true},
+		{"bad mr url", "://bad", "", "", true},
 	}
 
 	for _, tc := range tests {
@@ -141,13 +147,31 @@ func TestCreateURL(t *testing.T) {
 		{"github https", "https://github.com/owner/repo.git", "feat/add-login", "https://github.com/owner/repo/compare/feat%2Fadd-login?expand=1"},
 		{"github ssh", "git@github.com:owner/repo.git", "fix/auth", "https://github.com/owner/repo/compare/fix%2Fauth?expand=1"},
 		{"gitlab https", "https://gitlab.com/group/project.git", "feat/new", "https://gitlab.com/group/project/-/merge_requests/new?merge_request%5Bsource_branch%5D=feat%2Fnew"},
+		{"spoofed github substring", "https://evilgithub.example/owner/repo.git", "main", ""},
+		{"spoofed gitlab substring", "https://notgitlab.example/group/project.git", "main", ""},
 		{"unknown", "https://bitbucket.org/owner/repo.git", "main", ""},
+		{"invalid", "://bad", "main", ""},
+		{"empty path", "https://github.com", "main", ""},
 	}
 
 	for _, tc := range tests {
 		if got := CreateURL(tc.remoteURL, tc.branch); got != tc.want {
 			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
 		}
+	}
+}
+
+func TestCreateURLWithBaseAllowsConfiguredHosts(t *testing.T) {
+	got := CreateURLWithBase("https://git.myco.com/owner/repo.git", "feat/x", "https://git.myco.com/api/v3", "")
+	want := "https://git.myco.com/owner/repo/compare/feat%2Fx?expand=1"
+	if got != want {
+		t.Fatalf("CreateURLWithBase GitHub = %q, want %q", got, want)
+	}
+
+	got = CreateURLWithBase("https://git.myco.com/group/project.git", "feat/x", "", "https://git.myco.com/api/v4")
+	want = "https://git.myco.com/group/project/-/merge_requests/new?merge_request%5Bsource_branch%5D=feat%2Fx"
+	if got != want {
+		t.Fatalf("CreateURLWithBase GitLab = %q, want %q", got, want)
 	}
 }
 
@@ -160,6 +184,7 @@ func TestParseInfo(t *testing.T) {
 	}{
 		{"ssh github", "git@github.com:owner/repo.git", Info{Host: "github.com", PathParts: []string{"owner", "repo"}}, false},
 		{"https nested", "https://gitlab.com/group/sub/project.git", Info{Host: "gitlab.com", PathParts: []string{"group", "sub", "project"}}, false},
+		{"https port", "https://git.example.test:8443/group/project.git", Info{Host: "git.example.test", PathParts: []string{"group", "project"}}, false},
 		{"too short", "https://github.com/onlyone", Info{}, true},
 	}
 
@@ -184,8 +209,14 @@ func TestHostAndURLDetection(t *testing.T) {
 	if IsGitHubHost("git.myco.com", "") {
 		t.Fatal("unexpected GitHub host detection without configured base")
 	}
+	if IsGitHubHost("evilgithub.com", "") {
+		t.Fatal("substring host must not be treated as GitHub")
+	}
 	if !IsGitLabHost("gitlab.com", "") || !IsGitLabHost("git.myco.com", "https://git.myco.com") {
 		t.Fatal("expected GitLab host detection")
+	}
+	if IsGitLabHost("notgitlab.example", "") {
+		t.Fatal("substring host must not be treated as GitLab")
 	}
 	if !IsGitHubURL("https://github.com/o/r/pull/1") || IsGitHubURL("https://github.com/o/r/issues/1") {
 		t.Fatal("unexpected GitHub URL detection")

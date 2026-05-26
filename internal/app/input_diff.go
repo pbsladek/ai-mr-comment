@@ -169,15 +169,15 @@ func summarizeDiff(diffContent, source, model string, truncated bool) diffSummar
 			continue
 		}
 		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++ ") {
-			summary.Additions++
 			if current >= 0 {
+				summary.Additions++
 				summary.Files[current].Additions++
 			}
 			continue
 		}
 		if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "--- ") {
-			summary.Deletions++
 			if current >= 0 {
+				summary.Deletions++
 				summary.Files[current].Deletions++
 			}
 		}

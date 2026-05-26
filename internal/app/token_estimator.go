@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/google/generative-ai-go/genai"
 	"github.com/pbsladek/ai-mr-comment/internal/estimate"
+	"google.golang.org/genai"
 )
 
 // TokenEstimator defines the interface for counting tokens before an API call.
@@ -27,13 +27,12 @@ func (e *GeminiTokenEstimator) CountTokens(ctx context.Context, modelName string
 		return 0, fmt.Errorf("failed to create genai client for token counting: %w", err)
 	}
 
-	model := client.GenerativeModel(modelName)
-	parts := make([]genai.Part, len(text))
+	parts := make([]*genai.Part, len(text))
 	for i, t := range text {
-		parts[i] = genai.Text(t)
+		parts[i] = genai.NewPartFromText(t)
 	}
 
-	resp, err := model.CountTokens(ctx, parts...)
+	resp, err := client.Models.CountTokens(ctx, modelName, []*genai.Content{{Role: genai.RoleUser, Parts: parts}}, nil)
 	if err != nil {
 		return 0, err
 	}

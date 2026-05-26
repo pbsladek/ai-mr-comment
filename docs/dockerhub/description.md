@@ -34,7 +34,7 @@ docker run --rm \
   -e ANTHROPIC_API_KEY=... \
   -v "$PWD:/work" -w /work \
   pwbsladek/ai-mr-comment:latest \
-  --provider anthropic --model claude-opus-4-6 --staged
+  --provider anthropic --model claude-opus-4-7 --staged
 ```
 
 ### Gemini

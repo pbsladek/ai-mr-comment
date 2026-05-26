@@ -146,6 +146,58 @@ func TestGitHubOperationsWithClient(t *testing.T) {
 	}
 }
 
+func TestGitHubUpsertCommentChecksAllPages(t *testing.T) {
+	var updatedBody string
+	var postedBody string
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/owner/repo/issues/42/comments", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			if r.URL.Query().Get("page") == "2" {
+				_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 123, "body": "<!-- marker -->\nold"}})
+				return
+			}
+			w.Header().Set("Link", `</repos/owner/repo/issues/42/comments?page=2>; rel="next"`)
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 1, "body": "unmanaged"}})
+		case http.MethodPost:
+			var payload struct {
+				Body string `json:"body"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			postedBody = payload.Body
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 999, "body": payload.Body})
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/repos/owner/repo/issues/comments/123", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var payload struct {
+			Body string `json:"body"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		updatedBody = payload.Body
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": 123, "body": payload.Body})
+	})
+
+	gh := newRemoteTestGitHubClient(t, mux)
+	if err := UpsertGitHubPRCommentWithClient(context.Background(), gh, "https://github.com/owner/repo/pull/42", "<!-- marker -->", "replacement"); err != nil {
+		t.Fatalf("UpsertGitHubPRCommentWithClient failed: %v", err)
+	}
+	if updatedBody != "replacement" {
+		t.Fatalf("expected page-2 comment update, got %q", updatedBody)
+	}
+	if postedBody != "" {
+		t.Fatalf("expected no duplicate post, got %q", postedBody)
+	}
+}
+
 func TestGitHubFindOrCreatePR(t *testing.T) {
 	t.Run("finds existing", func(t *testing.T) {
 		mux := http.NewServeMux()
@@ -298,6 +350,59 @@ func TestGitLabOperationsWithClient(t *testing.T) {
 	}
 	if upsertedNote != "replacement note" {
 		t.Fatalf("upserted note = %q", upsertedNote)
+	}
+}
+
+func TestGitLabUpsertNoteChecksAllPages(t *testing.T) {
+	var updatedNote string
+	var postedNote string
+	targetURL := "https://gitlab.com/group/repo/-/merge_requests/5"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/group%2Frepo/merge_requests/5/notes", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			if r.URL.Query().Get("page") == "2" {
+				_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 88, "body": "<!-- marker -->\nold"}})
+				return
+			}
+			w.Header().Set("X-Next-Page", "2")
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 1, "body": "unmanaged"}})
+		case http.MethodPost:
+			var payload struct {
+				Body string `json:"body"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			postedNote = payload.Body
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 999, "body": payload.Body})
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/v4/projects/group%2Frepo/merge_requests/5/notes/88", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var payload struct {
+			Body string `json:"body"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		updatedNote = payload.Body
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": 88, "body": payload.Body})
+	})
+
+	gl := newRemoteTestGitLabClient(t, mux)
+	if err := UpsertGitLabMRNoteWithClient(context.Background(), gl, targetURL, "<!-- marker -->", "replacement"); err != nil {
+		t.Fatalf("UpsertGitLabMRNoteWithClient failed: %v", err)
+	}
+	if updatedNote != "replacement" {
+		t.Fatalf("expected page-2 note update, got %q", updatedNote)
+	}
+	if postedNote != "" {
+		t.Fatalf("expected no duplicate post, got %q", postedNote)
 	}
 }
 
@@ -558,5 +663,134 @@ func TestGitLabRemoteWrapperOperations(t *testing.T) {
 	}
 	if err := RequestGitLabMRReviewers(context.Background(), mrURL, "token", srv.URL, []string{"alice"}); err == nil || !strings.Contains(err.Error(), "numeric user ID") {
 		t.Fatalf("expected invalid reviewer error, got %v", err)
+	}
+}
+
+func TestGitHubFindOrCreatePRRequestContract(t *testing.T) {
+	var sawList, sawRepo, sawCreate bool
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		path := strings.TrimPrefix(r.URL.Path, "/api/v3")
+		if !strings.Contains(r.Header.Get("Authorization"), "token") {
+			t.Errorf("missing token auth header on %s %s: %q", r.Method, path, r.Header.Get("Authorization"))
+		}
+		switch path {
+		case "/repos/owner/repo/pulls":
+			switch r.Method {
+			case http.MethodGet:
+				sawList = true
+				if r.URL.Query().Get("state") != "open" || r.URL.Query().Get("head") != "owner:feat/branch" {
+					t.Errorf("unexpected list query: %s", r.URL.RawQuery)
+				}
+				_ = json.NewEncoder(w).Encode([]map[string]any{})
+			case http.MethodPost:
+				sawCreate = true
+				var payload struct {
+					Title string `json:"title"`
+					Head  string `json:"head"`
+					Base  string `json:"base"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					t.Errorf("decoding create payload: %v", err)
+				}
+				if payload.Title != "Generated title" || payload.Head != "feat/branch" || payload.Base != "main" {
+					t.Errorf("unexpected create payload: %+v", payload)
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"html_url": "https://github.example/owner/repo/pull/9"})
+			default:
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			}
+		case "/repos/owner/repo":
+			sawRepo = true
+			if r.Method != http.MethodGet {
+				t.Errorf("repo method = %s", r.Method)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"default_branch": "main"})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	gh, err := NewGitHubClient(context.Background(), "token", srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := FindOrCreateGitHubPR(context.Background(), gh, "owner", "repo", "feat/branch", "Generated title")
+	if err != nil {
+		t.Fatalf("FindOrCreateGitHubPR failed: %v", err)
+	}
+	if got != "https://github.example/owner/repo/pull/9" {
+		t.Fatalf("created URL = %q", got)
+	}
+	if !sawList || !sawRepo || !sawCreate {
+		t.Fatalf("missing requests: list=%v repo=%v create=%v", sawList, sawRepo, sawCreate)
+	}
+}
+
+func TestGitLabFindOrCreateMRRequestContract(t *testing.T) {
+	var sawList, sawProject, sawCreate bool
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/group%2Frepo/merge_requests", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Header.Get("PRIVATE-TOKEN") != "token" {
+			t.Errorf("PRIVATE-TOKEN = %q", r.Header.Get("PRIVATE-TOKEN"))
+		}
+		switch r.Method {
+		case http.MethodGet:
+			sawList = true
+			if r.URL.Query().Get("state") != "opened" || r.URL.Query().Get("source_branch") != "feat/branch" {
+				t.Errorf("unexpected MR list query: %s", r.URL.RawQuery)
+			}
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		case http.MethodPost:
+			sawCreate = true
+			var payload struct {
+				Title        string `json:"title"`
+				SourceBranch string `json:"source_branch"`
+				TargetBranch string `json:"target_branch"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Errorf("decoding create MR payload: %v", err)
+			}
+			if payload.Title != "Generated title" || payload.SourceBranch != "feat/branch" || payload.TargetBranch != "main" {
+				t.Errorf("unexpected create MR payload: %+v", payload)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"web_url": "https://gitlab.example/group/repo/-/merge_requests/9"})
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/v4/projects/group%2Frepo", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodGet {
+			t.Errorf("project method = %s", r.Method)
+		}
+		if r.Header.Get("PRIVATE-TOKEN") != "token" {
+			t.Errorf("PRIVATE-TOKEN = %q", r.Header.Get("PRIVATE-TOKEN"))
+		}
+		sawProject = true
+		_ = json.NewEncoder(w).Encode(map[string]any{"default_branch": "main"})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	gl, err := NewGitLabClient("token", srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := FindOrCreateGitLabMR(context.Background(), gl, "group/repo", "feat/branch", "Generated title")
+	if err != nil {
+		t.Fatalf("FindOrCreateGitLabMR failed: %v", err)
+	}
+	if got != "https://gitlab.example/group/repo/-/merge_requests/9" {
+		t.Fatalf("created URL = %q", got)
+	}
+	if !sawList || !sawProject || !sawCreate {
+		t.Fatalf("missing requests: list=%v project=%v create=%v", sawList, sawProject, sawCreate)
 	}
 }

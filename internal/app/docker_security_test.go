@@ -12,7 +12,10 @@ func TestDockerfileUsesRefreshedDHIBaseDigestsAndPackageUpgrades(t *testing.T) {
 	required := []string{
 		"dhi.io/golang:1.26-debian13-dev@sha256:086c893153f92793f3a1541793cd4a8e8b23bfd4ccaf70c8f4261f496080fb0e",
 		"dhi.io/debian-base:trixie-debian13-dev@sha256:9415967aa0ed8adea8b5c048994259d1982026dca143d0303c7bbe0e11ed67d3",
-		"apt-get upgrade -y --no-install-recommends",
+		"DEBIAN_FRONTEND=noninteractive",
+		"Dpkg::Options::=\"--force-confdef\"",
+		"Dpkg::Options::=\"--force-confold\"",
+		"upgrade -y --no-install-recommends",
 	}
 	for _, want := range required {
 		if !strings.Contains(dockerfile, want) {
@@ -56,7 +59,7 @@ func TestReleaseWorkflowScansImagesBeforePublish(t *testing.T) {
 		"Build Docker arm64 image for vulnerability scan",
 		"Build Docker FIPS amd64 image for vulnerability scan",
 		"Build Docker FIPS arm64 image for vulnerability scan",
-		"uses: docker/scout-action@bacf462e8d090c09660de30a6ccc718035f961e3 # v1.20.4",
+		"uses: docker/scout-action@cd72f264beff1cd72735de31148b9d3244a0234a # v1.21.0",
 		"image: local://pwbsladek/ai-mr-comment:scan-amd64",
 		"image: local://pwbsladek/ai-mr-comment:scan-arm64",
 		"image: local://pwbsladek/ai-mr-comment:scan-fips-amd64",

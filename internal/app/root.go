@@ -13,6 +13,96 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type rootDryRunPlan struct {
+	DryRun              bool        `json:"dry_run"`
+	Provider            string      `json:"provider"`
+	Model               string      `json:"model"`
+	Template            string      `json:"template"`
+	Preset              string      `json:"preset,omitempty"`
+	DiffSource          string      `json:"diff_source"`
+	Summary             diffSummary `json:"summary"`
+	WouldCallProvider   bool        `json:"would_call_provider"`
+	WouldWriteOutput    bool        `json:"would_write_output"`
+	WouldCopyClipboard  bool        `json:"would_copy_clipboard"`
+	WouldPostComment    bool        `json:"would_post_comment"`
+	WouldUpdateTitle    bool        `json:"would_update_title"`
+	WouldUpdateBody     bool        `json:"would_update_description"`
+	MissingPostTarget   bool        `json:"missing_post_target,omitempty"`
+	MissingUpdateTarget bool        `json:"missing_update_target,omitempty"`
+	PostTarget          string      `json:"post_target,omitempty"`
+	outputPath          string
+	clipboard           string
+}
+
+func buildRootDryRunPlan(cfg *Config, opts RootOptions, presetName, diffSource string, summary diffSummary) rootDryRunPlan {
+	return rootDryRunPlan{
+		DryRun:              true,
+		Provider:            string(cfg.Provider),
+		Model:               getModelName(cfg),
+		Template:            cfg.Template,
+		Preset:              presetName,
+		DiffSource:          diffSource,
+		Summary:             summary,
+		WouldCallProvider:   (!opts.Post && !opts.UpdateTitle && !opts.UpdateDescription) || opts.PRURL != "",
+		WouldWriteOutput:    opts.OutputPath != "",
+		WouldCopyClipboard:  opts.Clipboard != "",
+		WouldPostComment:    opts.Post,
+		WouldUpdateTitle:    opts.UpdateTitle,
+		WouldUpdateBody:     opts.UpdateDescription,
+		MissingPostTarget:   opts.Post && opts.PRURL == "",
+		MissingUpdateTarget: (opts.UpdateTitle || opts.UpdateDescription) && opts.PRURL == "",
+		PostTarget:          opts.PRURL,
+		outputPath:          opts.OutputPath,
+		clipboard:           opts.Clipboard,
+	}
+}
+
+func writeRootDryRunPlan(cmd *cobra.Command, plan rootDryRunPlan, format string) error {
+	out := cmd.OutOrStdout()
+	if format == "json" {
+		return json.NewEncoder(out).Encode(plan)
+	}
+	_, _ = fmt.Fprintln(out, "Dry run: no provider call, file write, clipboard write, PR/MR post, or PR/MR metadata update will be performed.")
+	_, _ = fmt.Fprintf(out, "- Provider: %s\n", plan.Provider)
+	_, _ = fmt.Fprintf(out, "- Model: %s\n", plan.Model)
+	_, _ = fmt.Fprintf(out, "- Template: %s\n", plan.Template)
+	if plan.Preset != "" {
+		_, _ = fmt.Fprintf(out, "- Preset: %s\n", plan.Preset)
+	}
+	_, _ = fmt.Fprintf(out, "- Diff source: %s\n", plan.DiffSource)
+	_, _ = fmt.Fprintf(out, "- Files: %d\n", plan.Summary.FileCount)
+	_, _ = fmt.Fprintf(out, "- Additions: %d\n", plan.Summary.Additions)
+	_, _ = fmt.Fprintf(out, "- Deletions: %d\n", plan.Summary.Deletions)
+	if plan.WouldWriteOutput {
+		_, _ = fmt.Fprintf(out, "- Would write output: %s\n", plan.outputPath)
+	}
+	if plan.WouldCopyClipboard {
+		_, _ = fmt.Fprintf(out, "- Would copy clipboard: %s\n", plan.clipboard)
+	}
+	if plan.WouldPostComment {
+		if plan.MissingPostTarget {
+			_, _ = fmt.Fprintln(out, "- Would post comment: (missing --pr)")
+		} else {
+			_, _ = fmt.Fprintf(out, "- Would post comment: %s\n", plan.PostTarget)
+		}
+	}
+	if plan.WouldUpdateTitle || plan.WouldUpdateBody {
+		if plan.MissingUpdateTarget {
+			_, _ = fmt.Fprintln(out, "- Would update PR/MR metadata: (missing --pr)")
+		} else {
+			fields := []string{}
+			if plan.WouldUpdateTitle {
+				fields = append(fields, "title")
+			}
+			if plan.WouldUpdateBody {
+				fields = append(fields, "description")
+			}
+			_, _ = fmt.Fprintf(out, "- Would update PR/MR %s: %s\n", strings.Join(fields, "+"), plan.PostTarget)
+		}
+	}
+	return nil
+}
+
 // newRootCmd builds the root cobra command, wiring flags to the provided chatFn.
 // Accepting chatFn as a parameter allows tests to inject a mock without real API calls.
 func newRootCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
@@ -223,83 +313,7 @@ func newRootCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, strin
 			}
 
 			if dryRun {
-				plan := struct {
-					DryRun              bool        `json:"dry_run"`
-					Provider            string      `json:"provider"`
-					Model               string      `json:"model"`
-					Template            string      `json:"template"`
-					Preset              string      `json:"preset,omitempty"`
-					DiffSource          string      `json:"diff_source"`
-					Summary             diffSummary `json:"summary"`
-					WouldCallProvider   bool        `json:"would_call_provider"`
-					WouldWriteOutput    bool        `json:"would_write_output"`
-					WouldCopyClipboard  bool        `json:"would_copy_clipboard"`
-					WouldPostComment    bool        `json:"would_post_comment"`
-					WouldUpdateTitle    bool        `json:"would_update_title"`
-					WouldUpdateBody     bool        `json:"would_update_description"`
-					MissingPostTarget   bool        `json:"missing_post_target,omitempty"`
-					MissingUpdateTarget bool        `json:"missing_update_target,omitempty"`
-					PostTarget          string      `json:"post_target,omitempty"`
-				}{
-					DryRun:              true,
-					Provider:            string(cfg.Provider),
-					Model:               getModelName(cfg),
-					Template:            cfg.Template,
-					Preset:              presetName,
-					DiffSource:          diffSource,
-					Summary:             summary,
-					WouldCallProvider:   (!postFlag && !updateTitleFlag && !updateDescriptionFlag) || prURL != "",
-					WouldWriteOutput:    outputPath != "",
-					WouldCopyClipboard:  clipboardFlag != "",
-					WouldPostComment:    postFlag,
-					WouldUpdateTitle:    updateTitleFlag,
-					WouldUpdateBody:     updateDescriptionFlag,
-					MissingPostTarget:   postFlag && prURL == "",
-					MissingUpdateTarget: (updateTitleFlag || updateDescriptionFlag) && prURL == "",
-					PostTarget:          prURL,
-				}
-				if format == "json" {
-					return json.NewEncoder(out).Encode(plan)
-				}
-				_, _ = fmt.Fprintln(out, "Dry run: no provider call, file write, clipboard write, PR/MR post, or PR/MR metadata update will be performed.")
-				_, _ = fmt.Fprintf(out, "- Provider: %s\n", plan.Provider)
-				_, _ = fmt.Fprintf(out, "- Model: %s\n", plan.Model)
-				_, _ = fmt.Fprintf(out, "- Template: %s\n", plan.Template)
-				if presetName != "" {
-					_, _ = fmt.Fprintf(out, "- Preset: %s\n", presetName)
-				}
-				_, _ = fmt.Fprintf(out, "- Diff source: %s\n", diffSource)
-				_, _ = fmt.Fprintf(out, "- Files: %d\n", summary.FileCount)
-				_, _ = fmt.Fprintf(out, "- Additions: %d\n", summary.Additions)
-				_, _ = fmt.Fprintf(out, "- Deletions: %d\n", summary.Deletions)
-				if outputPath != "" {
-					_, _ = fmt.Fprintf(out, "- Would write output: %s\n", outputPath)
-				}
-				if clipboardFlag != "" {
-					_, _ = fmt.Fprintf(out, "- Would copy clipboard: %s\n", clipboardFlag)
-				}
-				if postFlag {
-					if prURL == "" {
-						_, _ = fmt.Fprintln(out, "- Would post comment: (missing --pr)")
-					} else {
-						_, _ = fmt.Fprintf(out, "- Would post comment: %s\n", prURL)
-					}
-				}
-				if updateTitleFlag || updateDescriptionFlag {
-					if prURL == "" {
-						_, _ = fmt.Fprintln(out, "- Would update PR/MR metadata: (missing --pr)")
-					} else {
-						fields := []string{}
-						if updateTitleFlag {
-							fields = append(fields, "title")
-						}
-						if updateDescriptionFlag {
-							fields = append(fields, "description")
-						}
-						_, _ = fmt.Fprintf(out, "- Would update PR/MR %s: %s\n", strings.Join(fields, "+"), prURL)
-					}
-				}
-				return nil
+				return writeRootDryRunPlan(cmd, buildRootDryRunPlan(cfg, rootOpts, presetName, diffSource, summary), format)
 			}
 
 			if debug {
@@ -318,25 +332,43 @@ func newRootCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, strin
 				}
 			}
 
-			// Stream tokens directly to the terminal when output is a real TTY,
-			// text format is selected, smart-chunk is off, and no output file is set.
-			// All other paths use the buffered chatFn to get the full response first.
+			// Stream tokens directly for interactive text output, or as JSONL token
+			// events when requested. All other paths use the buffered chatFn.
 			isTTY := fileIsTerminal(os.Stdout)
-			shouldStream := isTTY && format == "text" && streamMode == "" && !smartChunk && outputPath == ""
+			jsonlStream := streamMode == "jsonl" && !titleOnly && !generateCommitMsg && !smartChunk
+			shouldStream := (isTTY && format == "text" && streamMode == "" && !smartChunk && outputPath == "") || jsonlStream
 			debugLog(cfg, "streaming: tty=%v format=%s smart-chunk=%v output-file=%q → enabled=%v",
 				isTTY, format, smartChunk, outputPath, shouldStream)
+			generationOut := out
+			if streamMode == "jsonl" {
+				if err := encodeJSONLine(out, "start", map[string]any{
+					"provider":    string(cfg.Provider),
+					"model":       getModelName(cfg),
+					"diff_source": diffSource,
+					"truncated":   diffTruncated,
+				}); err != nil {
+					return err
+				}
+				if jsonlStream {
+					generationOut = jsonlTokenWriter{out: out}
+				}
+			}
 			generation, err := generateRootProviderOutput(rootGenerationRequest{
 				Context:      cmd.Context(),
 				Config:       cfg,
 				Options:      rootOpts,
 				Chat:         chatFn,
+				Stream:       deps.streamToWriter,
 				SystemPrompt: systemPrompt,
 				DiffContent:  diffContent,
 				SmartChunk:   smartChunk,
 				ShouldStream: shouldStream,
-				Out:          out,
+				Out:          generationOut,
 			})
 			if err != nil {
+				if streamMode == "jsonl" {
+					_ = encodeJSONLine(out, "error", map[string]any{"message": err.Error()})
+				}
 				return err
 			}
 			comment := generation.Comment
@@ -385,15 +417,9 @@ func newRootCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, strin
 					_, _ = fmt.Fprintln(out, verdict)
 				}
 			} else if streamMode == "jsonl" {
-				if err := encodeJSONLine(out, "start", map[string]any{
-					"provider":    string(cfg.Provider),
-					"model":       getModelName(cfg),
-					"diff_source": diffSource,
-					"truncated":   diffTruncated,
-				}); err != nil {
-					return err
-				}
-				if titleOnly {
+				if streamedOK {
+					// Token events were emitted by jsonlTokenWriter during generation.
+				} else if titleOnly {
 					if err := encodeJSONLine(out, "token", map[string]any{"text": title}); err != nil {
 						return err
 					}
@@ -486,6 +512,8 @@ func newRootCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, strin
 					fileContent = []byte(title + "\n")
 				} else if generateCommitMsg {
 					fileContent = []byte(commitMessage + "\n")
+				} else if title != "" {
+					fileContent = []byte(title + "\n\n" + comment + "\n")
 				} else {
 					fileContent = []byte(comment)
 				}
@@ -538,8 +566,8 @@ func newRootCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, strin
 	rootCmd.Flags().StringVar(&diffFilePath, "file", "", "Path to diff file")
 	rootCmd.Flags().StringVar(&prURL, "pr", "", "GitHub PR or GitLab MR URL (e.g. https://github.com/owner/repo/pull/123 or https://gitlab.com/group/project/-/merge_requests/42)")
 	rootCmd.Flags().StringVar(&outputPath, "output", "", "Output file path")
-	rootCmd.Flags().StringVar(&provider, "provider", "openai", "API provider (openai, anthropic, gemini, ollama)")
-	rootCmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this run (e.g. gpt-5.5, claude-opus-4-6, gemini-2.5-flash)")
+	rootCmd.Flags().StringVar(&provider, "provider", "", "API provider (openai, anthropic, gemini, ollama, claude-cli, gemini-cli, codex-cli)")
+	rootCmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this run (e.g. gpt-5.5, claude-opus-4-7, gemini-3.1-pro-preview)")
 	rootCmd.Flags().StringVarP(&templateName, "template", "t", "default", "Prompt template to use (e.g., default, conventional, technical)")
 	rootCmd.Flags().BoolVar(&debug, "debug", false, "Show token/cost estimate and exit without calling the API")
 	rootCmd.Flags().BoolVar(&verbose, "verbose", false, "Enable verbose debug logging to stderr (provider, model, timing, errors)")
@@ -653,4 +681,18 @@ func newAgentAliasCmdWithDeps(name, short string, prefix []string, chatFn func(c
 			return root.Execute()
 		},
 	}
+}
+
+type jsonlTokenWriter struct {
+	out io.Writer
+}
+
+func (w jsonlTokenWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if err := encodeJSONLine(w.out, "token", map[string]any{"text": string(p)}); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -15,6 +16,51 @@ import (
 const managedDescriptionStart = "<!-- ai-mr-comment:description:start -->"
 const managedDescriptionEnd = "<!-- ai-mr-comment:description:end -->"
 const managedCommentMarker = "<!-- ai-mr-comment:comment -->"
+
+type publishActionRequest struct {
+	Title               string
+	Description         string
+	NoUpdateTitle       bool
+	NoUpdateDescription bool
+	PostSummary         bool
+	AutoLabels          bool
+	Labels              []string
+	Reviewers           []string
+	Summary             diffSummary
+}
+
+type publishActionPlan struct {
+	Title             string
+	Description       string
+	UpdateTitle       bool
+	UpdateDescription bool
+	PostSummary       bool
+	Labels            []string
+	Reviewers         []string
+}
+
+func hasRequestedPublishActions(noUpdateTitle, noUpdateDescription, postSummary, autoLabels bool, labels, reviewers []string) bool {
+	return publishHasActions(!noUpdateTitle, !noUpdateDescription, postSummary, cleanStringList(labels), cleanStringList(reviewers)) || autoLabels
+}
+
+func planPublishActions(req publishActionRequest) (publishActionPlan, error) {
+	plan := publishActionPlan{
+		Title:             strings.TrimSpace(req.Title),
+		Description:       strings.TrimSpace(req.Description),
+		UpdateTitle:       !req.NoUpdateTitle,
+		UpdateDescription: !req.NoUpdateDescription,
+		PostSummary:       req.PostSummary,
+		Labels:            cleanStringList(req.Labels),
+		Reviewers:         cleanStringList(req.Reviewers),
+	}
+	if req.AutoLabels {
+		plan.Labels = cleanStringList(append(plan.Labels, derivePublishLabels(req.Summary, plan.Description)...))
+	}
+	if !publishHasActions(plan.UpdateTitle, plan.UpdateDescription, plan.PostSummary, plan.Labels, plan.Reviewers) {
+		return publishActionPlan{}, withExitCode(4, errors.New("publish has no remote actions enabled"))
+	}
+	return plan, nil
+}
 
 func newPublishCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error), deps commandDeps) *cobra.Command {
 	var prURL, provider, modelOverride, templateName, profileName, format string
@@ -50,7 +96,7 @@ find or create one from the current branch and origin remote.`,
 			if format != "text" && format != "json" {
 				return withExitCode(4, fmt.Errorf("unsupported format %q: must be text or json", format))
 			}
-			if noUpdateTitle && noUpdateDescription && !postSummary && len(labels) == 0 && len(reviewers) == 0 && !autoLabels {
+			if !hasRequestedPublishActions(noUpdateTitle, noUpdateDescription, postSummary, autoLabels, labels, reviewers) {
 				return withExitCode(4, errors.New("publish has no remote actions enabled"))
 			}
 			if cancel := applyRequestTimeout(cmd, cfg); cancel != nil {
@@ -97,27 +143,43 @@ find or create one from the current branch and origin remote.`,
 				title = ensureDraftTitle(title)
 			}
 
-			appliedLabels := cleanStringList(labels)
-			if autoLabels {
-				appliedLabels = cleanStringList(append(appliedLabels, derivePublishLabels(summary, description)...))
+			actionPlan, err := planPublishActions(publishActionRequest{
+				Title:               title,
+				Description:         description,
+				NoUpdateTitle:       noUpdateTitle,
+				NoUpdateDescription: noUpdateDescription,
+				PostSummary:         postSummary,
+				AutoLabels:          autoLabels,
+				Labels:              labels,
+				Reviewers:           reviewers,
+				Summary:             summary,
+			})
+			if err != nil {
+				return err
 			}
-			reviewers = cleanStringList(reviewers)
+			title = actionPlan.Title
+			description = actionPlan.Description
 
 			if targetURL == "" {
-				targetURL, err = findOrCreatePublishTargetWithDeps(cmd.Context(), cfg, title, deps)
+				if dryRun {
+					targetURL, err = plannedPublishTargetWithDeps(cfg, deps)
+				} else {
+					targetURL, err = findOrCreatePublishTargetWithDeps(cmd.Context(), cfg, title, deps)
+				}
 				if err != nil {
 					return err
 				}
 			}
 
-			updateTitle := !noUpdateTitle
-			updateDescription := !noUpdateDescription
 			var updateTitleValue *string
 			var updateDescriptionValue *string
-			if updateTitle {
+			if actionPlan.UpdateTitle {
 				updateTitleValue = &title
 			}
-			if updateDescription {
+			if dryRun {
+				return writePublishDryRun(cmd, cfg, targetURL, title, description, actionPlan.UpdateTitle, actionPlan.UpdateDescription, actionPlan.PostSummary, actionPlan.Labels, actionPlan.Reviewers)
+			}
+			if actionPlan.UpdateDescription {
 				body := description
 				if !replaceDescription {
 					metadata, metaErr := deps.getRemoteMetadata(cmd.Context(), cfg, targetURL)
@@ -129,27 +191,23 @@ find or create one from the current branch and origin remote.`,
 				updateDescriptionValue = &body
 			}
 
-			if dryRun {
-				return writePublishDryRun(cmd, cfg, targetURL, title, description, updateTitle, updateDescription, postSummary, appliedLabels, reviewers)
-			}
-
-			if updateTitle || updateDescription {
+			if actionPlan.UpdateTitle || actionPlan.UpdateDescription {
 				if err := deps.updateRemoteMetadata(cmd.Context(), cfg, targetURL, updateTitleValue, updateDescriptionValue); err != nil {
 					return err
 				}
 			}
-			if postSummary {
+			if actionPlan.PostSummary {
 				if err := deps.upsertRemoteManagedComment(cmd.Context(), cfg, targetURL, buildManagedComment(title, description)); err != nil {
 					return err
 				}
 			}
-			if len(appliedLabels) > 0 {
-				if err := deps.addRemoteLabels(cmd.Context(), cfg, targetURL, appliedLabels); err != nil {
+			if len(actionPlan.Labels) > 0 {
+				if err := deps.addRemoteLabels(cmd.Context(), cfg, targetURL, actionPlan.Labels); err != nil {
 					return err
 				}
 			}
-			if len(reviewers) > 0 {
-				if err := deps.requestRemoteReviewers(cmd.Context(), cfg, targetURL, reviewers); err != nil {
+			if len(actionPlan.Reviewers) > 0 {
+				if err := deps.requestRemoteReviewers(cmd.Context(), cfg, targetURL, actionPlan.Reviewers); err != nil {
 					return err
 				}
 			}
@@ -167,10 +225,10 @@ find or create one from the current branch and origin remote.`,
 				}{
 					URL:                targetURL,
 					Title:              title,
-					DescriptionUpdated: updateDescription,
-					CommentUpserted:    postSummary,
-					Labels:             appliedLabels,
-					Reviewers:          reviewers,
+					DescriptionUpdated: actionPlan.UpdateDescription,
+					CommentUpserted:    actionPlan.PostSummary,
+					Labels:             actionPlan.Labels,
+					Reviewers:          actionPlan.Reviewers,
 					Provider:           string(cfg.Provider),
 					Model:              getModelName(cfg),
 				})
@@ -181,7 +239,7 @@ find or create one from the current branch and origin remote.`,
 	}
 
 	cmd.Flags().StringVar(&prURL, "pr", "", "GitHub PR or GitLab MR URL; omitted means find or create from the current branch")
-	cmd.Flags().StringVar(&provider, "provider", "openai", "AI provider to use")
+	cmd.Flags().StringVar(&provider, "provider", "", "AI provider to use")
 	cmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this run")
 	cmd.Flags().StringVarP(&templateName, "template", "t", "default", "Prompt template to use")
 	cmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate")
@@ -200,6 +258,10 @@ find or create one from the current branch and origin remote.`,
 	_ = cmd.RegisterFlagCompletionFunc("profile", completeProfiles)
 	_ = cmd.RegisterFlagCompletionFunc("format", completeValues([]string{"text", "json"}))
 	return cmd
+}
+
+func publishHasActions(updateTitle, updateDescription, postSummary bool, labels, reviewers []string) bool {
+	return updateTitle || updateDescription || postSummary || len(labels) > 0 || len(reviewers) > 0
 }
 
 func resolvePublishDiffWithDeps(ctx context.Context, cfg *Config, prURL string, deps commandDeps) (diffContent, targetURL string, err error) {
@@ -250,6 +312,40 @@ func findOrCreatePublishTargetWithDeps(ctx context.Context, cfg *Config, title s
 		return deps.findOrCreateTarget(ctx, cfg, info, branch, title)
 	}
 	return "", fmt.Errorf("unrecognised remote host %q; set github_base_url or gitlab_base_url in config", info.Host)
+}
+
+func plannedPublishTargetWithDeps(cfg *Config, deps commandDeps) (string, error) {
+	branch, err := deps.getCurrentBranch()
+	if err != nil {
+		return "", fmt.Errorf("could not determine current branch: %w", err)
+	}
+	if branch == "" {
+		return "", errors.New("cannot publish from detached HEAD without --pr")
+	}
+	remoteURL, err := deps.getRemoteURL()
+	if err != nil {
+		return "", fmt.Errorf("getting remote URL: %w", err)
+	}
+	if createURL := prCreateURLWithConfig(remoteURL, branch, cfg); createURL != "" {
+		return createURL, nil
+	}
+	info, err := deps.parseRemoteInfo(remoteURL)
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case deps.isGitHubHost(info.Host, cfg.GitHubBaseURL):
+		if len(info.PathParts) < 2 {
+			return "", fmt.Errorf("could not parse owner/repo from remote URL")
+		}
+		return "https://" + info.Host + "/" + strings.Join(info.PathParts[:2], "/") + "/compare/" + url.PathEscape(branch) + "?expand=1", nil
+	case deps.isGitLabHost(info.Host, cfg.GitLabBaseURL):
+		q := url.Values{}
+		q.Set("merge_request[source_branch]", branch)
+		return "https://" + info.Host + "/" + strings.Join(info.PathParts, "/") + "/-/merge_requests/new?" + q.Encode(), nil
+	default:
+		return "", fmt.Errorf("unrecognised remote host %q; set github_base_url or gitlab_base_url in config", info.Host)
+	}
 }
 
 func getRemoteMetadata(ctx context.Context, cfg *Config, targetURL string) (prMetadata, error) {

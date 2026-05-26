@@ -19,16 +19,16 @@ import (
 	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
-	"github.com/google/generative-ai-go/genai"
 	openai "github.com/openai/openai-go"
 	"github.com/openai/openai-go/packages/param"
 	"github.com/openai/openai-go/responses"
 	"github.com/pbsladek/ai-mr-comment/internal/config"
-	"google.golang.org/api/iterator"
-	"google.golang.org/api/option"
+	"google.golang.org/genai"
 )
 
-var geminiClientOptions []option.ClientOption
+type GeminiClientOption func(*genai.ClientConfig)
+
+var geminiClientOptions []GeminiClientOption
 
 var (
 	geminiCachedClient    *genai.Client
@@ -39,13 +39,24 @@ var (
 const DefaultOllamaHTTPTimeout = 2 * time.Minute
 
 // SetGeminiClientOptions allows tests to inject Gemini SDK options.
-func SetGeminiClientOptions(opts []option.ClientOption) {
+func SetGeminiClientOptions(opts []GeminiClientOption) {
 	geminiClientMu.Lock()
 	defer geminiClientMu.Unlock()
 
 	geminiClientOptions = opts
 	geminiCachedClient = nil
 	geminiCachedClientKey = ""
+}
+
+// GeminiEndpointOption rewires Gemini requests to a custom endpoint and HTTP
+// client. It is intended for tests and local API-compatible proxies.
+func GeminiEndpointOption(baseURL string, httpClient *http.Client) GeminiClientOption {
+	return func(cfg *genai.ClientConfig) {
+		cfg.HTTPOptions.BaseURL = baseURL
+		if httpClient != nil {
+			cfg.HTTPClient = httpClient
+		}
+	}
 }
 
 func GetOllamaHTTPTimeout() time.Duration {
@@ -71,14 +82,21 @@ func GetGeminiClient(ctx context.Context, apiKey string) (*genai.Client, error) 
 		return geminiCachedClient, nil
 	}
 
-	opts := []option.ClientOption{option.WithAPIKey(apiKey)}
-	opts = append(opts, geminiClientOptions...)
-	client, err := genai.NewClient(ctx, opts...)
+	clientConfig := &genai.ClientConfig{
+		APIKey:  apiKey,
+		Backend: genai.BackendGeminiAPI,
+	}
+	for _, opt := range geminiClientOptions {
+		opt(clientConfig)
+	}
+	client, err := genai.NewClient(ctx, clientConfig)
 	if err != nil {
 		return nil, err
 	}
-	geminiCachedClient = client
-	geminiCachedClientKey = apiKey
+	if len(geminiClientOptions) == 0 {
+		geminiCachedClient = client
+		geminiCachedClientKey = apiKey
+	}
 	return client, nil
 }
 
@@ -167,21 +185,24 @@ func CallAnthropic(ctx context.Context, client *anthropic.Client, cfg *config.Co
 	if err != nil {
 		return "", enrichAnthropicError(err)
 	}
-	if len(resp.Content) == 0 {
-		return "", errors.New("no content returned")
+	var sb strings.Builder
+	for _, block := range resp.Content {
+		if block.Type == "text" {
+			sb.WriteString(block.Text)
+		}
 	}
-	block := resp.Content[0]
-	if block.Type != "text" {
-		return "", errors.New("first content block is not text")
+	if sb.Len() == 0 {
+		return "", errors.New("no text content returned")
 	}
-	return block.Text, nil
+	return sb.String(), nil
 }
 
 // CallOllama sends a generation request to the Ollama local API.
 func CallOllama(ctx context.Context, cfg *config.Config, systemPrompt, diffContent string) (string, error) {
 	reqBody := map[string]any{
 		"model":  cfg.OllamaModel,
-		"prompt": systemPrompt + "\n" + diffContent,
+		"prompt": diffContent,
+		"system": systemPrompt,
 		"stream": false,
 	}
 
@@ -208,6 +229,9 @@ func CallOllama(ctx context.Context, cfg *config.Config, systemPrompt, diffConte
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", err
 	}
+	if result.Response == "" {
+		return "", errors.New("no text content returned from Ollama")
+	}
 	return result.Response, nil
 }
 
@@ -232,12 +256,7 @@ func CallGemini(ctx context.Context, cfg *config.Config, systemPrompt, diffConte
 		return "", err
 	}
 
-	model := client.GenerativeModel(cfg.GeminiModel)
-	model.SystemInstruction = &genai.Content{
-		Parts: []genai.Part{genai.Text(systemPrompt)},
-	}
-
-	resp, err := model.GenerateContent(ctx, genai.Text(diffContent))
+	resp, err := client.Models.GenerateContent(ctx, cfg.GeminiModel, genai.Text(diffContent), geminiGenerateConfig(systemPrompt))
 	if err != nil {
 		return "", enrichNetworkError(err)
 	}
@@ -246,13 +265,19 @@ func CallGemini(ctx context.Context, cfg *config.Config, systemPrompt, diffConte
 		return "", errors.New("no content returned from Gemini")
 	}
 
-	var sb strings.Builder
-	for _, part := range resp.Candidates[0].Content.Parts {
-		if txt, ok := part.(genai.Text); ok {
-			sb.WriteString(string(txt))
-		}
+	output := resp.Text()
+	if output == "" {
+		return "", errors.New("no text content returned from Gemini")
 	}
-	return sb.String(), nil
+	return output, nil
+}
+
+func geminiGenerateConfig(systemPrompt string) *genai.GenerateContentConfig {
+	return &genai.GenerateContentConfig{
+		SystemInstruction: &genai.Content{
+			Parts: []*genai.Part{genai.NewPartFromText(systemPrompt)},
+		},
+	}
 }
 
 // CLIPrompt combines the system prompt and diff, stripping null bytes.
@@ -466,7 +491,9 @@ func StreamOpenAI(ctx context.Context, client *openai.Client, cfg *config.Config
 			if token == "" {
 				token = event.Text
 			}
-			_, _ = fmt.Fprint(w, token)
+			if _, err := fmt.Fprint(w, token); err != nil {
+				return "", err
+			}
 			sb.WriteString(token)
 		case "error":
 			return "", fmt.Errorf("OpenAI stream error: %s", event.Message)
@@ -474,6 +501,9 @@ func StreamOpenAI(ctx context.Context, client *openai.Client, cfg *config.Config
 	}
 	if err := stream.Err(); err != nil {
 		return "", enrichOpenAIError(err)
+	}
+	if sb.Len() == 0 {
+		return "", errors.New("no output text returned from OpenAI stream")
 	}
 	return sb.String(), nil
 }
@@ -499,12 +529,17 @@ func StreamAnthropic(ctx context.Context, client *anthropic.Client, cfg *config.
 		event := stream.Current()
 		if delta, ok := event.AsAny().(anthropic.ContentBlockDeltaEvent); ok && delta.Delta.Type == "text_delta" {
 			token := delta.Delta.AsTextDelta().Text
-			_, _ = fmt.Fprint(w, token)
+			if _, err := fmt.Fprint(w, token); err != nil {
+				return "", err
+			}
 			sb.WriteString(token)
 		}
 	}
 	if err := stream.Err(); err != nil {
 		return "", enrichAnthropicError(err)
+	}
+	if sb.Len() == 0 {
+		return "", errors.New("no text content returned from Anthropic stream")
 	}
 	return sb.String(), nil
 }
@@ -515,32 +550,23 @@ func StreamGemini(ctx context.Context, cfg *config.Config, systemPrompt, diffCon
 		return "", err
 	}
 
-	model := client.GenerativeModel(cfg.GeminiModel)
-	model.SystemInstruction = &genai.Content{
-		Parts: []genai.Part{genai.Text(systemPrompt)},
-	}
-
-	iter := model.GenerateContentStream(ctx, genai.Text(diffContent))
+	stream := client.Models.GenerateContentStream(ctx, cfg.GeminiModel, genai.Text(diffContent), geminiGenerateConfig(systemPrompt))
 
 	var sb strings.Builder
-	for {
-		resp, err := iter.Next()
-		if errors.Is(err, iterator.Done) {
-			break
-		}
+	for resp, err := range stream {
 		if err != nil {
 			return "", enrichNetworkError(err)
 		}
-		if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil || len(resp.Candidates[0].Content.Parts) == 0 {
-			continue
-		}
-		for _, part := range resp.Candidates[0].Content.Parts {
-			if txt, ok := part.(genai.Text); ok {
-				token := string(txt)
-				_, _ = fmt.Fprint(w, token)
-				sb.WriteString(token)
+		token := resp.Text()
+		if token != "" {
+			if _, err := fmt.Fprint(w, token); err != nil {
+				return "", err
 			}
+			sb.WriteString(token)
 		}
+	}
+	if sb.Len() == 0 {
+		return "", errors.New("no text content returned from Gemini stream")
 	}
 	return sb.String(), nil
 }
@@ -548,7 +574,8 @@ func StreamGemini(ctx context.Context, cfg *config.Config, systemPrompt, diffCon
 func StreamOllama(ctx context.Context, cfg *config.Config, systemPrompt, diffContent string, w io.Writer) (string, error) {
 	reqBody := map[string]any{
 		"model":  cfg.OllamaModel,
-		"prompt": systemPrompt + "\n" + diffContent,
+		"prompt": diffContent,
+		"system": systemPrompt,
 		"stream": true,
 	}
 
@@ -586,7 +613,9 @@ func StreamOllama(ctx context.Context, cfg *config.Config, systemPrompt, diffCon
 		if err := json.Unmarshal(line, &chunk); err != nil {
 			return "", fmt.Errorf("decoding ollama stream chunk: %w", err)
 		}
-		_, _ = fmt.Fprint(w, chunk.Response)
+		if _, err := fmt.Fprint(w, chunk.Response); err != nil {
+			return "", err
+		}
 		sb.WriteString(chunk.Response)
 		if chunk.Done {
 			break
@@ -594,6 +623,9 @@ func StreamOllama(ctx context.Context, cfg *config.Config, systemPrompt, diffCon
 	}
 	if err := scanner.Err(); err != nil {
 		return "", err
+	}
+	if sb.Len() == 0 {
+		return "", errors.New("no text content returned from Ollama stream")
 	}
 	return sb.String(), nil
 }

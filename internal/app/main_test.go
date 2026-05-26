@@ -186,6 +186,42 @@ func TestNewRootCmd_OutputToFile(t *testing.T) {
 	}
 }
 
+func TestNewRootCmd_OutputToFileIncludesGeneratedTitle(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+	outputFile := filepath.Join(t.TempDir(), "review.md")
+
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, systemPrompt, _ string) (string, error) {
+		if strings.HasPrefix(systemPrompt, "Generate a single-line MR/PR title") {
+			return "Add generated title", nil
+		}
+		return "Generated description", nil
+	}
+
+	var stdoutBuf strings.Builder
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"--title", "--file=testdata/diff.txt", "--provider=openai", "--output=" + outputFile})
+	cmd.SetOut(&stdoutBuf)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if stdoutBuf.Len() > 0 {
+		t.Errorf("expected no stdout output when --output is set, got: %q", stdoutBuf.String())
+	}
+
+	data, err := os.ReadFile(outputFile)
+	if err != nil {
+		t.Fatalf("expected output file, got error %v", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "Add generated title") || !strings.Contains(got, "Generated description") {
+		t.Fatalf("expected title and description in output file, got %q", got)
+	}
+}
+
 func TestNewRootCmd_CustomTemplateFlagUsesTemplateFile(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
@@ -402,11 +438,21 @@ func TestRootCmd_JSONLStream(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "dummy")
 
 	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
+		return "fallback review", nil
+	}
+	deps := defaultCommandDeps()
+	deps.streamToWriter = func(_ context.Context, _ *Config, _ ApiProvider, _, _ string, w io.Writer) (string, error) {
+		if _, err := io.WriteString(w, "streamed "); err != nil {
+			return "", err
+		}
+		if _, err := io.WriteString(w, "review"); err != nil {
+			return "", err
+		}
 		return "streamed review", nil
 	}
 
 	var out strings.Builder
-	cmd := newRootCmd(fn)
+	cmd := newRootCmdWithDeps(fn, deps)
 	cmd.SetArgs([]string{"--stream=jsonl", "--file=-", "--provider=openai"})
 	cmd.SetIn(strings.NewReader("diff --git a/a b/a\n+stream\n"))
 	cmd.SetOut(&out)
@@ -418,8 +464,8 @@ func TestRootCmd_JSONLStream(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 JSONL events, got %d: %q", len(lines), out.String())
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 JSONL events, got %d: %q", len(lines), out.String())
 	}
 	var events []map[string]any
 	for _, line := range lines {
@@ -429,11 +475,11 @@ func TestRootCmd_JSONLStream(t *testing.T) {
 		}
 		events = append(events, event)
 	}
-	if events[0]["type"] != "start" || events[1]["type"] != "token" || events[2]["type"] != "done" {
+	if events[0]["type"] != "start" || events[1]["type"] != "token" || events[2]["type"] != "token" || events[3]["type"] != "done" {
 		t.Fatalf("unexpected event types: %#v", events)
 	}
-	if events[1]["text"] != "streamed review" {
-		t.Fatalf("expected token text, got %#v", events[1])
+	if events[1]["text"] != "streamed " || events[2]["text"] != "review" {
+		t.Fatalf("expected streamed token text, got %#v", events)
 	}
 }
 
@@ -1728,6 +1774,27 @@ func TestModelsCmd(t *testing.T) {
 	}
 }
 
+func TestModelsCmdDefaultsToConfiguredProvider(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, ".ai-mr-comment.toml"), []byte(`provider = "gemini"`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("HOME", tmpDir)
+
+	var buf strings.Builder
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{"models"})
+	cmd.SetOut(&buf)
+	cmd.SetErr(io.Discard)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !strings.Contains(buf.String(), "Models for provider gemini") {
+		t.Fatalf("expected configured provider in output, got:\n%s", buf.String())
+	}
+}
+
 func TestModelsCmd_InvalidProvider(t *testing.T) {
 	cmd := newRootCmd(dummyChatFn)
 	cmd.SetArgs([]string{"models", "--provider=invalid"})
@@ -2185,14 +2252,14 @@ func TestEnforceBreakingChange(t *testing.T) {
 	}{
 		// Already has ! — unchanged
 		{"feat!: add profiles", "feat!: add profiles"},
-		{"feat!(config)!: add profiles", "feat!(config)!: add profiles"},
+		{"feat(config)!: add profiles", "feat(config)!: add profiles"},
 		// Plain type: rewrite
 		{"feat: add profiles", "feat!: add profiles"},
 		{"fix: correct typo", "fix!: correct typo"},
 		{"chore: bump deps", "chore!: bump deps"},
 		// type(scope): rewrite
-		{"feat(config): add profiles", "feat!(config): add profiles"},
-		{"fix(api): handle error", "fix!(api): handle error"},
+		{"feat(config): add profiles", "feat(config)!: add profiles"},
+		{"fix(api): handle error", "fix(api)!: handle error"},
 		// Non-conventional — prefix
 		{"add named config profiles", "feat!: add named config profiles"},
 	}
@@ -2237,8 +2304,8 @@ func TestQuickCommit_Breaking_DryRun(t *testing.T) {
 		t.Errorf("expected diff to contain BREAKING CHANGE footer, got:\n%s", capturedDiff)
 	}
 	// Output message must have ! even though AI omitted it
-	if !strings.Contains(buf.String(), "feat!(config): add named profiles") {
-		t.Errorf("expected feat!(config) in output, got:\n%s", buf.String())
+	if !strings.Contains(buf.String(), "feat(config)!: add named profiles") {
+		t.Errorf("expected feat(config)! in output, got:\n%s", buf.String())
 	}
 }
 
@@ -2576,6 +2643,29 @@ func TestUpdatePRMetadataFlags_UpdateGitHubTitleAndDescription(t *testing.T) {
 	}
 	if updated.Title != "feat: Generated title" || !strings.Contains(updated.Body, "Generated PR description") {
 		t.Fatalf("unexpected updated metadata: %+v", updated)
+	}
+}
+
+func TestPublishRejectsNoActionsAfterCleaningLists(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	cmd := newRootCmd(dummyChatFn)
+	cmd.SetArgs([]string{
+		"publish",
+		"--provider=openai",
+		"--no-update-title",
+		"--no-update-description",
+		"--post-summary=false",
+		"--label= , ",
+	})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "publish has no remote actions enabled") {
+		t.Fatalf("expected no-actions error, got %v", err)
 	}
 }
 
@@ -3557,7 +3647,7 @@ func TestNormalizeCommitBody_NonConventionalSubject(t *testing.T) {
 func TestEnforceBreakingChange_MultiLine(t *testing.T) {
 	msg := "feat(config): add profiles\n\n## What Changed\n- Added --profile flag"
 	got := enforceBreakingChange(msg)
-	want := "feat!(config): add profiles\n\n## What Changed\n- Added --profile flag"
+	want := "feat(config)!: add profiles\n\n## What Changed\n- Added --profile flag"
 	if got != want {
 		t.Errorf("expected:\n%q\ngot:\n%q", want, got)
 	}
@@ -3565,7 +3655,7 @@ func TestEnforceBreakingChange_MultiLine(t *testing.T) {
 
 func TestEnforceBreakingChange_MultiLine_BodyUnchanged(t *testing.T) {
 	// Body already has ! in subject — should be a no-op
-	msg := "feat!(config): add profiles\n\n## Why\nBreaking."
+	msg := "feat(config)!: add profiles\n\n## Why\nBreaking."
 	got := enforceBreakingChange(msg)
 	if got != msg {
 		t.Errorf("expected no change when ! already present, got:\n%q", got)
@@ -3806,7 +3896,7 @@ func TestApplyCommitTypeScope(t *testing.T) {
 			name:       "breaking marker is preserved",
 			msg:        "feat!: remove legacy config",
 			forceScope: "config",
-			want:       "feat!(config): remove legacy config",
+			want:       "feat(config)!: remove legacy config",
 		},
 	}
 	for _, tc := range cases {
@@ -3933,6 +4023,34 @@ func TestQuickCommit_TrackedOnlyLeavesUntrackedFiles(t *testing.T) {
 	}
 }
 
+func TestQuickCommit_DryRunIncludesUntrackedOnlyChanges(t *testing.T) {
+	dir := initEmptyRepo(t)
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var capturedDiff string
+	fn := func(_ context.Context, _ *Config, _ ApiProvider, _, diff string) (string, error) {
+		capturedDiff = diff
+		return "feat(repo): add untracked file", nil
+	}
+	cmd := newRootCmd(fn)
+	cmd.SetArgs([]string{"quick-commit", "--dry-run", "--provider=openai"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("quick-commit dry-run failed: %v", err)
+	}
+	if !strings.Contains(capturedDiff, "diff --git a/untracked.txt b/untracked.txt") || !strings.Contains(capturedDiff, "+new") {
+		t.Fatalf("expected untracked file in dry-run diff, got:\n%s", capturedDiff)
+	}
+}
+
 func TestQuickCommit_NewFlagValidation(t *testing.T) {
 	initEmptyRepo(t)
 	t.Setenv("OPENAI_API_KEY", "dummy")
@@ -4010,7 +4128,7 @@ func TestAppendCommitEmoji_Types(t *testing.T) {
 		{"ci: fix workflow", "ci: fix workflow 👷"},
 		{"build: upgrade go", "build: upgrade go 🏗️"},
 		{"feat!: breaking api change", "feat!: breaking api change 💥"},
-		{"feat!(scope): breaking", "feat!(scope): breaking 💥"},
+		{"feat(scope)!: breaking", "feat(scope)!: breaking 💥"},
 		{"unknown: something", "unknown: something 🚀"},
 	}
 	for _, tc := range cases {

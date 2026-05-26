@@ -62,10 +62,16 @@ func IsConventionalLine(line string) bool {
 		if strings.HasPrefix(l, typ+":") {
 			return true
 		}
+		if strings.HasPrefix(l, typ+"!:") {
+			return true
+		}
 		prefix := typ + "("
 		if strings.HasPrefix(l, prefix) {
 			rest := l[len(prefix):]
 			if close := strings.Index(rest, ")"); close > 0 && close+1 < len(rest) && rest[close+1] == ':' {
+				return true
+			}
+			if close := strings.Index(rest, ")"); close > 0 && close+2 < len(rest) && rest[close+1] == '!' && rest[close+2] == ':' {
 				return true
 			}
 		}
@@ -128,12 +134,15 @@ func ParseConventionalSubject(subject string) (typ, scope, description string, b
 		breaking = true
 		head = stripped
 	}
-	if headWithoutClose, ok := strings.CutSuffix(head, ")"); ok {
-		if open := strings.Index(headWithoutClose, "("); open > 0 {
-			typ = headWithoutClose[:open]
-			scope = headWithoutClose[open+1:]
-		} else {
-			typ = head
+	if strings.HasSuffix(head, ")") {
+		open := strings.Index(head, "(")
+		if open <= 0 {
+			return "", "", strings.TrimSpace(subject), false, false
+		}
+		typ = head[:open]
+		scope = head[open+1 : len(head)-1]
+		if scope == "" {
+			return "", "", strings.TrimSpace(subject), false, false
 		}
 	} else {
 		typ = head
@@ -164,18 +173,22 @@ func ApplyTypeScope(msg, forcedType, forcedScope string) string {
 	if forcedScope != "" {
 		scope = forcedScope
 	}
-	prefix := typ
-	if breaking {
-		prefix += "!"
-	}
-	if scope != "" {
-		prefix += "(" + scope + ")"
-	}
-	subject = prefix + ": " + strings.TrimSpace(description)
+	subject = FormatConventionalSubject(typ, scope, description, breaking)
 	if hasRest {
 		return subject + "\n" + rest
 	}
 	return subject
+}
+
+func FormatConventionalSubject(typ, scope, description string, breaking bool) string {
+	prefix := typ
+	if scope != "" {
+		prefix += "(" + scope + ")"
+	}
+	if breaking {
+		prefix += "!"
+	}
+	return prefix + ": " + strings.TrimSpace(description)
 }
 
 var typeEmoji = map[string]string{
@@ -194,7 +207,7 @@ var typeEmoji = map[string]string{
 func AppendEmoji(msg string) string {
 	subject, rest, hasRest := strings.Cut(msg, "\n")
 	emoji := "🚀"
-	if strings.Contains(subject, "!") {
+	if _, _, _, breaking, ok := ParseConventionalSubject(strings.TrimSpace(subject)); ok && breaking {
 		emoji = "💥"
 	} else {
 		for t, e := range typeEmoji {
@@ -212,17 +225,9 @@ func AppendEmoji(msg string) string {
 }
 
 func EnforceBreakingSubject(subject string) string {
-	if strings.Contains(subject, "!") {
-		return subject
-	}
-	types := []string{"feat", "fix", "chore", "refactor", "perf", "docs", "style", "test", "ci", "build"}
-	for _, t := range types {
-		if strings.HasPrefix(subject, t+"(") {
-			return t + "!" + subject[len(t):]
-		}
-		if strings.HasPrefix(subject, t+":") {
-			return t + "!" + subject[len(t):]
-		}
+	typ, scope, description, _, ok := ParseConventionalSubject(strings.TrimSpace(subject))
+	if ok {
+		return FormatConventionalSubject(typ, scope, description, true)
 	}
 	return "feat!: " + subject
 }

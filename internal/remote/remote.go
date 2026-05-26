@@ -42,7 +42,7 @@ func normalizeConfiguredBaseURL(rawBaseURL, provider string) (string, string, er
 
 // ResolveGitHubBaseURL returns the API base URL needed by go-github for prURL.
 func ResolveGitHubBaseURL(prURL, configuredBaseURL string) (string, error) {
-	scheme, host, hostname, err := parseURLHost(prURL)
+	_, host, hostname, err := parseURLHost(prURL)
 	if err != nil {
 		return "", fmt.Errorf("invalid GitHub PR URL %q: %w", prURL, err)
 	}
@@ -50,7 +50,7 @@ func ResolveGitHubBaseURL(prURL, configuredBaseURL string) (string, error) {
 		if hostname == "github.com" {
 			return "", nil
 		}
-		return scheme + "://" + host, nil
+		return "", fmt.Errorf("GitHub PR URL host %q is not github.com; set github_base_url for GitHub Enterprise hosts", host)
 	}
 	normalizedBase, baseHost, err := normalizeConfiguredBaseURL(configuredBaseURL, "github")
 	if err != nil {
@@ -64,7 +64,7 @@ func ResolveGitHubBaseURL(prURL, configuredBaseURL string) (string, error) {
 
 // ResolveGitLabBaseURL returns the API base URL needed by go-gitlab for mrURL.
 func ResolveGitLabBaseURL(mrURL, configuredBaseURL string) (string, error) {
-	scheme, host, hostname, err := parseURLHost(mrURL)
+	_, host, hostname, err := parseURLHost(mrURL)
 	if err != nil {
 		return "", fmt.Errorf("invalid GitLab MR URL %q: %w", mrURL, err)
 	}
@@ -72,7 +72,7 @@ func ResolveGitLabBaseURL(mrURL, configuredBaseURL string) (string, error) {
 		if hostname == "gitlab.com" {
 			return "", nil
 		}
-		return scheme + "://" + host, nil
+		return "", fmt.Errorf("GitLab MR URL host %q is not gitlab.com; set gitlab_base_url for self-hosted GitLab hosts", host)
 	}
 	normalizedBase, baseHost, err := normalizeConfiguredBaseURL(configuredBaseURL, "gitlab")
 	if err != nil {
@@ -87,6 +87,13 @@ func ResolveGitLabBaseURL(mrURL, configuredBaseURL string) (string, error) {
 // CreateURL converts a git remote URL and branch name into a browser URL for
 // creating a new PR (GitHub) or MR (GitLab). It returns "" for unknown hosts.
 func CreateURL(remoteURL, branch string) string {
+	return CreateURLWithBase(remoteURL, branch, "", "")
+}
+
+// CreateURLWithBase converts a git remote URL and branch name into a browser URL
+// for creating a new PR (GitHub) or MR (GitLab), accepting configured self-hosted
+// base URLs. It returns "" for unknown hosts.
+func CreateURLWithBase(remoteURL, branch, githubBaseURL, gitlabBaseURL string) string {
 	raw := remoteURL
 	if stripped, ok := strings.CutPrefix(raw, "git@"); ok {
 		raw = stripped
@@ -100,13 +107,16 @@ func CreateURL(remoteURL, branch string) string {
 		return ""
 	}
 
-	host := strings.ToLower(u.Host)
+	hostname := strings.ToLower(u.Hostname())
 	path := strings.Trim(u.Path, "/")
+	if path == "" {
+		return ""
+	}
 
 	switch {
-	case strings.Contains(host, "github"):
+	case IsGitHubHost(hostname, githubBaseURL):
 		return "https://" + u.Host + "/" + path + "/compare/" + url.PathEscape(branch) + "?expand=1"
-	case strings.Contains(host, "gitlab"):
+	case IsGitLabHost(hostname, gitlabBaseURL):
 		q := url.Values{}
 		q.Set("merge_request[source_branch]", branch)
 		return "https://" + u.Host + "/" + path + "/-/merge_requests/new?" + q.Encode()
@@ -189,12 +199,13 @@ func ParseInfo(rawURL string) (Info, error) {
 	if len(parts) < 2 || parts[0] == "" {
 		return Info{}, fmt.Errorf("remote URL %q has too few path segments", rawURL)
 	}
-	return Info{Host: strings.ToLower(u.Host), PathParts: parts}, nil
+	return Info{Host: strings.ToLower(u.Hostname()), PathParts: parts}, nil
 }
 
 // IsGitHubHost reports whether host belongs to GitHub.
 func IsGitHubHost(host, configuredBaseURL string) bool {
-	if strings.Contains(host, "github") {
+	host = strings.ToLower(host)
+	if host == "github.com" {
 		return true
 	}
 	if configuredBaseURL == "" {
@@ -206,7 +217,8 @@ func IsGitHubHost(host, configuredBaseURL string) bool {
 
 // IsGitLabHost reports whether host belongs to GitLab.
 func IsGitLabHost(host, configuredBaseURL string) bool {
-	if strings.Contains(host, "gitlab") {
+	host = strings.ToLower(host)
+	if host == "gitlab.com" {
 		return true
 	}
 	if configuredBaseURL == "" {

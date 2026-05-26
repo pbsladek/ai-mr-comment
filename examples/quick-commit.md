@@ -52,7 +52,7 @@ Override the configured provider for one commit:
 ```sh
 ai-mr-comment quick-commit \
   --provider anthropic \
-  --model claude-opus-4-6 \
+  --model claude-opus-4-7 \
   --dry-run
 ```
 

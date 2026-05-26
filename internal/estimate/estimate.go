@@ -43,18 +43,22 @@ func EstimateCost(model string, inputTokens int32) float64 {
 	// Pricing table in USD per 1M tokens (approximate, subject to change).
 	prices := map[string]ModelPrice{
 		// OpenAI (current)
-		"o3":           {Input: 2.00},
-		"o3-mini":      {Input: 1.10},
-		"o3-pro":       {Input: 20.00},
-		"o1":           {Input: 15.00},
-		"o1-mini":      {Input: 1.10},
-		"gpt-5.5":      {Input: 5.00},
-		"gpt-5.4":      {Input: 2.50},
-		"gpt-5.4-mini": {Input: 0.75},
-		"gpt-5.4-nano": {Input: 0.15},
-		"gpt-4.1":      {Input: 2.00},
-		"gpt-4.1-mini": {Input: 0.40},
-		"gpt-4.1-nano": {Input: 0.10},
+		"o3":            {Input: 2.00},
+		"o3-mini":       {Input: 1.10},
+		"o3-pro":        {Input: 20.00},
+		"o1":            {Input: 15.00},
+		"o1-mini":       {Input: 1.10},
+		"gpt-5.5":       {Input: 5.00},
+		"gpt-5.5-pro":   {Input: 30.00},
+		"gpt-5.4":       {Input: 2.50},
+		"gpt-5.4-pro":   {Input: 30.00},
+		"gpt-5.4-mini":  {Input: 0.75},
+		"gpt-5.4-nano":  {Input: 0.20},
+		"gpt-5.3-codex": {Input: 1.75},
+		"gpt-5.2":       {Input: 1.75},
+		"gpt-4.1":       {Input: 2.00},
+		"gpt-4.1-mini":  {Input: 0.40},
+		"gpt-4.1-nano":  {Input: 0.10},
 		// OpenAI (legacy)
 		"gpt-4o":            {Input: 2.50},
 		"gpt-4o-2024-05-13": {Input: 5.00},
@@ -63,6 +67,7 @@ func EstimateCost(model string, inputTokens int32) float64 {
 		"gpt-3.5-turbo":     {Input: 0.50},
 
 		// Anthropic (current)
+		"claude-opus-4-7":           {Input: 5.00},
 		"claude-opus-4-6":           {Input: 5.00},
 		"claude-sonnet-4-6":         {Input: 3.00},
 		"claude-haiku-4-5-20251001": {Input: 1.00},
@@ -79,12 +84,16 @@ func EstimateCost(model string, inputTokens int32) float64 {
 		"claude-3-haiku-20240307":    {Input: 0.25},
 
 		// Gemini (current; pricing for text <=200k context window)
-		"gemini-2.5-pro":        {Input: 1.25},
-		"gemini-2.5-flash":      {Input: 0.30},
-		"gemini-2.5-flash-lite": {Input: 0.10},
+		"gemini-3.1-pro-preview":             {Input: 2.00},
+		"gemini-3.1-pro-preview-customtools": {Input: 2.00},
+		"gemini-3-flash-preview":             {Input: 0.50},
+		"gemini-3.1-flash-lite":              {Input: 0.25},
+		"gemini-3.1-flash-lite-preview":      {Input: 0.25},
+		"gemini-2.5-pro":                     {Input: 1.25},
+		"gemini-2.5-flash":                   {Input: 0.30},
+		"gemini-2.5-flash-lite":              {Input: 0.10},
 		// Gemini (preview)
-		"gemini-3-flash-preview": {Input: 0.50},
-		"gemini-3-pro-preview":   {Input: 2.00},
+		"gemini-3-pro-preview": {Input: 2.00},
 		// Gemini (legacy, retiring June 2026)
 		"gemini-2.0-flash":      {Input: 0.10},
 		"gemini-2.0-flash-lite": {Input: 0.075},
@@ -114,10 +123,14 @@ func substringFallbackPrice(model string, inputTokens int32) float64 {
 	// less-specific ones (e.g. "gpt-4.1") to avoid shadowing.
 	rules := []substringRule{
 		// OpenAI
+		{"gpt-5.5-pro", "", 30.00},
 		{"gpt-5.5", "", 5.00},
+		{"gpt-5.4-pro", "", 30.00},
 		{"gpt-5.4-mini", "", 0.75},
-		{"gpt-5.4-nano", "", 0.15},
+		{"gpt-5.4-nano", "", 0.20},
 		{"gpt-5.4", "", 2.50},
+		{"gpt-5.3-codex", "", 1.75},
+		{"gpt-5.2", "", 1.75},
 		{"gpt-4.1-nano", "", 0.10},
 		{"gpt-4.1-mini", "", 0.40},
 		{"gpt-4.1", "", 2.00},
@@ -130,9 +143,12 @@ func substringFallbackPrice(model string, inputTokens int32) float64 {
 		{"claude", "sonnet", 3.00},
 		{"claude", "haiku", 1.00},
 		// Gemini, most-specific generation/tier first
+		{"gemini-3.1", "pro", 2.00},
+		{"gemini-3.1", "flash-lite", 0.25},
 		{"gemini-3", "pro", 2.00},
 		{"gemini-3", "flash", 0.50},
 		{"gemini-2.5", "pro", 1.25},
+		{"gemini-2.5", "flash-lite", 0.10},
 		{"gemini-2.5", "flash", 0.30},
 		{"gemini", "flash", 0.10},
 		{"gemini", "pro", 1.25},

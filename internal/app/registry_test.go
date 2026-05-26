@@ -1,6 +1,10 @@
 package app
 
-import "testing"
+import (
+	"testing"
+
+	internalconfig "github.com/pbsladek/ai-mr-comment/internal/config"
+)
 
 func TestProviderRegistryDrivesCompletionAndValidation(t *testing.T) {
 	if len(providerRegistry) != len(providerNames) {
@@ -11,8 +15,11 @@ func TestProviderRegistryDrivesCompletionAndValidation(t *testing.T) {
 		if providerNames[i] != meta.Name {
 			t.Fatalf("providerNames[%d] = %q, want %q", i, providerNames[i], meta.Name)
 		}
-		if meta.Name == "" || meta.DefaultModel == "" {
-			t.Fatalf("provider metadata must include name/default model: %+v", meta)
+		if meta.Name == "" {
+			t.Fatalf("provider metadata must include name: %+v", meta)
+		}
+		if meta.Provider != CodexCLI && meta.DefaultModel == "" {
+			t.Fatalf("provider metadata must include default model unless it delegates to a local CLI default: %+v", meta)
 		}
 		if meta.ModelName == nil || meta.Call == nil {
 			t.Fatalf("provider metadata must include model/call dispatch: %+v", meta)
@@ -30,6 +37,23 @@ func TestProviderRegistryDrivesCompletionAndValidation(t *testing.T) {
 	}
 	if isSupportedProvider(ApiProvider("unknown")) {
 		t.Fatal("unknown provider should not be supported")
+	}
+}
+
+func TestProviderRegistryDefaultsMatchConfigDefaults(t *testing.T) {
+	cfg := &Config{
+		OpenAIModel:    internalconfig.DefaultOpenAIModel,
+		AnthropicModel: internalconfig.DefaultAnthropicModel,
+		GeminiModel:    internalconfig.DefaultGeminiModel,
+		OllamaModel:    internalconfig.DefaultOllamaModel,
+		ClaudeCLIModel: internalconfig.DefaultClaudeCLIModel,
+		GeminiCLIModel: internalconfig.DefaultGeminiCLIModel,
+		CodexCLIModel:  internalconfig.DefaultCodexCLIModel,
+	}
+	for _, meta := range providerRegistry {
+		if got := meta.ModelName(cfg); got != meta.DefaultModel {
+			t.Fatalf("%s registry default %q does not match config default %q", meta.Name, meta.DefaultModel, got)
+		}
 	}
 }
 

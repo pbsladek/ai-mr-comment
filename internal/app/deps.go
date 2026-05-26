@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"io"
 	"os"
 	"time"
 
@@ -21,6 +22,7 @@ type commandDeps struct {
 	isGitRepo          func() bool
 	getCurrentBranch   func() (string, error)
 	getGitDiff         func(string, bool, []string) (string, error)
+	getQuickDryRunDiff func(bool) (string, error)
 	stageAll           func() error
 	stageTracked       func() error
 	commitMessage      func(string) error
@@ -45,6 +47,7 @@ type commandDeps struct {
 	upsertRemoteManagedComment func(context.Context, *Config, string, string) error
 	addRemoteLabels            func(context.Context, *Config, string, []string) error
 	requestRemoteReviewers     func(context.Context, *Config, string, []string) error
+	streamToWriter             func(context.Context, *Config, ApiProvider, string, string, io.Writer) (string, error)
 }
 
 func defaultCommandDeps() commandDeps {
@@ -59,6 +62,7 @@ func defaultCommandDeps() commandDeps {
 		isGitRepo:          localgit.IsRepo,
 		getCurrentBranch:   localgit.CurrentBranch,
 		getGitDiff:         localgit.Diff,
+		getQuickDryRunDiff: localgit.QuickCommitDryRunDiff,
 		stageAll:           localgit.Add,
 		stageTracked:       localgit.AddTracked,
 		commitMessage:      localgit.CommitMessage,
@@ -83,6 +87,7 @@ func defaultCommandDeps() commandDeps {
 		upsertRemoteManagedComment: upsertRemoteManagedComment,
 		addRemoteLabels:            addRemoteLabels,
 		requestRemoteReviewers:     requestRemoteReviewers,
+		streamToWriter:             streamToWriter,
 	}
 }
 

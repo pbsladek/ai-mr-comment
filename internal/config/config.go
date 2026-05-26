@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/go-viper/mapstructure/v2"
@@ -22,6 +24,18 @@ const (
 	ClaudeCLI Provider = "claude-cli"
 	GeminiCLI Provider = "gemini-cli"
 	CodexCLI  Provider = "codex-cli"
+)
+
+const (
+	DefaultProvider       = Anthropic
+	DefaultTemplate       = "default"
+	DefaultOpenAIModel    = "gpt-5.5"
+	DefaultAnthropicModel = "claude-sonnet-4-6"
+	DefaultOllamaModel    = "llama3.2"
+	DefaultGeminiModel    = "gemini-2.5-flash"
+	DefaultClaudeCLIModel = "claude-sonnet-4-6"
+	DefaultGeminiCLIModel = "gemini-2.5-flash"
+	DefaultCodexCLIModel  = ""
 )
 
 // Config holds all runtime settings, populated from the TOML config file,
@@ -125,30 +139,67 @@ func ApplyProfile(v *viper.Viper, profile string) error {
 		return fmt.Errorf("profile %q not found in config", profile)
 	}
 	for key, val := range sub.AllSettings() {
+		if hasEnvOverride(key) {
+			continue
+		}
 		v.Set(key, val)
 	}
 	return nil
+}
+
+func hasEnvOverride(key string) bool {
+	envKey := "AI_MR_COMMENT_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
+	if _, ok := os.LookupEnv(envKey); ok {
+		return true
+	}
+	for _, bare := range bareEnvKeys(key) {
+		if _, ok := os.LookupEnv(bare); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func bareEnvKeys(key string) []string {
+	switch key {
+	case "openai_api_key":
+		return []string{"OPENAI_API_KEY"}
+	case "anthropic_api_key":
+		return []string{"ANTHROPIC_API_KEY"}
+	case "gemini_api_key":
+		return []string{"GEMINI_API_KEY"}
+	case "github_token":
+		return []string{"GITHUB_TOKEN"}
+	case "gitlab_token":
+		return []string{"GITLAB_TOKEN"}
+	case "github_base_url":
+		return []string{"GITHUB_BASE_URL"}
+	case "gitlab_base_url":
+		return []string{"GITLAB_BASE_URL"}
+	default:
+		return nil
+	}
 }
 
 // LoadWith applies defaults, reads the config file (if present), overlays the
 // named profile (if any), and unmarshals the result into a Config.
 // It is split from LoadForProfile to allow tests to inject a pre-configured Viper instance.
 func LoadWith(v *viper.Viper, profile string) (*Config, error) {
-	v.SetDefault("provider", Anthropic)
-	v.SetDefault("openai_model", "gpt-5.5")
+	v.SetDefault("provider", DefaultProvider)
+	v.SetDefault("openai_model", DefaultOpenAIModel)
 	v.SetDefault("openai_endpoint", "https://api.openai.com/v1/")
-	v.SetDefault("anthropic_model", "claude-sonnet-4-6")
+	v.SetDefault("anthropic_model", DefaultAnthropicModel)
 	v.SetDefault("anthropic_endpoint", "https://api.anthropic.com/")
-	v.SetDefault("ollama_model", "llama3.2")
+	v.SetDefault("ollama_model", DefaultOllamaModel)
 	v.SetDefault("ollama_endpoint", "http://localhost:11434/api/generate")
-	v.SetDefault("gemini_model", "gemini-2.5-flash")
-	v.SetDefault("claude_cli_model", "claude-sonnet-4-6")
+	v.SetDefault("gemini_model", DefaultGeminiModel)
+	v.SetDefault("claude_cli_model", DefaultClaudeCLIModel)
 	v.SetDefault("claude_cli_path", "")
-	v.SetDefault("gemini_cli_model", "gemini-2.5-flash")
+	v.SetDefault("gemini_cli_model", DefaultGeminiCLIModel)
 	v.SetDefault("gemini_cli_path", "")
-	v.SetDefault("codex_cli_model", "")
+	v.SetDefault("codex_cli_model", DefaultCodexCLIModel)
 	v.SetDefault("codex_cli_path", "")
-	v.SetDefault("template", "default")
+	v.SetDefault("template", DefaultTemplate)
 	v.SetDefault("request_timeout", "0s")
 
 	if err := v.ReadInConfig(); err != nil {
