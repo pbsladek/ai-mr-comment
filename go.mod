@@ -3,7 +3,7 @@ module github.com/pbsladek/ai-mr-comment
 go 1.26
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.45.0
+	github.com/anthropics/anthropic-sdk-go v1.46.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/google/go-github/v68 v68.0.0
