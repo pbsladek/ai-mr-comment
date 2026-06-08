@@ -24,7 +24,7 @@ jobs:
       tag_commit: ${{ steps.resolve_tag.outputs.tag_commit }}
       tag_commit_short: ${{ steps.resolve_tag.outputs.tag_commit_short }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
           ref: refs/heads/main
@@ -46,7 +46,7 @@ jobs:
       source_url: ${{ steps.release_meta.outputs.source_url }}
       source_sha256: ${{ steps.release_meta.outputs.source_sha256 }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
           ref: ${{ needs.validate.outputs.tag_commit }}
@@ -104,7 +104,7 @@ jobs:
       docker_tags: ${{ steps.docker_tags.outputs.tags }}
       docker_enabled: ${{ steps.docker_creds.outputs.enabled }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
           ref: ${{ needs.validate.outputs.tag_commit }}
@@ -118,7 +118,7 @@ jobs:
 
       - name: Set up QEMU
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4.1.0
 
       - name: Set up Docker Buildx
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
@@ -248,7 +248,7 @@ jobs:
       docker_fips_tags: ${{ steps.docker_tags_fips.outputs.tags }}
       docker_fips_enabled: ${{ steps.docker_creds.outputs.enabled }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
           ref: ${{ needs.validate.outputs.tag_commit }}
@@ -262,7 +262,7 @@ jobs:
 
       - name: Set up QEMU
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4.1.0
 
       - name: Set up Docker Buildx
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
@@ -390,7 +390,7 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
           ref: ${{ needs.validate.outputs.tag_commit }}
@@ -447,7 +447,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 1
           ref: ${{ needs.validate.outputs.tag_commit }}
