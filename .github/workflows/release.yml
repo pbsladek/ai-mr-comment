@@ -24,7 +24,7 @@ jobs:
       tag_commit: ${{ steps.resolve_tag.outputs.tag_commit }}
       tag_commit_short: ${{ steps.resolve_tag.outputs.tag_commit_short }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           ref: refs/heads/main
@@ -46,13 +46,13 @@ jobs:
       source_url: ${{ steps.release_meta.outputs.source_url }}
       source_sha256: ${{ steps.release_meta.outputs.source_sha256 }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           ref: ${{ needs.validate.outputs.tag_commit }}
 
       - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: "1.26"
 
@@ -77,7 +77,7 @@ jobs:
 
       - name: Attest release archives provenance
         id: attest_binaries
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-checksums: dist/checksums.txt
 
@@ -104,7 +104,7 @@ jobs:
       docker_tags: ${{ steps.docker_tags.outputs.tags }}
       docker_enabled: ${{ steps.docker_creds.outputs.enabled }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           ref: ${{ needs.validate.outputs.tag_commit }}
@@ -118,7 +118,7 @@ jobs:
 
       - name: Set up QEMU
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4.1.0
 
       - name: Set up Docker Buildx
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
@@ -165,7 +165,7 @@ jobs:
 
       - name: Scan Docker amd64 image vulnerabilities
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/scout-action@cd72f264beff1cd72735de31148b9d3244a0234a # v1.21.0
+        uses: docker/scout-action@7520205ff60037fdc436b40b6a1d1e55a839ec2d # v1.22.0
         with:
           command: cves
           image: local://pwbsladek/ai-mr-comment:scan-amd64
@@ -191,7 +191,7 @@ jobs:
 
       - name: Scan Docker arm64 image vulnerabilities
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/scout-action@cd72f264beff1cd72735de31148b9d3244a0234a # v1.21.0
+        uses: docker/scout-action@7520205ff60037fdc436b40b6a1d1e55a839ec2d # v1.22.0
         with:
           command: cves
           image: local://pwbsladek/ai-mr-comment:scan-arm64
@@ -218,7 +218,7 @@ jobs:
       - name: Attest Docker image provenance
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
         id: attest_docker
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-name: docker.io/pwbsladek/ai-mr-comment
           subject-digest: ${{ steps.docker_build.outputs.digest }}
@@ -248,7 +248,7 @@ jobs:
       docker_fips_tags: ${{ steps.docker_tags_fips.outputs.tags }}
       docker_fips_enabled: ${{ steps.docker_creds.outputs.enabled }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           ref: ${{ needs.validate.outputs.tag_commit }}
@@ -262,7 +262,7 @@ jobs:
 
       - name: Set up QEMU
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4.1.0
 
       - name: Set up Docker Buildx
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
@@ -310,7 +310,7 @@ jobs:
 
       - name: Scan Docker FIPS amd64 image vulnerabilities
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/scout-action@cd72f264beff1cd72735de31148b9d3244a0234a # v1.21.0
+        uses: docker/scout-action@7520205ff60037fdc436b40b6a1d1e55a839ec2d # v1.22.0
         with:
           command: cves
           image: local://pwbsladek/ai-mr-comment:scan-fips-amd64
@@ -337,7 +337,7 @@ jobs:
 
       - name: Scan Docker FIPS arm64 image vulnerabilities
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
-        uses: docker/scout-action@cd72f264beff1cd72735de31148b9d3244a0234a # v1.21.0
+        uses: docker/scout-action@7520205ff60037fdc436b40b6a1d1e55a839ec2d # v1.22.0
         with:
           command: cves
           image: local://pwbsladek/ai-mr-comment:scan-fips-arm64
@@ -365,7 +365,7 @@ jobs:
       - name: Attest Docker FIPS image provenance
         if: ${{ steps.docker_creds.outputs.enabled == 'true' }}
         id: attest_docker_fips
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-name: docker.io/pwbsladek/ai-mr-comment
           subject-digest: ${{ steps.docker_build_fips.outputs.digest }}
@@ -390,7 +390,7 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           ref: ${{ needs.validate.outputs.tag_commit }}
@@ -447,7 +447,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 1
           ref: ${{ needs.validate.outputs.tag_commit }}
