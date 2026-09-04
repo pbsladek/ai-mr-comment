@@ -96,6 +96,9 @@ Examples:
 			if cmd.Flags().Changed("model") {
 				setModelOverride(cfg, modelOverride)
 			}
+			if !isSupportedProvider(cfg.Provider) {
+				return withExitCode(4, errors.New("unsupported provider: "+string(cfg.Provider)))
+			}
 
 			// Print resolved config.
 			_, _ = fmt.Fprintf(out, "Provider : %s\n", cfg.Provider)
@@ -194,10 +197,10 @@ func newDoctorCmd() *cobra.Command {
 				setModelOverride(cfg, modelOverride)
 			}
 			if !isSupportedProvider(cfg.Provider) {
-				return errors.New("unsupported provider: " + string(cfg.Provider))
+				return withExitCode(4, errors.New("unsupported provider: "+string(cfg.Provider)))
 			}
 			if format != "text" && format != "json" {
-				return fmt.Errorf("unsupported format %q: must be text or json", format)
+				return withExitCode(4, fmt.Errorf("unsupported format %q: must be text or json", format))
 			}
 
 			type doctorPayload struct {

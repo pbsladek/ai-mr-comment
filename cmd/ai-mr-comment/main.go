@@ -33,6 +33,11 @@ type exitCoder interface {
 	ExitCode() int
 }
 
+type silentExit interface {
+	error
+	SilentExit() bool
+}
+
 func init() {
 	if Version != "dev" || Commit != "unknown" {
 		return
@@ -58,6 +63,10 @@ func main() {
 	app.SetBuildInfo(Version, Commit, CommitFull)
 	if err := app.Execute(); err != nil {
 		if exitErr, ok := errors.AsType[exitCoder](err); ok {
+			silent, isSilent := errors.AsType[silentExit](err)
+			if !isSilent || !silent.SilentExit() {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			}
 			os.Exit(exitErr.ExitCode())
 		}
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

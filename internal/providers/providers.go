@@ -296,8 +296,15 @@ func CLIExecError(ctx context.Context, name string, err error, stderr string) er
 }
 
 func ExecCLI(ctx context.Context, binary string, args []string) (string, error) {
+	return ExecCLIWithInput(ctx, binary, args, "")
+}
+
+// ExecCLIWithInput runs a local provider CLI with prompt content on stdin so
+// large or sensitive diffs are not exposed through the process argument list.
+func ExecCLIWithInput(ctx context.Context, binary string, args []string, input string) (string, error) {
 	cmd := exec.CommandContext(ctx, binary, args...) //nolint:gosec // G204: binary is resolved from explicit config/PATH for supported local AI CLIs.
 	var stderr bytes.Buffer
+	cmd.Stdin = strings.NewReader(input)
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
@@ -315,9 +322,15 @@ func ExecCLI(ctx context.Context, binary string, args []string) (string, error) 
 }
 
 func StreamExecCLI(ctx context.Context, binary string, args []string, w io.Writer) (string, error) {
+	return StreamExecCLIWithInput(ctx, binary, args, "", w)
+}
+
+// StreamExecCLIWithInput is the streaming form of ExecCLIWithInput.
+func StreamExecCLIWithInput(ctx context.Context, binary string, args []string, input string, w io.Writer) (string, error) {
 	cmd := exec.CommandContext(ctx, binary, args...) //nolint:gosec // G204: binary is resolved from explicit config/PATH for supported local AI CLIs.
 	var sb strings.Builder
 	var stderr bytes.Buffer
+	cmd.Stdin = strings.NewReader(input)
 	cmd.Stdout = io.MultiWriter(w, &sb)
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -352,12 +365,14 @@ func FindClaudeBinary(cfg *config.Config) (string, error) {
 	return path, nil
 }
 
-func ClaudeCLIArgs(cfg *config.Config, prompt string) []string {
+func ClaudeCLIArgs(cfg *config.Config) []string {
 	args := []string{"--output-format", "text"}
 	if cfg.ClaudeCLIModel != "" {
 		args = append(args, "--model", cfg.ClaudeCLIModel)
 	}
-	return append(args, "-p", prompt)
+	// Claude's print flag reads the prompt from stdin when no positional prompt
+	// is supplied.
+	return append(args, "-p")
 }
 
 func CallClaudeCLI(ctx context.Context, cfg *config.Config, systemPrompt, diffContent string) (string, error) {
@@ -365,7 +380,7 @@ func CallClaudeCLI(ctx context.Context, cfg *config.Config, systemPrompt, diffCo
 	if err != nil {
 		return "", err
 	}
-	return ExecCLI(ctx, binary, ClaudeCLIArgs(cfg, CLIPrompt(systemPrompt, diffContent)))
+	return ExecCLIWithInput(ctx, binary, ClaudeCLIArgs(cfg), CLIPrompt(systemPrompt, diffContent))
 }
 
 func StreamClaudeCLI(ctx context.Context, cfg *config.Config, systemPrompt, diffContent string, w io.Writer) (string, error) {
@@ -373,7 +388,7 @@ func StreamClaudeCLI(ctx context.Context, cfg *config.Config, systemPrompt, diff
 	if err != nil {
 		return "", err
 	}
-	return StreamExecCLI(ctx, binary, ClaudeCLIArgs(cfg, CLIPrompt(systemPrompt, diffContent)), w)
+	return StreamExecCLIWithInput(ctx, binary, ClaudeCLIArgs(cfg), CLIPrompt(systemPrompt, diffContent), w)
 }
 
 func FindGeminiCLIBinary(cfg *config.Config) (string, error) {
@@ -390,12 +405,14 @@ func FindGeminiCLIBinary(cfg *config.Config) (string, error) {
 	return path, nil
 }
 
-func GeminiCLIArgs(cfg *config.Config, prompt string) []string {
+func GeminiCLIArgs(cfg *config.Config) []string {
 	var args []string
 	if cfg.GeminiCLIModel != "" {
 		args = append(args, "--model", cfg.GeminiCLIModel)
 	}
-	return append(args, "-p", prompt)
+	// Gemini requires a value for --prompt in headless mode and appends stdin as
+	// context. Keep the argv prompt constant and place all user content on stdin.
+	return append(args, "-p", "Follow the complete instructions supplied on standard input.")
 }
 
 func CallGeminiCLI(ctx context.Context, cfg *config.Config, systemPrompt, diffContent string) (string, error) {
@@ -403,7 +420,7 @@ func CallGeminiCLI(ctx context.Context, cfg *config.Config, systemPrompt, diffCo
 	if err != nil {
 		return "", err
 	}
-	return ExecCLI(ctx, binary, GeminiCLIArgs(cfg, CLIPrompt(systemPrompt, diffContent)))
+	return ExecCLIWithInput(ctx, binary, GeminiCLIArgs(cfg), CLIPrompt(systemPrompt, diffContent))
 }
 
 func StreamGeminiCLI(ctx context.Context, cfg *config.Config, systemPrompt, diffContent string, w io.Writer) (string, error) {
@@ -411,7 +428,7 @@ func StreamGeminiCLI(ctx context.Context, cfg *config.Config, systemPrompt, diff
 	if err != nil {
 		return "", err
 	}
-	return StreamExecCLI(ctx, binary, GeminiCLIArgs(cfg, CLIPrompt(systemPrompt, diffContent)), w)
+	return StreamExecCLIWithInput(ctx, binary, GeminiCLIArgs(cfg), CLIPrompt(systemPrompt, diffContent), w)
 }
 
 func FindCodexBinary(cfg *config.Config) (string, error) {
@@ -428,12 +445,13 @@ func FindCodexBinary(cfg *config.Config) (string, error) {
 	return path, nil
 }
 
-func CodexCLIArgs(cfg *config.Config, prompt string) []string {
+func CodexCLIArgs(cfg *config.Config) []string {
 	args := []string{"exec"}
 	if cfg.CodexCLIModel != "" {
 		args = append(args, "-m", cfg.CodexCLIModel)
 	}
-	return append(args, prompt)
+	// The explicit '-' sentinel forces codex exec to read its prompt from stdin.
+	return append(args, "-")
 }
 
 func CallCodexCLI(ctx context.Context, cfg *config.Config, systemPrompt, diffContent string) (string, error) {
@@ -441,7 +459,7 @@ func CallCodexCLI(ctx context.Context, cfg *config.Config, systemPrompt, diffCon
 	if err != nil {
 		return "", err
 	}
-	return ExecCLI(ctx, binary, CodexCLIArgs(cfg, CLIPrompt(systemPrompt, diffContent)))
+	return ExecCLIWithInput(ctx, binary, CodexCLIArgs(cfg), CLIPrompt(systemPrompt, diffContent))
 }
 
 func StreamCodexCLI(ctx context.Context, cfg *config.Config, systemPrompt, diffContent string, w io.Writer) (string, error) {
@@ -449,7 +467,7 @@ func StreamCodexCLI(ctx context.Context, cfg *config.Config, systemPrompt, diffC
 	if err != nil {
 		return "", err
 	}
-	return StreamExecCLI(ctx, binary, CodexCLIArgs(cfg, CLIPrompt(systemPrompt, diffContent)), w)
+	return StreamExecCLIWithInput(ctx, binary, CodexCLIArgs(cfg), CLIPrompt(systemPrompt, diffContent), w)
 }
 
 // ValidateAPIKey returns an error if the required API key for provider is missing.

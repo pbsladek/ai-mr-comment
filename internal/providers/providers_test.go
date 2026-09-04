@@ -784,6 +784,26 @@ func TestExecCLIAndStreamExecCLI(t *testing.T) {
 	}
 }
 
+func TestExecCLIWithInputAndStreamExecCLIWithInput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fixtures are POSIX-only")
+	}
+	dir := t.TempDir()
+	bin := writeExecutable(t, dir, "stdin-cli", "#!/bin/sh\ncat\n")
+	const prompt = "system instructions\n\ndiff --git a/a.go b/a.go\n+secret content\n"
+
+	got, err := ExecCLIWithInput(context.Background(), bin, nil, prompt)
+	if err != nil || got != strings.TrimSpace(prompt) {
+		t.Fatalf("ExecCLIWithInput = %q, %v", got, err)
+	}
+
+	var buf bytes.Buffer
+	got, err = StreamExecCLIWithInput(context.Background(), bin, nil, prompt, &buf)
+	if err != nil || got != strings.TrimSpace(prompt) || strings.TrimSpace(buf.String()) != got {
+		t.Fatalf("StreamExecCLIWithInput = %q, %v, writer=%q", got, err, buf.String())
+	}
+}
+
 func TestExecCLIErrorAndEmptyOutput(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell script fixtures are POSIX-only")
@@ -901,11 +921,10 @@ func TestCallAndStreamConfiguredCLIs(t *testing.T) {
 		t.Skip("shell script fixtures are POSIX-only")
 	}
 	dir := t.TempDir()
-	echoScript := "#!/bin/sh\necho generated from \"$1\" \"$2\"\n"
-	streamScript := "#!/bin/sh\nprintf streamed-output\n"
-	claude := writeExecutable(t, dir, "claude", echoScript)
-	gemini := writeExecutable(t, dir, "gemini", echoScript)
-	codex := writeExecutable(t, dir, "codex", streamScript)
+	stdinScript := "#!/bin/sh\ncat\n"
+	claude := writeExecutable(t, dir, "claude", stdinScript)
+	gemini := writeExecutable(t, dir, "gemini", stdinScript)
+	codex := writeExecutable(t, dir, "codex", stdinScript)
 
 	cfg := &config.Config{
 		ClaudeCLIPath: claude,
@@ -921,8 +940,8 @@ func TestCallAndStreamConfiguredCLIs(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s call failed: %v", name, err)
 		}
-		if strings.TrimSpace(got) == "" {
-			t.Fatalf("%s call returned empty output", name)
+		if got != "system\n\ndiff" {
+			t.Fatalf("%s call did not receive prompt through stdin: %q", name, got)
 		}
 	}
 
@@ -936,7 +955,7 @@ func TestCallAndStreamConfiguredCLIs(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s stream failed: %v", name, err)
 		}
-		if strings.TrimSpace(got) == "" || strings.TrimSpace(buf.String()) != got {
+		if got != "system\n\ndiff" || strings.TrimSpace(buf.String()) != got {
 			t.Fatalf("unexpected %s streamed output: got=%q writer=%q", name, got, buf.String())
 		}
 	}
@@ -949,13 +968,13 @@ func TestCLIArgs(t *testing.T) {
 		CodexCLIModel:  "gpt-5.5",
 	}
 
-	if got := strings.Join(ClaudeCLIArgs(cfg, "prompt"), " "); !strings.Contains(got, "--model claude-sonnet-4-6") {
+	if got := strings.Join(ClaudeCLIArgs(cfg), " "); !strings.Contains(got, "--model claude-sonnet-4-6") || strings.Contains(got, "prompt") {
 		t.Fatalf("expected Claude model arg, got %q", got)
 	}
-	if got := strings.Join(GeminiCLIArgs(cfg, "prompt"), " "); !strings.Contains(got, "--model gemini-2.5-flash") {
+	if got := strings.Join(GeminiCLIArgs(cfg), " "); !strings.Contains(got, "--model gemini-2.5-flash") {
 		t.Fatalf("expected Gemini model arg, got %q", got)
 	}
-	if got := strings.Join(CodexCLIArgs(cfg, "prompt"), " "); !strings.Contains(got, "-m gpt-5.5") {
+	if got := strings.Join(CodexCLIArgs(cfg), " "); !strings.Contains(got, "-m gpt-5.5 -") {
 		t.Fatalf("expected Codex model arg, got %q", got)
 	}
 }

@@ -3,9 +3,13 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type testErrWriter struct {
@@ -191,13 +195,16 @@ func TestGenerateRootProviderOutputTitleOnlyAndSmartChunk(t *testing.T) {
 		t.Fatalf("title = %q", title.Title)
 	}
 
+	var promptsMu sync.Mutex
 	var prompts []string
 	got, err := generateRootProviderOutput(rootGenerationRequest{
 		Context: context.Background(),
 		Config:  cfg,
 		Options: RootOptions{},
 		Chat: func(_ context.Context, _ *Config, _ ApiProvider, prompt, diff string) (string, error) {
+			promptsMu.Lock()
 			prompts = append(prompts, prompt)
+			promptsMu.Unlock()
 			if strings.Contains(prompt, "Summarize the changes") {
 				return "summary for " + firstLine(diff), nil
 			}
@@ -218,8 +225,69 @@ func TestGenerateRootProviderOutputTitleOnlyAndSmartChunk(t *testing.T) {
 	if got.Comment != "synthesized comment" {
 		t.Fatalf("smart-chunk comment = %q", got.Comment)
 	}
+	promptsMu.Lock()
+	defer promptsMu.Unlock()
 	if len(prompts) != 3 {
 		t.Fatalf("expected two chunk prompts and synthesis, got %d: %v", len(prompts), prompts)
+	}
+}
+
+func TestSmartChunkBoundsConcurrency(t *testing.T) {
+	cfg := &Config{Provider: OpenAI, OpenAIModel: "gpt-5.5"}
+	var active atomic.Int32
+	var maximum atomic.Int32
+	chatFn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, _ string) (string, error) {
+		if !strings.Contains(prompt, "Summarize the changes") {
+			return "final", nil
+		}
+		current := active.Add(1)
+		for {
+			seen := maximum.Load()
+			if current <= seen || maximum.CompareAndSwap(seen, current) {
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+		active.Add(-1)
+		return "summary", nil
+	}
+
+	var diff strings.Builder
+	for i := range 24 {
+		_, _ = fmt.Fprintf(&diff, "diff --git a/file-%02d.go b/file-%02d.go\n+change\n", i, i)
+	}
+	got, err := generateRootProviderOutput(rootGenerationRequest{
+		Context:      context.Background(),
+		Config:       cfg,
+		Options:      RootOptions{},
+		Chat:         chatFn,
+		SystemPrompt: defaultPromptTemplate,
+		DiffContent:  diff.String(),
+		SmartChunk:   true,
+		Out:          io.Discard,
+	})
+	if err != nil || got.Comment != "final" {
+		t.Fatalf("smart chunk result = %+v, %v", got, err)
+	}
+	if max := maximum.Load(); max > smartChunkConcurrency {
+		t.Fatalf("maximum concurrent calls = %d, limit = %d", max, smartChunkConcurrency)
+	}
+}
+
+func TestRootStreamingModeBuffersVerdictOnly(t *testing.T) {
+	shouldStream, jsonl := rootStreamingMode(true, "text", "", false, "", true, false, false)
+	if shouldStream || jsonl {
+		t.Fatalf("verdict-only interactive output must be buffered: stream=%v jsonl=%v", shouldStream, jsonl)
+	}
+
+	shouldStream, jsonl = rootStreamingMode(false, "text", "jsonl", false, "", true, false, false)
+	if shouldStream || jsonl {
+		t.Fatalf("verdict-only JSONL output must be buffered: stream=%v jsonl=%v", shouldStream, jsonl)
+	}
+
+	shouldStream, jsonl = rootStreamingMode(true, "text", "", false, "", false, false, false)
+	if !shouldStream || jsonl {
+		t.Fatalf("ordinary interactive text should stream: stream=%v jsonl=%v", shouldStream, jsonl)
 	}
 }
 

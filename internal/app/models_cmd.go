@@ -95,7 +95,7 @@ func newModelsCmd() *cobra.Command {
 			}
 			models, ok := providerModels[p]
 			if !ok {
-				return fmt.Errorf("unknown provider %q: choose from openai, anthropic, gemini, ollama, claude-cli, gemini-cli, codex-cli", p)
+				return withExitCode(4, fmt.Errorf("unknown provider %q: choose from openai, anthropic, gemini, ollama, claude-cli, gemini-cli, codex-cli", p))
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Models for provider %s:\n\n", p)
 			if len(models) == 0 {

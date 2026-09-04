@@ -211,10 +211,19 @@ func validateRevisionSpec(spec string) error {
 // so dry-run previews match the default git add . behaviour without mutating
 // the index.
 func QuickCommitDryRunDiff(trackedOnly bool) (string, error) {
-	diff, err := Diff("", false, nil)
-	if err != nil {
-		return "", err
+	var args []string
+	if HasCommits() {
+		// A quick-commit preview must describe only changes that the next commit
+		// would contain, not every commit since the branch merge base.
+		args = []string{"diff", "HEAD"}
+	} else {
+		args = []string{"diff", "--cached"}
 	}
+	out, err := exec.Command("git", args...).CombinedOutput() //nolint:gosec // G204: git is fixed and args are internal constants.
+	if err != nil {
+		return "", fmt.Errorf("reading quick-commit preview diff: %w\n%s", err, strings.TrimSpace(string(out)))
+	}
+	diff := string(out)
 	if trackedOnly {
 		return diff, nil
 	}

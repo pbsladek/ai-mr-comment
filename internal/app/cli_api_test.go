@@ -177,8 +177,11 @@ func TestStreamExecCLI_NonZeroExit(t *testing.T) {
 
 func TestClaudeCLIArgs_NoModel(t *testing.T) {
 	cfg := &Config{}
-	args := claudeCLIArgs(cfg, "the-prompt")
-	assertArgOrder(t, args, "--output-format", "text", "-p", "the-prompt")
+	args := claudeCLIArgs(cfg)
+	assertArgOrder(t, args, "--output-format", "text", "-p")
+	if strings.Contains(strings.Join(args, " "), "the-prompt") {
+		t.Fatal("prompt content must not be placed in Claude argv")
+	}
 	if containsFlag(args, "--model") {
 		t.Error("expected no --model flag when model is empty")
 	}
@@ -186,16 +189,16 @@ func TestClaudeCLIArgs_NoModel(t *testing.T) {
 
 func TestClaudeCLIArgs_WithModel(t *testing.T) {
 	cfg := &Config{ClaudeCLIModel: "claude-sonnet-4-6"}
-	args := claudeCLIArgs(cfg, "the-prompt")
-	assertArgOrder(t, args, "--model", "claude-sonnet-4-6", "-p", "the-prompt")
+	args := claudeCLIArgs(cfg)
+	assertArgOrder(t, args, "--model", "claude-sonnet-4-6", "-p")
 	assertFlagBeforePrompt(t, args, "--output-format", "-p")
 	assertFlagBeforePrompt(t, args, "--model", "-p")
 }
 
 func TestGeminiCLIArgs_NoModel(t *testing.T) {
 	cfg := &Config{}
-	args := geminiCLIArgs(cfg, "the-prompt")
-	assertArgOrder(t, args, "-p", "the-prompt")
+	args := geminiCLIArgs(cfg)
+	assertArgOrder(t, args, "-p", "Follow the complete instructions supplied on standard input.")
 	if containsFlag(args, "--model") {
 		t.Error("expected no --model flag when model is empty")
 	}
@@ -203,15 +206,15 @@ func TestGeminiCLIArgs_NoModel(t *testing.T) {
 
 func TestGeminiCLIArgs_WithModel(t *testing.T) {
 	cfg := &Config{GeminiCLIModel: "gemini-2.5-flash"}
-	args := geminiCLIArgs(cfg, "the-prompt")
-	assertArgOrder(t, args, "--model", "gemini-2.5-flash", "-p", "the-prompt")
+	args := geminiCLIArgs(cfg)
+	assertArgOrder(t, args, "--model", "gemini-2.5-flash", "-p", "Follow the complete instructions supplied on standard input.")
 	assertFlagBeforePrompt(t, args, "--model", "-p")
 }
 
 func TestCodexCLIArgs_NoModel(t *testing.T) {
 	cfg := &Config{}
-	args := codexCLIArgs(cfg, "the-prompt")
-	assertArgOrder(t, args, "exec", "the-prompt")
+	args := codexCLIArgs(cfg)
+	assertArgOrder(t, args, "exec", "-")
 	if containsFlag(args, "-m") {
 		t.Error("expected no -m flag when model is empty")
 	}
@@ -219,8 +222,8 @@ func TestCodexCLIArgs_NoModel(t *testing.T) {
 
 func TestCodexCLIArgs_WithModel(t *testing.T) {
 	cfg := &Config{CodexCLIModel: "o4-mini"}
-	args := codexCLIArgs(cfg, "the-prompt")
-	assertArgOrder(t, args, "exec", "-m", "o4-mini", "the-prompt")
+	args := codexCLIArgs(cfg)
+	assertArgOrder(t, args, "exec", "-m", "o4-mini", "-")
 }
 
 // --- findClaudeBinary ---

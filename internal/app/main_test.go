@@ -3271,6 +3271,61 @@ func TestSmartChunk_LargeFileSet(t *testing.T) {
 	}
 }
 
+func TestSmartChunk_DoesNotDropMiddleFilesBeforeSplitting(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "dummy")
+
+	const fileCount = 30
+	var input strings.Builder
+	for file := range fileCount {
+		_, _ = fmt.Fprintf(&input, "diff --git a/file-%02d.go b/file-%02d.go\n--- a/file-%02d.go\n+++ b/file-%02d.go\n", file, file, file, file)
+		for line := range 210 {
+			_, _ = fmt.Fprintf(&input, "+file-%02d-line-%03d\n", file, line)
+		}
+	}
+	if lines := strings.Count(input.String(), "\n"); lines <= 4000 {
+		t.Fatalf("test setup requires a diff over the global limit, got %d lines", lines)
+	}
+
+	seen := make(map[string]bool, fileCount)
+	var mu sync.Mutex
+	mockFn := func(_ context.Context, _ *Config, _ ApiProvider, prompt, diffContent string) (string, error) {
+		if strings.HasPrefix(prompt, "Summarize the changes") {
+			header := firstLine(diffContent)
+			mu.Lock()
+			seen[header] = true
+			mu.Unlock()
+			return "summary for " + header, nil
+		}
+		if strings.Contains(prompt, "Condense these per-file diff summaries") {
+			return "aggregate preserving all files", nil
+		}
+		return "complete synthesis", nil
+	}
+
+	cmd := newRootCmd(mockFn)
+	cmd.SetArgs([]string{"--smart-chunk", "--file=-", "--provider=openai"})
+	cmd.SetIn(strings.NewReader(input.String()))
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("smart chunk command failed: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != fileCount {
+		t.Fatalf("smart chunk saw %d/%d files", len(seen), fileCount)
+	}
+	for file := range fileCount {
+		header := fmt.Sprintf("diff --git a/file-%02d.go b/file-%02d.go", file, file)
+		if !seen[header] {
+			t.Errorf("middle file was not summarized: %s", header)
+		}
+	}
+}
+
 // TestSmartChunk_ChunkError verifies that if any parallel chunk call fails,
 // the whole command returns an error.
 func TestSmartChunk_ChunkError(t *testing.T) {
@@ -4795,9 +4850,9 @@ func TestCheckAll_SkipsUnconfigured(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("GEMINI_API_KEY", "")
 
-	called := false
+	var called atomic.Bool
 	chatFn := func(_ context.Context, _ *Config, _ ApiProvider, _, _ string) (string, error) {
-		called = true
+		called.Store(true)
 		return "OK", nil
 	}
 	cmd := newRootCmd(chatFn)
@@ -4814,7 +4869,7 @@ func TestCheckAll_SkipsUnconfigured(t *testing.T) {
 			t.Errorf("expected SKIP for provider %q when key is unset, got:\n%s", p, out)
 		}
 	}
-	_ = called // CLI providers may still be called if binaries exist
+	_ = called.Load() // CLI providers may still be called if binaries exist
 }
 
 func TestCheckAll_TableColumns(t *testing.T) {

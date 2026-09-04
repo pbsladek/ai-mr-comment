@@ -36,4 +36,4 @@ internal/commit/          # quick-commit and commit-message helpers
 - Done: `internal/commit` owns quick-commit message normalization, conventional commit validation, guidance, signoff, emoji, breaking-change, and editor helpers.
 - Done: `internal/app` owns Cobra command orchestration and embedded application templates.
 - Done: `cmd/ai-mr-comment` owns the executable entry point and build metadata handoff.
-- Pending: split large `internal/app/main.go` command groups into smaller app files.
+- Done: split command groups into focused `internal/app/*_cmd.go` and root pipeline files.

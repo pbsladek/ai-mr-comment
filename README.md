@@ -21,7 +21,7 @@ A command-line tool written in Go that generates professional GitLab Merge Reque
 - **Local CLI providers** — delegate auth to locally installed CLI tools, no API key management needed:
   - `claude-cli` — uses the local `claude` binary (Claude Code session), no API key required
   - `gemini-cli` — uses the local `gemini` binary (Google OAuth), no API key required
-  - `codex-cli` — uses the local `codex` binary (quiet mode), requires `OPENAI_API_KEY`
+  - `codex-cli` — uses the local `codex` binary and its existing login, no API key required
 - Customizable API endpoints and models via `--model` flag or config
 - Multiple prompt styles — `default`, `conventional`, `technical`, `user-focused`, `emoji`, `sassy`, `monday`, `jira`, `commit`, `commit-emoji`, `commit-conventional`, `chaos`, `haiku`, `roast`, `intern`, `shakespeare`, `manager`, `yoda`, `excuse`
 - **Jira-aware template** (`--template=jira`) — extracts ticket key from branch name and places it first so Jira auto-links

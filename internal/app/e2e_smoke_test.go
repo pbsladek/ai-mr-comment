@@ -4,6 +4,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -74,6 +75,19 @@ func TestE2ESmoke_BinaryCommands(t *testing.T) {
 		}
 		return string(out)
 	}
+	runFailure := func(dir string, stdin string, args ...string) (int, string) {
+		t.Helper()
+		cmd := exec.Command(bin, args...)
+		cmd.Dir = dir
+		cmd.Env = baseEnv
+		cmd.Stdin = strings.NewReader(stdin)
+		out, runErr := cmd.CombinedOutput()
+		var exitErr *exec.ExitError
+		if !errors.As(runErr, &exitErr) {
+			t.Fatalf("%s %s: expected exit failure, got %v\n%s", bin, strings.Join(args, " "), runErr, out)
+		}
+		return exitErr.ExitCode(), string(out)
+	}
 
 	if out := run(repoRoot, "", "--version"); !strings.Contains(out, "repo=https://github.com/pbsladek/ai-mr-comment") {
 		t.Fatalf("unexpected --version output: %s", out)
@@ -112,6 +126,22 @@ func TestE2ESmoke_BinaryCommands(t *testing.T) {
 	}
 	if quickPayload.CommitMessage != "feat: smoke generated message" || quickPayload.Provider != "openai" {
 		t.Fatalf("unexpected quick-commit payload: %+v", quickPayload)
+	}
+
+	if code, out := runFailure(repoRoot, "", "--staged", "--commit", "HEAD"); code != 4 || !strings.Contains(out, "--staged and --commit are mutually exclusive") {
+		t.Fatalf("invalid usage contract: code=%d output=%q", code, out)
+	}
+	if code, out := runFailure(repoRoot, "", "--definitely-unknown"); code != 4 || !strings.Contains(out, "unknown flag") {
+		t.Fatalf("unknown flag contract: code=%d output=%q", code, out)
+	}
+	if code, out := runFailure(repoRoot, " \n", "--file=-", "--provider=openai"); code != 3 || !strings.Contains(out, "no diff found") {
+		t.Fatalf("no-input contract: code=%d output=%q", code, out)
+	}
+	if code, out := runFailure(repoRoot, "", "quick-commit", "--chaos", "--roast"); code != 4 || !strings.Contains(out, "mutually exclusive") {
+		t.Fatalf("quick-commit invalid usage contract: code=%d output=%q", code, out)
+	}
+	if code, out := runFailure(repoRoot, "diff --git a/a.go b/a.go\n+bad\n", "--exit-code", "--file=-", "--provider=openai"); code != 2 || strings.Contains(out, "Error: exit code 2") {
+		t.Fatalf("verdict failure contract: code=%d output=%q", code, out)
 	}
 }
 

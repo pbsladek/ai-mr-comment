@@ -44,7 +44,7 @@ func runChangelogWithDeps(cmd *cobra.Command, a changelogArgs, chatFn func(conte
 	}
 
 	if !isSupportedProvider(cfg.Provider) {
-		return fmt.Errorf("unsupported provider: %s", cfg.Provider)
+		return withExitCode(4, fmt.Errorf("unsupported provider: %s", cfg.Provider))
 	}
 	if !a.dryRun {
 		if cfgErr := validateProviderConfig(cfg); cfgErr != nil {
@@ -56,7 +56,7 @@ func runChangelogWithDeps(cmd *cobra.Command, a changelogArgs, chatFn func(conte
 	}
 
 	if a.format != "text" && a.format != "json" {
-		return fmt.Errorf("unsupported format %q: must be text or json", a.format)
+		return withExitCode(4, fmt.Errorf("unsupported format %q: must be text or json", a.format))
 	}
 	if a.dryRun && a.estimate {
 		return withExitCode(4, errors.New("changelog --dry-run cannot be combined with --estimate"))
@@ -158,9 +158,9 @@ func resolveDiffWithDeps(cmd *cobra.Command, commit, diffFilePath string, deps c
 	}
 	if strings.TrimSpace(diffContent) == "" {
 		if commit != "" {
-			return "", fmt.Errorf("no diff found for commit range %q", commit)
+			return "", withExitCode(3, fmt.Errorf("no diff found for commit range %q", commit))
 		}
-		return "", fmt.Errorf("no diff found. Specify a commit range with --commit or a file with --file")
+		return "", withExitCode(3, fmt.Errorf("no diff found. Specify a commit range with --commit or a file with --file"))
 	}
 	return diffContent, nil
 }

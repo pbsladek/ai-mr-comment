@@ -40,6 +40,13 @@ func (e exitCodeError) ExitCode() int {
 	return int(e)
 }
 
+// SilentExit marks verdict failures, whose result has already been rendered,
+// so the executable can return the requested status without printing a second
+// generic error line.
+func (e exitCodeError) SilentExit() bool {
+	return true
+}
+
 type codedError struct {
 	code int
 	err  error

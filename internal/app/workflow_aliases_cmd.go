@@ -27,7 +27,7 @@ Use --output=- to print to stdout instead of writing a file.`,
 			secretName, ok := providerSecrets[provider]
 			if !ok {
 				supported := []string{"openai", "anthropic", "gemini"}
-				return fmt.Errorf("unsupported provider %q for gen-workflow; supported: %s", provider, strings.Join(supported, ", "))
+				return withExitCode(4, fmt.Errorf("unsupported provider %q for gen-workflow; supported: %s", provider, strings.Join(supported, ", ")))
 			}
 			providerEnvVar := secretName // env var name == secret name
 

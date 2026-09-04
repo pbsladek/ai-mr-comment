@@ -420,6 +420,22 @@ func TestQuickCommitDeps_ValidationAndFailureBranches(t *testing.T) {
 	}
 }
 
+func TestQuickCommitDeps_InvalidStylesDoNotStage(t *testing.T) {
+	var actions []string
+	deps := fakeQuickCommitDeps(&actions)
+	err := executeQuickCommitWithDeps(t, deps, dummyChatFn, "--provider=openai", "--chaos", "--roast")
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("expected style validation error, got %v", err)
+	}
+	var coded interface{ ExitCode() int }
+	if !errors.As(err, &coded) || coded.ExitCode() != 4 {
+		t.Fatalf("expected invalid usage exit code 4, got %T %v", err, err)
+	}
+	if len(actions) != 0 {
+		t.Fatalf("invalid invocation performed side effects: %v", actions)
+	}
+}
+
 func TestQuickCommitDeps_DryRunStylesAndJSON(t *testing.T) {
 	for _, tc := range []struct {
 		name       string

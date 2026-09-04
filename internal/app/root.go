@@ -161,7 +161,7 @@ func newRootCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, strin
 			debugLog(cfg, "config: file=%s provider=%s model=%s template=%s", configFile, cfg.Provider, getModelName(cfg), cfg.Template)
 
 			if !isSupportedProvider(cfg.Provider) {
-				return errors.New("unsupported provider: " + string(cfg.Provider))
+				return withExitCode(4, errors.New("unsupported provider: "+string(cfg.Provider)))
 			}
 			if quiet {
 				format = "json"
@@ -237,6 +237,7 @@ func newRootCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, strin
 			debugLog(cfg, "diff: source=%s bytes=%d", diffSource, len(diffContent))
 
 			diffContent = prependLocalBranchContext(diffContent, diffSource, rootOpts, deps, cfg)
+			rawDiffContent := diffContent
 
 			out := cmd.OutOrStdout()
 			// When writing to a file, suppress all text output to the terminal.
@@ -249,8 +250,15 @@ func newRootCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, strin
 			rawLines := len(diffLines)
 			diffTruncated := rawLines > 4000
 			summary := summarizeDiff(diffContent, diffSource, getModelName(cfg), diffTruncated)
-			diffContent = truncateDiff(diffLines, 4000)
-			debugLog(cfg, "diff: lines before truncation=%d after=%d (max=4000)", rawLines, strings.Count(diffContent, "\n")+1)
+			if !smartChunk {
+				diffContent = truncateDiff(diffLines, 4000)
+			}
+			debugLog(cfg, "diff: lines before truncation=%d generation-lines=%d smart-chunk=%v", rawLines, strings.Count(diffContent, "\n")+1, smartChunk)
+			if smartChunk {
+				// Smart chunking owns its per-file limits and hierarchical synthesis;
+				// it must see the complete diff so middle files are not discarded.
+				diffContent = rawDiffContent
+			}
 
 			if changedFilesOnly || summaryOnly {
 				if outputPath != "" {
@@ -335,8 +343,7 @@ func newRootCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, strin
 			// Stream tokens directly for interactive text output, or as JSONL token
 			// events when requested. All other paths use the buffered chatFn.
 			isTTY := fileIsTerminal(os.Stdout)
-			jsonlStream := streamMode == "jsonl" && !titleOnly && !generateCommitMsg && !smartChunk
-			shouldStream := (isTTY && format == "text" && streamMode == "" && !smartChunk && outputPath == "") || jsonlStream
+			shouldStream, jsonlStream := rootStreamingMode(isTTY, format, streamMode, smartChunk, outputPath, verdictOnly, titleOnly, generateCommitMsg)
 			debugLog(cfg, "streaming: tty=%v format=%s smart-chunk=%v output-file=%q → enabled=%v",
 				isTTY, format, smartChunk, outputPath, shouldStream)
 			generationOut := out
@@ -561,6 +568,9 @@ func newRootCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, strin
 			return nil
 		},
 	}
+	rootCmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		return withExitCode(4, err)
+	})
 
 	rootCmd.Flags().StringVar(&commit, "commit", "", "Commit or commit range")
 	rootCmd.Flags().StringVar(&diffFilePath, "file", "", "Path to diff file")
@@ -658,6 +668,12 @@ func newRootCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, strin
 	})
 
 	return rootCmd
+}
+
+func rootStreamingMode(isTTY bool, format, streamMode string, smartChunk bool, outputPath string, verdictOnly, titleOnly, generateCommitMsg bool) (shouldStream, jsonlStream bool) {
+	jsonlStream = streamMode == "jsonl" && !titleOnly && !verdictOnly && !generateCommitMsg && !smartChunk
+	interactiveStream := isTTY && format == "text" && streamMode == "" && !verdictOnly && !smartChunk && outputPath == ""
+	return interactiveStream || jsonlStream, jsonlStream
 }
 
 func newAgentAliasCmdWithDeps(name, short string, prefix []string, chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error), deps commandDeps) *cobra.Command {

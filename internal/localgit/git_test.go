@@ -141,6 +141,45 @@ func TestQuickCommitDryRunDiffIncludesUntrackedFiles(t *testing.T) {
 	}
 }
 
+func TestQuickCommitDryRunDiffExcludesCommittedBranchHistory(t *testing.T) {
+	dir := withGitRepo(t)
+	chdir(t, dir)
+
+	writeFile(t, dir, "committed.txt", "base\n")
+	writeFile(t, dir, "pending.txt", "base\n")
+	if err := Add(); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitMessage("feat: initial"); err != nil {
+		t.Fatal(err)
+	}
+	base := runGit(t, dir, "rev-parse", "HEAD")
+	runGit(t, dir, "checkout", "-b", "feature")
+
+	writeFile(t, dir, "committed.txt", "branch history\n")
+	if err := Add(); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitMessage("feat: committed branch change"); err != nil {
+		t.Fatal(err)
+	}
+	// Reproduce the default root-diff environment where origin/main points to
+	// the branch base. A quick-commit preview must not use this merge base.
+	runGit(t, dir, "update-ref", "refs/remotes/origin/main", base)
+
+	writeFile(t, dir, "pending.txt", "pending work\n")
+	diff, err := QuickCommitDryRunDiff(true)
+	if err != nil {
+		t.Fatalf("QuickCommitDryRunDiff failed: %v", err)
+	}
+	if !strings.Contains(diff, "pending.txt") || !strings.Contains(diff, "+pending work") {
+		t.Fatalf("pending change missing from preview:\n%s", diff)
+	}
+	if strings.Contains(diff, "committed.txt") || strings.Contains(diff, "branch history") {
+		t.Fatalf("preview included already committed branch history:\n%s", diff)
+	}
+}
+
 func TestDiffRejectsOptionLikeRevision(t *testing.T) {
 	tests := []string{
 		"--stat",

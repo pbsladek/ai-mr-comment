@@ -97,8 +97,8 @@ func findClaudeBinary(cfg *Config) (string, error) {
 	return providers.FindClaudeBinary(cfg)
 }
 
-func claudeCLIArgs(cfg *Config, prompt string) []string {
-	return providers.ClaudeCLIArgs(cfg, prompt)
+func claudeCLIArgs(cfg *Config) []string {
+	return providers.ClaudeCLIArgs(cfg)
 }
 
 func callClaudeCLI(ctx context.Context, cfg *Config, systemPrompt, diffContent string) (string, error) {
@@ -113,8 +113,8 @@ func findGeminiCLIBinary(cfg *Config) (string, error) {
 	return providers.FindGeminiCLIBinary(cfg)
 }
 
-func geminiCLIArgs(cfg *Config, prompt string) []string {
-	return providers.GeminiCLIArgs(cfg, prompt)
+func geminiCLIArgs(cfg *Config) []string {
+	return providers.GeminiCLIArgs(cfg)
 }
 
 func callGeminiCLI(ctx context.Context, cfg *Config, systemPrompt, diffContent string) (string, error) {
@@ -129,8 +129,8 @@ func findCodexBinary(cfg *Config) (string, error) {
 	return providers.FindCodexBinary(cfg)
 }
 
-func codexCLIArgs(cfg *Config, prompt string) []string {
-	return providers.CodexCLIArgs(cfg, prompt)
+func codexCLIArgs(cfg *Config) []string {
+	return providers.CodexCLIArgs(cfg)
 }
 
 func callCodexCLI(ctx context.Context, cfg *Config, systemPrompt, diffContent string) (string, error) {

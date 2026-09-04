@@ -32,6 +32,11 @@ type rootGenerationResult struct {
 	StreamedOK    bool
 }
 
+const (
+	smartChunkConcurrency = 4
+	smartChunkBatchSize   = 20
+)
+
 func generateRootProviderOutput(req rootGenerationRequest) (rootGenerationResult, error) {
 	cfg := req.Config
 	opts := req.Options
@@ -92,8 +97,14 @@ func generateRootProviderOutput(req rootGenerationRequest) (rootGenerationResult
 	needsTitle := (opts.GenerateTitle || opts.UpdateTitle || opts.Format == "json") && !opts.GenerateCommitMsg
 	if needsTitle && !opts.TitleOnly && result.Title == "" {
 		debugLog(cfg, "title: generating title after stream")
+		titleInput := req.DiffContent
+		if req.SmartChunk {
+			// The complete raw diff may be far larger than a single provider
+			// request. The synthesized description already represents every chunk.
+			titleInput = result.Comment
+		}
 		result.Title, err = timedCall(cfg, "title", func() (string, error) {
-			return req.Chat(ctx, cfg, cfg.Provider, titlePrompt, req.DiffContent)
+			return req.Chat(ctx, cfg, cfg.Provider, titlePrompt, titleInput)
 		})
 		if err != nil {
 			return result, normalizeProviderConnectionError(cfg, err)
@@ -133,8 +144,9 @@ func generateSmartChunkComment(req rootGenerationRequest) (string, error) {
 
 	const chunkPrompt = "Summarize the changes in this file diff in 3-5 bullet points. Be concise and technical."
 	summaries := make([]string, len(chunks))
-	debugLog(cfg, "smart-chunk: summarizing %d chunks in parallel", len(chunks))
+	debugLog(cfg, "smart-chunk: summarizing %d chunks with concurrency=%d", len(chunks), smartChunkConcurrency)
 	eg, egCtx := errgroup.WithContext(req.Context)
+	eg.SetLimit(smartChunkConcurrency)
 	for i, chunk := range chunks {
 		i, chunk := i, chunk
 		eg.Go(func() error {
@@ -145,7 +157,7 @@ func generateSmartChunkComment(req rootGenerationRequest) (string, error) {
 			if err != nil {
 				return err
 			}
-			summaries[i] = summary
+			summaries[i] = fmt.Sprintf("File %d/%d — %s\n%s", i+1, len(chunks), firstLine(chunk), strings.TrimSpace(summary))
 			return nil
 		})
 	}
@@ -153,10 +165,49 @@ func generateSmartChunkComment(req rootGenerationRequest) (string, error) {
 		return "", err
 	}
 
-	debugLog(cfg, "smart-chunk: all chunks summarized, running synthesis call")
-	combinedSummaries := strings.Join(summaries, "\n\n---\n\n")
-	return timedCall(cfg, "synthesis", func() (string, error) {
-		return req.Chat(req.Context, cfg, cfg.Provider, req.SystemPrompt, combinedSummaries)
+	return synthesizeSmartChunkSummaries(req, summaries)
+}
+
+func synthesizeSmartChunkSummaries(req rootGenerationRequest, summaries []string) (string, error) {
+	const aggregationPrompt = `Condense these per-file diff summaries for a later whole-change synthesis.
+Preserve every file name and every material behavior, risk, compatibility concern, and test note.
+Use concise technical bullets only. Do not drop a file merely because its change seems minor.`
+
+	current := summaries
+	level := 1
+	for len(current) > smartChunkBatchSize {
+		batchCount := (len(current) + smartChunkBatchSize - 1) / smartChunkBatchSize
+		debugLog(req.Config, "smart-chunk: aggregation level=%d inputs=%d batches=%d", level, len(current), batchCount)
+		next := make([]string, batchCount)
+		eg, egCtx := errgroup.WithContext(req.Context)
+		eg.SetLimit(smartChunkConcurrency)
+		for batch := 0; batch < batchCount; batch++ {
+			batch := batch
+			start := batch * smartChunkBatchSize
+			end := min(start+smartChunkBatchSize, len(current))
+			input := strings.Join(current[start:end], "\n\n---\n\n")
+			eg.Go(func() error {
+				summary, err := timedCall(req.Config, fmt.Sprintf("chunk-aggregate-%d-%d", level, batch+1), func() (string, error) {
+					return req.Chat(egCtx, req.Config, req.Config.Provider, aggregationPrompt, input)
+				})
+				if err != nil {
+					return err
+				}
+				next[batch] = fmt.Sprintf("Aggregate %d/%d\n%s", batch+1, batchCount, strings.TrimSpace(summary))
+				return nil
+			})
+		}
+		if err := eg.Wait(); err != nil {
+			return "", err
+		}
+		current = next
+		level++
+	}
+
+	debugLog(req.Config, "smart-chunk: all chunks represented, running final synthesis call")
+	combinedSummaries := strings.Join(current, "\n\n---\n\n")
+	return timedCall(req.Config, "synthesis", func() (string, error) {
+		return req.Chat(req.Context, req.Config, req.Config.Provider, req.SystemPrompt, combinedSummaries)
 	})
 }
 

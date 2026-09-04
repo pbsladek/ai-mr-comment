@@ -88,7 +88,7 @@ find or create one from the current branch and origin remote.`,
 				cfg.Template = templateName
 			}
 			if !isSupportedProvider(cfg.Provider) {
-				return errors.New("unsupported provider: " + string(cfg.Provider))
+				return withExitCode(4, errors.New("unsupported provider: "+string(cfg.Provider)))
 			}
 			if cfgErr := validateProviderConfig(cfg); cfgErr != nil {
 				return cfgErr
@@ -270,7 +270,7 @@ func resolvePublishDiffWithDeps(ctx context.Context, cfg *Config, prURL string, 
 		case deps.isGitHubURL(prURL), deps.isGitLabURL(prURL):
 			diffContent, err = deps.getRemoteDiff(ctx, cfg, prURL)
 		default:
-			return "", "", fmt.Errorf("unsupported URL %q: must be a GitHub PR (/pull/) or GitLab MR (/-/merge_requests/) URL", prURL)
+			return "", "", withExitCode(4, fmt.Errorf("unsupported URL %q: must be a GitHub PR (/pull/) or GitLab MR (/-/merge_requests/) URL", prURL))
 		}
 		return diffContent, prURL, err
 	}

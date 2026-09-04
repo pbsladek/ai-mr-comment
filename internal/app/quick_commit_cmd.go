@@ -28,6 +28,68 @@ func newQuickCommitCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider
 using AI, commits with that message, and pushes to the current branch's
 remote. Use --dry-run to preview the generated message without committing.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if format != "text" && format != "json" {
+				return withExitCode(4, fmt.Errorf("unsupported format %q: must be text or json", format))
+			}
+			if bodyLines < 0 {
+				return withExitCode(4, fmt.Errorf("--body-lines must be 0 or greater"))
+			}
+			commitType = strings.ToLower(strings.TrimSpace(commitType))
+			commitScope = strings.TrimSpace(commitScope)
+			messageTemplate = strings.ToLower(strings.TrimSpace(messageTemplate))
+			if commitType != "" && !isValidCommitType(commitType) {
+				return withExitCode(4, fmt.Errorf("--type must be one of: %s", strings.Join(conventionalCommitTypes, ", ")))
+			}
+			if messageTemplate != "" && !isValidQuickCommitMessageTemplate(messageTemplate) {
+				return withExitCode(4, fmt.Errorf("--message-template must be one of: %s", strings.Join(quickCommitMessageTemplateNames, ", ")))
+			}
+			if cmd.Flags().Changed("scope") {
+				if err := validateCommitScope(commitScope); err != nil {
+					return withExitCode(4, err)
+				}
+			}
+			if noConventional && (commitType != "" || commitScope != "") {
+				return withExitCode(4, fmt.Errorf("--type and --scope cannot be combined with --no-conventional"))
+			}
+			if breaking && commitType != "" && commitType != "feat" {
+				return withExitCode(4, fmt.Errorf("--breaking can only be combined with --type=feat"))
+			}
+			if includeUntracked && trackedOnly {
+				return withExitCode(4, fmt.Errorf("--include-untracked and --tracked-only are mutually exclusive"))
+			}
+			if longBody || bodyLines > 0 || quickCommitMessageTemplateImpliesBody(messageTemplate) {
+				multiLine = true
+			}
+			if postFlag && dryRun {
+				return withExitCode(4, errors.New("--post cannot be combined with --dry-run"))
+			}
+			if postFlag && noPush {
+				return withExitCode(4, errors.New("--post cannot be combined with --no-push"))
+			}
+
+			// Validate all style combinations before any git operation can mutate
+			// the index.
+			styleFlagNames := []string{"--chaos", "--haiku", "--roast", "--monday", "--jira", "--emoji-commit", "--sassy", "--technical", "--intern", "--shakespeare", "--manager", "--yoda", "--excuse"}
+			styleFlags := []bool{chaos, haiku, roast, qcMonday, qcJira, qcEmoji, qcSassy, qcTechnical, qcIntern, qcShakespeare, qcManager, qcYoda, qcExcuse}
+			styleCount := 0
+			for _, f := range styleFlags {
+				if f {
+					styleCount++
+				}
+			}
+			if styleCount > 1 {
+				return withExitCode(4, fmt.Errorf("%s are mutually exclusive", strings.Join(styleFlagNames, ", ")))
+			}
+			if chaos && (multiLine || noConventional) {
+				return withExitCode(4, fmt.Errorf("--chaos cannot be combined with --multi-line or --no-conventional"))
+			}
+			if haiku && (multiLine || noConventional) {
+				return withExitCode(4, fmt.Errorf("--haiku cannot be combined with --multi-line or --no-conventional"))
+			}
+			if roast && (multiLine || noConventional) {
+				return withExitCode(4, fmt.Errorf("--roast cannot be combined with --multi-line or --no-conventional"))
+			}
+
 			if !deps.isGitRepo() {
 				return fmt.Errorf("not a git repository")
 			}
@@ -45,49 +107,14 @@ remote. Use --dry-run to preview the generated message without committing.`,
 			if verbose {
 				cfg.DebugWriter = cmd.ErrOrStderr()
 			}
+			if !isSupportedProvider(cfg.Provider) {
+				return withExitCode(4, fmt.Errorf("unsupported provider: %s", cfg.Provider))
+			}
 			if cfgErr := validateProviderConfig(cfg); cfgErr != nil {
 				return cfgErr
 			}
 			if cancel := applyRequestTimeout(cmd, cfg); cancel != nil {
 				defer cancel()
-			}
-			if format != "text" && format != "json" {
-				return fmt.Errorf("unsupported format %q: must be text or json", format)
-			}
-			if bodyLines < 0 {
-				return fmt.Errorf("--body-lines must be 0 or greater")
-			}
-			commitType = strings.ToLower(strings.TrimSpace(commitType))
-			commitScope = strings.TrimSpace(commitScope)
-			messageTemplate = strings.ToLower(strings.TrimSpace(messageTemplate))
-			if commitType != "" && !isValidCommitType(commitType) {
-				return fmt.Errorf("--type must be one of: %s", strings.Join(conventionalCommitTypes, ", "))
-			}
-			if messageTemplate != "" && !isValidQuickCommitMessageTemplate(messageTemplate) {
-				return fmt.Errorf("--message-template must be one of: %s", strings.Join(quickCommitMessageTemplateNames, ", "))
-			}
-			if cmd.Flags().Changed("scope") {
-				if err := validateCommitScope(commitScope); err != nil {
-					return err
-				}
-			}
-			if noConventional && (commitType != "" || commitScope != "") {
-				return fmt.Errorf("--type and --scope cannot be combined with --no-conventional")
-			}
-			if breaking && commitType != "" && commitType != "feat" {
-				return fmt.Errorf("--breaking can only be combined with --type=feat")
-			}
-			if includeUntracked && trackedOnly {
-				return fmt.Errorf("--include-untracked and --tracked-only are mutually exclusive")
-			}
-			if longBody || bodyLines > 0 || quickCommitMessageTemplateImpliesBody(messageTemplate) {
-				multiLine = true
-			}
-			if postFlag && dryRun {
-				return errors.New("--post cannot be combined with --dry-run")
-			}
-			if postFlag && noPush {
-				return errors.New("--post cannot be combined with --no-push")
 			}
 
 			branch, err := deps.getCurrentBranch()
@@ -130,29 +157,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 				return fmt.Errorf("reading diff: %w", err)
 			}
 			if strings.TrimSpace(diffContent) == "" && !chaos {
-				return fmt.Errorf("no changes found to generate a commit message for")
-			}
-
-			// Validate mutually exclusive style flags.
-			styleFlagNames := []string{"--chaos", "--haiku", "--roast", "--monday", "--jira", "--emoji-commit", "--sassy", "--technical", "--intern", "--shakespeare", "--manager", "--yoda", "--excuse"}
-			styleFlags := []bool{chaos, haiku, roast, qcMonday, qcJira, qcEmoji, qcSassy, qcTechnical, qcIntern, qcShakespeare, qcManager, qcYoda, qcExcuse}
-			styleCount := 0
-			for _, f := range styleFlags {
-				if f {
-					styleCount++
-				}
-			}
-			if styleCount > 1 {
-				return fmt.Errorf("%s are mutually exclusive", strings.Join(styleFlagNames, ", "))
-			}
-			if chaos && (multiLine || noConventional) {
-				return fmt.Errorf("--chaos cannot be combined with --multi-line or --no-conventional")
-			}
-			if haiku && (multiLine || noConventional) {
-				return fmt.Errorf("--haiku cannot be combined with --multi-line or --no-conventional")
-			}
-			if roast && (multiLine || noConventional) {
-				return fmt.Errorf("--roast cannot be combined with --multi-line or --no-conventional")
+				return withExitCode(3, fmt.Errorf("no changes found to generate a commit message for"))
 			}
 
 			// Prepend branch name so the AI can reference the ticket key.
