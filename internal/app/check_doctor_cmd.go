@@ -33,6 +33,7 @@ type pingResult struct {
 	err      error
 	skipped  bool // true when credentials/binary are absent — not worth pinging
 	skipMsg  string
+	reply    string
 }
 
 // pingProvider sends a minimal prompt to one provider and returns the result.
@@ -47,24 +48,28 @@ func pingProvider(ctx context.Context, cfg *Config, provider ApiProvider, chatFn
 	}
 
 	start := time.Now()
-	_, err := chatFn(ctx, &provCfg, provider, checkPingPrompt, "")
+	reply, err := chatFn(ctx, &provCfg, provider, checkPingPrompt, "")
 	return pingResult{
 		provider: provider,
 		model:    getModelName(&provCfg),
 		elapsed:  time.Since(start),
 		err:      err,
+		reply:    strings.TrimSpace(reply),
 	}
 }
 
 // newCheckCmd returns a command that validates the configured provider is reachable
 // by sending a minimal live ping and reporting the result.
 func newCheckCmd(chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error)) *cobra.Command {
-	var provider, modelOverride, profileName string
+	var provider, modelOverride, profileName, format string
 	var all bool
 
 	cmd := &cobra.Command{
-		Use:   "check",
-		Short: "Validate AI provider access with a live ping",
+		Use:           "check",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Args:          cobra.NoArgs,
+		Short:         "Validate AI provider access with a live ping",
 		Long: `Loads your configuration, prints the resolved settings, and sends a
 minimal request to confirm the provider API or CLI is reachable and responding.
 
@@ -76,18 +81,21 @@ Examples:
   ai-mr-comment check --all
   ai-mr-comment check --profile fast`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := loadConfigForProfile(profileName)
+			cfg, err := loadCommandConfig(cmd, loadConfigForProfile, profileName)
 			if err != nil {
 				return err
 			}
 
 			out := cmd.OutOrStdout()
+			if format != "text" && format != "json" {
+				return fmt.Errorf("unsupported format %q: must be text or json", format)
+			}
 
 			if all {
 				if cancel := applyRequestTimeout(cmd, cfg); cancel != nil {
 					defer cancel()
 				}
-				return runCheckAll(cmd.Context(), cfg, chatFn, out)
+				return runCheckAll(cmd.Context(), cfg, chatFn, out, format)
 			}
 
 			if cmd.Flags().Changed("provider") {
@@ -95,6 +103,24 @@ Examples:
 			}
 			if cmd.Flags().Changed("model") {
 				setModelOverride(cfg, modelOverride)
+			}
+
+			if format == "json" {
+				if cancel := applyRequestTimeout(cmd, cfg); cancel != nil {
+					defer cancel()
+				}
+				result := pingProvider(cmd.Context(), cfg, cfg.Provider, chatFn)
+				if result.skipped {
+					result.err = errors.New(result.skipMsg)
+					result.skipped = false
+				}
+				if err := writeCheckJSON(out, []pingResult{result}); err != nil {
+					return err
+				}
+				if result.err != nil {
+					return fmt.Errorf("check failed: %w", result.err)
+				}
+				return nil
 			}
 
 			// Print resolved config.
@@ -160,9 +186,13 @@ Examples:
 		},
 	}
 
+	addResourceFlags(cmd)
 	cmd.Flags().StringVar(&provider, "provider", "", "AI provider to check (overrides config)")
 	cmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this check")
+	_ = cmd.RegisterFlagCompletionFunc("model", completeModels)
 	cmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate")
+	cmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")
+	_ = cmd.RegisterFlagCompletionFunc("format", completeValues([]string{"text", "json"}))
 	cmd.Flags().BoolVar(&all, "all", false, "Ping every provider in parallel and print a summary table")
 	_ = cmd.RegisterFlagCompletionFunc("provider", completeValues(providerNames))
 	_ = cmd.RegisterFlagCompletionFunc("profile", completeProfiles)
@@ -174,10 +204,11 @@ func newDoctorCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:     "doctor",
+		Args:    cobra.NoArgs,
 		Aliases: []string{"config-dump"},
 		Short:   "Inspect resolved config and local CLI readiness without a live provider call",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := loadConfigForProfile(profileName)
+			cfg, err := loadCommandConfig(cmd, loadConfigForProfile, profileName)
 			if err != nil {
 				return err
 			}
@@ -201,16 +232,19 @@ func newDoctorCmd() *cobra.Command {
 			}
 
 			type doctorPayload struct {
-				ConfigFile string            `json:"config_file"`
-				Profile    string            `json:"profile,omitempty"`
-				Preset     string            `json:"preset,omitempty"`
-				Provider   string            `json:"provider"`
-				Model      string            `json:"model"`
-				Template   string            `json:"template"`
-				Timeout    string            `json:"request_timeout"`
-				Git        map[string]string `json:"git"`
-				Secrets    map[string]string `json:"secrets"`
-				Binaries   map[string]string `json:"binaries"`
+				ConfigFile       string            `json:"config_file"`
+				Profile          string            `json:"profile,omitempty"`
+				Preset           string            `json:"preset,omitempty"`
+				Provider         string            `json:"provider"`
+				Model            string            `json:"model"`
+				Template         string            `json:"template"`
+				Timeout          string            `json:"request_timeout"`
+				MaxOutputTokens  int               `json:"max_output_tokens"`
+				MaxInputBytes    int64             `json:"max_input_bytes"`
+				ChunkConcurrency int               `json:"chunk_concurrency"`
+				Git              map[string]string `json:"git"`
+				Secrets          map[string]string `json:"secrets"`
+				Binaries         map[string]string `json:"binaries"`
 			}
 
 			gitInfo := map[string]string{"repository": "false"}
@@ -244,14 +278,17 @@ func newDoctorCmd() *cobra.Command {
 				configFile = "(none)"
 			}
 			payload := doctorPayload{
-				ConfigFile: configFile,
-				Profile:    profileName,
-				Preset:     presetName,
-				Provider:   string(cfg.Provider),
-				Model:      getModelName(cfg),
-				Template:   cfg.Template,
-				Timeout:    cfg.RequestTimeout.String(),
-				Git:        gitInfo,
+				ConfigFile:       configFile,
+				Profile:          profileName,
+				Preset:           presetName,
+				Provider:         string(cfg.Provider),
+				Model:            getModelName(cfg),
+				Template:         cfg.Template,
+				Timeout:          cfg.RequestTimeout.String(),
+				MaxOutputTokens:  cfg.OutputTokenLimit(),
+				MaxInputBytes:    cfg.InputByteLimit(),
+				ChunkConcurrency: cfg.ChunkLimit(),
+				Git:              gitInfo,
 				Secrets: map[string]string{
 					"OPENAI_API_KEY":    secretStatus(cfg.OpenAIAPIKey),
 					"ANTHROPIC_API_KEY": secretStatus(cfg.AnthropicAPIKey),
@@ -276,6 +313,7 @@ func newDoctorCmd() *cobra.Command {
 			_, _ = fmt.Fprintf(out, "Model       : %s\n", payload.Model)
 			_, _ = fmt.Fprintf(out, "Template    : %s\n", payload.Template)
 			_, _ = fmt.Fprintf(out, "Timeout     : %s\n", payload.Timeout)
+			_, _ = fmt.Fprintf(out, "Output limit: %d tokens\nInput limit : %d bytes\nChunk limit : %d requests\n", payload.MaxOutputTokens, payload.MaxInputBytes, payload.ChunkConcurrency)
 			_, _ = fmt.Fprintf(out, "Git repo    : %s\n", payload.Git["repository"])
 			if payload.Git["branch"] != "" {
 				_, _ = fmt.Fprintf(out, "Git branch  : %s\n", payload.Git["branch"])
@@ -291,8 +329,10 @@ func newDoctorCmd() *cobra.Command {
 			return nil
 		},
 	}
+	addResourceFlags(cmd)
 	cmd.Flags().StringVar(&provider, "provider", "", "AI provider to inspect (overrides config)")
 	cmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for inspection")
+	_ = cmd.RegisterFlagCompletionFunc("model", completeModels)
 	cmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate")
 	cmd.Flags().StringVar(&presetName, "preset", "", "Preset defaults: ci, local-fast, security, release-notes")
 	cmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")
@@ -312,9 +352,12 @@ func secretStatus(value string) string {
 
 // runCheckAll pings all providers concurrently and prints a summary table.
 // Returns an error if any configured (non-skipped) provider fails.
-func runCheckAll(ctx context.Context, cfg *Config, chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error), out io.Writer) error {
-	_, _ = fmt.Fprintln(out, "Pinging all providers...")
-	_, _ = fmt.Fprintln(out)
+func runCheckAll(ctx context.Context, cfg *Config, chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error), out io.Writer, formats ...string) error {
+	jsonOutput := len(formats) > 0 && formats[0] == "json"
+	if !jsonOutput {
+		_, _ = fmt.Fprintln(out, "Pinging all providers...")
+		_, _ = fmt.Fprintln(out)
+	}
 
 	type indexedResult struct {
 		idx int
@@ -333,6 +376,18 @@ func runCheckAll(ctx context.Context, cfg *Config, chatFn func(context.Context, 
 	for range allProviders {
 		r := <-ch
 		results[r.idx] = r.pingResult
+	}
+
+	if jsonOutput {
+		if err := writeCheckJSON(out, results); err != nil {
+			return err
+		}
+		for _, result := range results {
+			if result.err != nil {
+				return errors.New("one or more providers failed — see JSON results")
+			}
+		}
+		return nil
 	}
 
 	// Print aligned table.
@@ -390,4 +445,33 @@ func maskSecret(s string) string {
 		return "****"
 	}
 	return s[:4] + "****"
+}
+
+// writeCheckJSON uses the same result envelope for single-provider and --all checks.
+func writeCheckJSON(out io.Writer, results []pingResult) error {
+	type result struct {
+		Provider  ApiProvider `json:"provider"`
+		Model     string      `json:"model"`
+		Status    string      `json:"status"`
+		ElapsedMS int64       `json:"elapsed_ms"`
+		Response  string      `json:"response,omitempty"`
+		Error     string      `json:"error,omitempty"`
+	}
+	payload := struct {
+		OK      bool     `json:"ok"`
+		Results []result `json:"results"`
+	}{OK: true, Results: make([]result, 0, len(results))}
+	for _, r := range results {
+		item := result{Provider: r.provider, Model: r.model, Status: "ok", ElapsedMS: r.elapsed.Milliseconds(), Response: r.reply}
+		if r.skipped {
+			item.Status = "skip"
+			item.Error = r.skipMsg
+		} else if r.err != nil {
+			item.Status = "fail"
+			item.Error = r.err.Error()
+			payload.OK = false
+		}
+		payload.Results = append(payload.Results, item)
+	}
+	return json.NewEncoder(out).Encode(payload)
 }

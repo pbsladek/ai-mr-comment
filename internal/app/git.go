@@ -3,11 +3,11 @@ package app
 import (
 	"context"
 
-	gogithub "github.com/google/go-github/v68/github"
+	gogithub "github.com/google/go-github/v93/github"
 	"github.com/pbsladek/ai-mr-comment/internal/gitdiff"
 	"github.com/pbsladek/ai-mr-comment/internal/localgit"
 	"github.com/pbsladek/ai-mr-comment/internal/remote"
-	gogitlab "gitlab.com/gitlab-org/api/client-go"
+	gogitlab "gitlab.com/gitlab-org/api/client-go/v3"
 )
 
 func resolveGitHubBaseURL(prURL, configuredBaseURL string) (string, error) {

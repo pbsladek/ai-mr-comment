@@ -2,34 +2,24 @@ package app
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
 
-func TestDockerfileUsesRefreshedDHIBaseDigestsAndPackageUpgrades(t *testing.T) {
+func TestDockerfilePinsHardenedBaseImagesAndPackageUpgrades(t *testing.T) {
 	dockerfile := readRepoFile(t, "Dockerfile")
-
-	required := []string{
-		"dhi.io/golang:1.26-debian13-dev@sha256:086c893153f92793f3a1541793cd4a8e8b23bfd4ccaf70c8f4261f496080fb0e",
-		"dhi.io/debian-base:trixie-debian13-dev@sha256:9415967aa0ed8adea8b5c048994259d1982026dca143d0303c7bbe0e11ed67d3",
-		"DEBIAN_FRONTEND=noninteractive",
-		"Dpkg::Options::=\"--force-confdef\"",
-		"Dpkg::Options::=\"--force-confold\"",
-		"upgrade -y --no-install-recommends",
-	}
-	for _, want := range required {
-		if !strings.Contains(dockerfile, want) {
-			t.Fatalf("Dockerfile missing %q", want)
+	for _, pattern := range []string{
+		`(?m)^FROM dhi\.io/golang:[0-9]+\.[0-9]+-debian[0-9]+-dev@sha256:[0-9a-f]{64} AS builder$`,
+		`(?m)^FROM dhi\.io/debian-base:[a-z]+-debian[0-9]+-dev@sha256:[0-9a-f]{64}$`,
+	} {
+		if !regexp.MustCompile(pattern).MatchString(dockerfile) {
+			t.Fatalf("Dockerfile is missing a pinned hardened base image matching %s", pattern)
 		}
 	}
-
-	staleDigests := []string{
-		"sha256:7c7ee6a2db0fa9a332ba1c96f2cc11b53dc7535a899ce66e45391db4dfa26350",
-		"sha256:2166e2eaef0651c9ad21de6ab5a34fda12541d89bccf7bcb0a94afceb1b1541b",
-	}
-	for _, stale := range staleDigests {
-		if strings.Contains(dockerfile, stale) {
-			t.Fatalf("Dockerfile still references stale base digest %q", stale)
+	for _, want := range []string{"DEBIAN_FRONTEND=noninteractive", `Dpkg::Options::="--force-confdef"`, `Dpkg::Options::="--force-confold"`, "upgrade -y --no-install-recommends"} {
+		if !strings.Contains(dockerfile, want) {
+			t.Fatalf("Dockerfile missing %q", want)
 		}
 	}
 }
@@ -59,7 +49,7 @@ func TestReleaseWorkflowScansImagesBeforePublish(t *testing.T) {
 		"Build Docker arm64 image for vulnerability scan",
 		"Build Docker FIPS amd64 image for vulnerability scan",
 		"Build Docker FIPS arm64 image for vulnerability scan",
-		"uses: docker/scout-action@cd72f264beff1cd72735de31148b9d3244a0234a # v1.21.0",
+		"uses: docker/scout-action@",
 		"image: local://pwbsladek/ai-mr-comment:scan-amd64",
 		"image: local://pwbsladek/ai-mr-comment:scan-arm64",
 		"image: local://pwbsladek/ai-mr-comment:scan-fips-amd64",

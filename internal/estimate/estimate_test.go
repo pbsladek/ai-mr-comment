@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"testing"
+	"time"
 )
 
 func TestHeuristicTokenEstimator(t *testing.T) {
@@ -79,5 +80,41 @@ func TestEstimateCost_NonPositiveTokens(t *testing.T) {
 	}
 	if got := EstimateCost("gpt-4o-mini", math.MinInt32); got != 0 {
 		t.Fatalf("expected 0 cost for MinInt32 tokens, got %f", got)
+	}
+}
+
+func TestCurrentModelPricingAndKnownStatus(t *testing.T) {
+	now := time.Date(2026, 11, 7, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		model  string
+		tokens int32
+		want   float64
+	}{
+		{"gpt-6-astra", 1000000, 10}, {"gpt-6.1-sol", 1000000, 2}, {"gpt-6.1-terra", 1000000, 1}, {"gpt-6-luna", 1000000, 0.10},
+		{"claude-fable-5-1", 1000000, 10}, {"claude-opus-5-5", 1000000, 4}, {"claude-sonnet-5-5", 1000000, 2},
+		{"claude-haiku-5-5", 100000, 0.01}, {"claude-haiku-5-5", 100001, 0.0500005},
+		{"gemini-4-argon", 1000000, 2}, {"gemini-3.8-flash", 1000000, 0.75}, {"gemini-3.5-flash-lite", 1000000, 0.30},
+	} {
+		got, known := lookupCostAt(tc.model, tc.tokens, now)
+		if !known || math.Abs(got-tc.want) > 0.0000001 {
+			t.Errorf("%s(%d) = %f, %v; want %f", tc.model, tc.tokens, got, known, tc.want)
+		}
+	}
+	for _, model := range []string{"future-model", "hosted-llama", "claude-future-sonnet", "gemini-future-flash", "custom-gpt-6.1-sol"} {
+		if got, known := lookupCostAt(model, 1000, now); known || got != 0 {
+			t.Errorf("unknown model %q received price %f, %v", model, got, known)
+		}
+	}
+	for _, tc := range []struct {
+		model string
+		date  time.Time
+		want  float64
+	}{
+		{"gemini-4-argon", time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC), 4},
+		{"gemini-3.8-flash", time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC), 1.50},
+	} {
+		if got, known := lookupCostAt(tc.model, 1000000, tc.date); !known || got != tc.want {
+			t.Errorf("promotional price end for %s: %f, %v", tc.model, got, known)
+		}
 	}
 }

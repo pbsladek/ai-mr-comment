@@ -23,6 +23,7 @@ func newQuickCommitCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider
 
 	cmd := &cobra.Command{
 		Use:   "quick-commit",
+		Args:  cobra.NoArgs,
 		Short: "Stage, AI-commit, and push in one step",
 		Long: `Stages all changes (git add .), generates a conventional commit message
 using AI, commits with that message, and pushes to the current branch's
@@ -32,7 +33,7 @@ remote. Use --dry-run to preview the generated message without committing.`,
 				return fmt.Errorf("not a git repository")
 			}
 
-			cfg, err := deps.loadConfig(profileName)
+			cfg, err := loadCommandConfig(cmd, deps.loadConfig, profileName)
 			if err != nil {
 				return err
 			}
@@ -155,6 +156,9 @@ remote. Use --dry-run to preview the generated message without committing.`,
 				return fmt.Errorf("--roast cannot be combined with --multi-line or --no-conventional")
 			}
 
+			if err := checkInputSize(diffContent, cfg); err != nil {
+				return err
+			}
 			// Prepend branch name so the AI can reference the ticket key.
 			diffContent = "Branch: " + branch + "\n\n" + diffContent
 			diffContent = processDiff(diffContent, 4000)
@@ -371,8 +375,10 @@ remote. Use --dry-run to preview the generated message without committing.`,
 		},
 	}
 
+	addResourceFlags(cmd)
 	cmd.Flags().StringVar(&provider, "provider", "", "AI provider to use (openai, anthropic, gemini, ollama, claude-cli, gemini-cli, codex-cli)")
 	cmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this run")
+	_ = cmd.RegisterFlagCompletionFunc("model", completeModels)
 	cmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Generate and print the commit message without staging, committing, or pushing")
 	cmd.Flags().BoolVar(&noPush, "no-push", false, "Commit but skip the push step")

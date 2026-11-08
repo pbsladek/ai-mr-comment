@@ -17,6 +17,7 @@ func newGenWorkflowCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "gen-workflow",
+		Args:  cobra.NoArgs,
 		Short: "Generate a GitHub Actions workflow for automatic AI PR review",
 		Long: `Writes a GitHub Actions workflow YAML file that automatically runs
 ai-mr-comment on every pull request (opened, synchronised, reopened) and
@@ -158,6 +159,7 @@ func newGenAliasesCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "gen-aliases",
+		Args:  cobra.NoArgs,
 		Short: "Print shell aliases for ai-mr-comment (amc and amc-*)",
 		Long: `Prints a block of shell alias definitions to stdout.
 

@@ -19,8 +19,8 @@ import (
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	anthropicopt "github.com/anthropics/anthropic-sdk-go/option"
-	openai "github.com/openai/openai-go"
-	openaiopt "github.com/openai/openai-go/option"
+	openai "github.com/openai/openai-go/v3"
+	openaiopt "github.com/openai/openai-go/v3/option"
 	"github.com/pbsladek/ai-mr-comment/internal/config"
 	"google.golang.org/genai"
 )
@@ -35,10 +35,12 @@ func TestCLIPromptStripsNullBytes(t *testing.T) {
 	}
 }
 
-func TestGeminiGenerateConfigDoesNotCapOutputTokens(t *testing.T) {
-	cfg := geminiGenerateConfig("system")
-	if cfg.MaxOutputTokens != 0 {
-		t.Fatalf("expected Gemini max output tokens to be unset, got %d", cfg.MaxOutputTokens)
+func TestGeminiGenerateConfigOutputBudget(t *testing.T) {
+	for _, limit := range []int{4000, 8192} {
+		cfg := geminiGenerateConfig("system", limit)
+		if cfg.MaxOutputTokens != int32(limit) {
+			t.Fatalf("max output tokens = %d, want %d", cfg.MaxOutputTokens, limit)
+		}
 	}
 }
 
@@ -957,5 +959,63 @@ func TestCLIArgs(t *testing.T) {
 	}
 	if got := strings.Join(CodexCLIArgs(cfg, "prompt"), " "); !strings.Contains(got, "-m gpt-5.5") {
 		t.Fatalf("expected Codex model arg, got %q", got)
+	}
+}
+
+func TestNewModelsAndOutputBudgetsReachProviderRequests(t *testing.T) {
+	for _, tc := range []struct{ provider, model string }{
+		{"openai", "gpt-6-astra"}, {"openai", "gpt-6.1-sol"}, {"openai", "gpt-6.1-terra"}, {"openai", "gpt-6-luna"}, {"openai", "future-openai-model"},
+		{"anthropic", "claude-fable-5-1"}, {"anthropic", "claude-opus-5-5"}, {"anthropic", "claude-sonnet-5-5"}, {"anthropic", "claude-haiku-5-5"}, {"anthropic", "future-claude-model"},
+		{"ollama", "custom-local:latest"},
+	} {
+		t.Run(tc.provider+"/"+tc.model, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+					http.Error(w, "bad JSON", 400)
+					return
+				}
+				if body["model"] != tc.model {
+					t.Errorf("provider changed model ID: %v", body["model"])
+				}
+				w.Header().Set("Content-Type", "application/json")
+				switch tc.provider {
+				case "openai":
+					if body["max_output_tokens"] != float64(8192) {
+						t.Errorf("OpenAI budget = %v", body["max_output_tokens"])
+					}
+					_ = json.NewEncoder(w).Encode(testOpenAIResponsePayload("review"))
+				case "anthropic":
+					if body["max_tokens"] != float64(8192) {
+						t.Errorf("Anthropic budget = %v", body["max_tokens"])
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"id": "msg_test", "type": "message", "role": "assistant", "model": tc.model, "content": []map[string]string{{"type": "thinking", "thinking": "internal"}, {"type": "text", "text": "review"}}, "stop_reason": "end_turn", "usage": map[string]int{"input_tokens": 1, "output_tokens": 1}})
+				case "ollama":
+					options, _ := body["options"].(map[string]any)
+					if options["num_predict"] != float64(8192) {
+						t.Errorf("Ollama budget = %v", options)
+					}
+					_, _ = io.WriteString(w, `{"response":"review"}`)
+				}
+			}))
+			defer server.Close()
+			cfg := &config.Config{MaxOutputTokens: 8192, OpenAIModel: tc.model, AnthropicModel: tc.model, OllamaModel: tc.model, OllamaEndpoint: server.URL}
+			var got string
+			var err error
+			switch tc.provider {
+			case "openai":
+				client := openai.NewClient(openaiopt.WithAPIKey("test"), openaiopt.WithBaseURL(server.URL+"/"))
+				got, err = CallOpenAI(context.Background(), &client, cfg, "system", "diff")
+			case "anthropic":
+				client := anthropic.NewClient(anthropicopt.WithAPIKey("test"), anthropicopt.WithBaseURL(server.URL+"/"))
+				got, err = CallAnthropic(context.Background(), &client, cfg, "system", "diff")
+			case "ollama":
+				got, err = CallOllama(context.Background(), cfg, "system", "diff")
+			}
+			if err != nil || got != "review" {
+				t.Fatalf("provider result %q, %v", got, err)
+			}
+		})
 	}
 }

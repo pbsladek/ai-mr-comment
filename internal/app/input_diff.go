@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	internalconfig "github.com/pbsladek/ai-mr-comment/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -35,12 +36,25 @@ func commandStdinIsPiped(cmd *cobra.Command) bool {
 }
 
 func readCommandInput(cmd *cobra.Command, path string) (string, error) {
+	return readCommandInputWithLimit(cmd, path, internalconfig.DefaultMaxInputBytes)
+}
+
+func readCommandInputWithLimit(cmd *cobra.Command, path string, limit int64) (string, error) {
+	input := cmd.InOrStdin()
 	if path != "" && path != "-" {
-		return readDiffFromFile(path)
+		f, err := os.Open(path)
+		if err != nil {
+			return "", fmt.Errorf("reading diff file: %w", err)
+		}
+		defer func() { _ = f.Close() }()
+		input = f
 	}
-	b, err := io.ReadAll(cmd.InOrStdin())
+	b, err := io.ReadAll(io.LimitReader(input, limit+1))
 	if err != nil {
 		return "", err
+	}
+	if int64(len(b)) > limit {
+		return "", fmt.Errorf("diff exceeds --max-input-bytes limit (%d bytes)", limit)
 	}
 	return string(b), nil
 }

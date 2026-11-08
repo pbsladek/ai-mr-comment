@@ -97,7 +97,7 @@ ai-mr-comment quick-commit --type fix --scope api
 ai-mr-comment quick-commit --message-template detailed
 ai-mr-comment quick-commit --tracked-only
 ai-mr-comment quick-commit --signoff
-ai-mr-comment quick-commit --provider anthropic --model claude-opus-4-7
+ai-mr-comment quick-commit --provider anthropic --model claude-opus-5-5
 ai-mr-comment quick-commit --profile local
 ai-mr-comment quick-commit --format json
 ```
@@ -159,3 +159,42 @@ Use the `release-notes` preset for user-facing summaries:
 ```sh
 ai-mr-comment changelog --preset release-notes --commit "v1.2.0..HEAD"
 ```
+
+
+## Models
+
+```sh
+ai-mr-comment models --provider openai --format json
+ai-mr-comment models --provider anthropic
+ai-mr-comment models --provider ollama --refresh --format json
+```
+
+JSON output contains `provider`, a `models` array, and `source` (`builtin` or
+`ollama`). `--refresh` queries the configured Ollama server's `/api/tags` endpoint,
+returns sorted unique installed model IDs, and fails if the server cannot be
+reached. It supports `--profile` and the configured `request_timeout`, with a
+10-second timeout when none is configured. Other providers use the built-in
+catalog and reject `--refresh`.
+
+## Check
+
+```sh
+ai-mr-comment check --provider openai --model gpt-6.1-sol --format json
+ai-mr-comment check --all --format json
+```
+
+JSON output uses the same envelope for one provider or all providers:
+
+```json
+{"ok":true,"results":[{"provider":"openai","model":"gpt-6.1-sol","status":"ok","elapsed_ms":120,"response":"OK"}]}
+```
+
+Results have `ok`, `fail`, or `skip` status, elapsed milliseconds, and an optional
+response or error. A failed check returns a nonzero exit status after writing
+JSON. Missing credentials or binaries are skipped in `--all`; a missing
+credential for a single-provider check is a failure. Text output remains the
+default. Model checks make live requests and may incur provider charges.
+
+Commands reject unexpected positional arguments. The `completion` command still
+requires a shell name, and review/title/commit-message/verdict/estimate aliases
+continue to forward flags to the root command.

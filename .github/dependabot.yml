@@ -1,4 +1,10 @@
 version: 2
+registries:
+  dhi:
+    type: docker-registry
+    url: https://dhi.io
+    username: ${{ secrets.DOCKERHUB_USERNAME }}
+    password: ${{ secrets.DOCKERHUB_TOKEN }}
 updates:
   - package-ecosystem: gomod
     directory: "/"
@@ -19,3 +25,22 @@ updates:
       all-actions:
         patterns:
           - "*"
+
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      all-npm-deps:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: "/"
+    registries: [dhi]
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      all-docker-deps:
+        patterns: ["*"]

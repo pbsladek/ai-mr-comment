@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,15 +28,18 @@ const (
 )
 
 const (
-	DefaultProvider       = Anthropic
-	DefaultTemplate       = "default"
-	DefaultOpenAIModel    = "gpt-5.5"
-	DefaultAnthropicModel = "claude-sonnet-4-6"
-	DefaultOllamaModel    = "llama3.2"
-	DefaultGeminiModel    = "gemini-2.5-flash"
-	DefaultClaudeCLIModel = "claude-sonnet-4-6"
-	DefaultGeminiCLIModel = "gemini-2.5-flash"
-	DefaultCodexCLIModel  = ""
+	DefaultProvider               = Anthropic
+	DefaultTemplate               = "default"
+	DefaultOpenAIModel            = "gpt-6.1-sol"
+	DefaultAnthropicModel         = "claude-sonnet-5-5"
+	DefaultOllamaModel            = "llama3.2"
+	DefaultGeminiModel            = "gemini-3.8-flash"
+	DefaultClaudeCLIModel         = "claude-sonnet-5-5"
+	DefaultGeminiCLIModel         = "gemini-3.8-flash"
+	DefaultCodexCLIModel          = ""
+	DefaultChunkConcurrency       = 4
+	DefaultMaxOutputTokens        = 4000
+	DefaultMaxInputBytes    int64 = 16 << 20
 )
 
 // Config holds all runtime settings, populated from the TOML config file,
@@ -66,6 +70,9 @@ type Config struct {
 	Provider          Provider      `mapstructure:"provider"`
 	Template          string        `mapstructure:"template"`
 	RequestTimeout    time.Duration `mapstructure:"request_timeout"`
+	ChunkConcurrency  int           `mapstructure:"chunk_concurrency"`
+	MaxOutputTokens   int           `mapstructure:"max_output_tokens"`
+	MaxInputBytes     int64         `mapstructure:"max_input_bytes"`
 
 	// DebugWriter is the output destination for verbose debug messages.
 	// Nil when verbose mode is disabled. Set by the CLI after config load; never read from TOML.
@@ -201,6 +208,9 @@ func LoadWith(v *viper.Viper, profile string) (*Config, error) {
 	v.SetDefault("codex_cli_path", "")
 	v.SetDefault("template", DefaultTemplate)
 	v.SetDefault("request_timeout", "0s")
+	v.SetDefault("chunk_concurrency", DefaultChunkConcurrency)
+	v.SetDefault("max_output_tokens", DefaultMaxOutputTokens)
+	v.SetDefault("max_input_bytes", DefaultMaxInputBytes)
 
 	if err := v.ReadInConfig(); err != nil {
 		var configParseError viper.ConfigParseError
@@ -224,6 +234,9 @@ func LoadWith(v *viper.Viper, profile string) (*Config, error) {
 	if err := Unmarshal(v, cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
+	if err := cfg.ValidateLimits(); err != nil {
+		return nil, err
+	}
 	cfg.ConfigFile = v.ConfigFileUsed()
 
 	return cfg, nil
@@ -234,6 +247,17 @@ func LoadWith(v *viper.Viper, profile string) (*Config, error) {
 func Unmarshal(v *viper.Viper, cfg *Config) error {
 	settings := v.AllSettings()
 	delete(settings, "profile")
+	// Environment variables arrive as strings; keep TOML decoding strict while
+	// accepting numeric resource settings through their documented env vars.
+	for _, key := range []string{"max_output_tokens", "max_input_bytes", "chunk_concurrency"} {
+		if raw, ok := settings[key].(string); ok && hasEnvOverride(key) {
+			value, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid %s environment value: %w", key, err)
+			}
+			settings[key] = value
+		}
+	}
 	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
 		ErrorUnused:      true,
 		WeaklyTypedInput: false,
@@ -245,4 +269,37 @@ func Unmarshal(v *viper.Viper, cfg *Config) error {
 		return err
 	}
 	return decoder.Decode(settings)
+}
+
+// ValidateLimits rejects invalid limits before reading input or making requests.
+func (c *Config) ValidateLimits() error {
+	if c.ChunkConcurrency <= 0 {
+		return errors.New("chunk_concurrency must be greater than zero")
+	}
+	if c.MaxOutputTokens <= 0 || int64(c.MaxOutputTokens) > 2147483647 {
+		return errors.New("max_output_tokens must be between 1 and 2147483647")
+	}
+	if c.MaxInputBytes <= 0 || c.MaxInputBytes == 9223372036854775807 {
+		return errors.New("max_input_bytes must be positive and less than 9223372036854775807")
+	}
+	return nil
+}
+
+func (c *Config) OutputTokenLimit() int {
+	if c.MaxOutputTokens == 0 {
+		return DefaultMaxOutputTokens
+	}
+	return c.MaxOutputTokens
+}
+func (c *Config) InputByteLimit() int64 {
+	if c.MaxInputBytes == 0 {
+		return DefaultMaxInputBytes
+	}
+	return c.MaxInputBytes
+}
+func (c *Config) ChunkLimit() int {
+	if c.ChunkConcurrency == 0 {
+		return DefaultChunkConcurrency
+	}
+	return c.ChunkConcurrency
 }
