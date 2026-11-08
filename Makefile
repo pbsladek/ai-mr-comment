@@ -10,10 +10,11 @@ LDFLAGS      := -ldflags="-s -w -X 'main.Version=$(VERSION)' -X 'main.Commit=$(C
 BUILD_DIR := dist
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
-# Maximum allowed binary size in bytes for linux/amd64 release build (35 MB)
-# Current baseline ~23.4 MB; gRPC+protobuf from generative-ai-go dominate.
+# Maximum allowed binary size in bytes for linux/amd64 release build (55 MiB).
+# Current SDK baseline: ~52.2 MiB with Go 1.26, ~49.2 MiB with Go 1.27.
+# Updating the provider and hosting SDKs increased the Go 1.26 baseline from ~29.5 MiB.
 # Raise this ceiling deliberately if you add large deps; shrink it to lock in gains.
-MAX_BINARY_BYTES := 36700160
+MAX_BINARY_BYTES := 57671680
 
 .PHONY: all clean build fetch-tags release release-check release-snapshot verify test test-cover test-e2e-smoke test-integration test-integration-openai test-integration-gemini test-integration-ollama test-integration-ollama-8b test-fuzz lint lint-shell test-run quick-commit run-debug changelog gen-aliases install install-completion-bash install-completion-zsh check-size help docker-build docker-build-fips docker-smoke docker-scout docker-scout-fips docker-run docker-run-fips docker-quick-commit profile-cpu profile-mem profile-bench
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pbsladek/ai-mr-comment/internal/estimate"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -30,22 +31,29 @@ template = "default"
 # "0s" disables the timeout and preserves the provider/client default behavior.
 request_timeout = "0s"
 
+# Maximum simultaneous requests when --smart-chunk summarizes files.
+chunk_concurrency = 4
+# Generated tokens per API request, including reasoning tokens where applicable.
+max_output_tokens = 4000
+# Reject diff input larger than 16 MiB before sending it to a provider.
+max_input_bytes = 16777216
+
 # --- OpenAI ---
 # openai_api_key = ""   # or set OPENAI_API_KEY env var
-openai_model    = "gpt-5.5"
+openai_model    = "gpt-6.1-sol"
 openai_endpoint = "https://api.openai.com/v1/"
-# Other OpenAI models: gpt-5.5-pro, gpt-5.4, gpt-5.4-pro, gpt-5.4-mini, gpt-5.4-nano, gpt-5.3-codex
+# Other OpenAI models: gpt-6-astra, gpt-6.1-terra, gpt-6-luna, gpt-5.5-pro, gpt-5.4, gpt-5.4-pro, gpt-5.4-mini, gpt-5.4-nano, gpt-5.3-codex
 
 # --- Anthropic ---
 # anthropic_api_key = ""   # or set ANTHROPIC_API_KEY env var
-anthropic_model    = "claude-sonnet-4-6"
+anthropic_model    = "claude-sonnet-5-5"
 anthropic_endpoint = "https://api.anthropic.com/"
-# Other Anthropic models: claude-opus-4-7, claude-opus-4-6, claude-haiku-4-5-20251001
+# Other Anthropic models: claude-fable-5-1, claude-opus-5-5, claude-haiku-5-5, claude-opus-4-7, claude-opus-4-6, claude-haiku-4-5-20251001
 
 # --- Google Gemini ---
 # gemini_api_key = ""   # or set GEMINI_API_KEY env var
-gemini_model = "gemini-2.5-flash"
-# Other Gemini models: gemini-3.1-pro-preview, gemini-3-flash-preview, gemini-3.1-flash-lite, gemini-2.5-pro, gemini-2.5-flash-lite
+gemini_model = "gemini-3.8-flash"
+# Other Gemini models: gemini-4-argon, gemini-3.6-flash, gemini-3.5-flash-lite, gemini-3.1-pro-preview, gemini-3-flash-preview, gemini-3.1-flash-lite, gemini-2.5-pro, gemini-2.5-flash-lite
 
 # --- Ollama (local) ---
 ollama_model    = "llama3.2"
@@ -56,13 +64,13 @@ ollama_endpoint = "http://localhost:11434/api/generate"
 # Uses the local claude CLI for auth — no API key required.
 # Auth is delegated to the claude CLI process (e.g. Claude Code session).
 # claude_cli_path = ""              # auto-detected: ~/.claude/local/claude, then PATH
-claude_cli_model = "claude-sonnet-4-6"
+claude_cli_model = "claude-sonnet-5-5"
 
 # --- Gemini CLI (gemini-cli) ---
 # Uses the local gemini CLI with Google OAuth — no API key required.
 # Install: npm install -g @google/gemini-cli
 # gemini_cli_path = ""              # auto-detected via PATH
-gemini_cli_model = "gemini-2.5-flash"
+gemini_cli_model = "gemini-3.8-flash"
 
 # --- Codex CLI (codex-cli) ---
 # Uses the local OpenAI Codex CLI in quiet mode — requires OPENAI_API_KEY.
@@ -85,28 +93,28 @@ gemini_cli_model = "gemini-2.5-flash"
 # Environment variables still take precedence over profile values.
 # ---------------------------------------------------------------------------
 
-# Fast / cheap — gpt-5.4-nano for quick reviews and commit messages
+# Fast / cheap — gpt-6-luna for quick reviews and commit messages
 [profile.fast]
 provider     = "openai"
-openai_model = "gpt-5.4-nano"
+openai_model = "gpt-6-luna"
 template     = "conventional"
 
-# OpenAI — gpt-5.5 with technical template for thorough reviews
+# OpenAI — gpt-6.1-sol with technical template for thorough reviews
 [profile.openai]
 provider     = "openai"
-openai_model = "gpt-5.5"
+openai_model = "gpt-6.1-sol"
 template     = "technical"
 
-# Anthropic — claude-opus-4-7 with technical template
+# Anthropic — claude-opus-5-5 with technical template
 [profile.anthropic]
 provider        = "anthropic"
-anthropic_model = "claude-opus-4-7"
+anthropic_model = "claude-opus-5-5"
 template        = "technical"
 
-# Gemini — gemini-3.1-pro-preview with technical template
+# Gemini — gemini-3.8-flash with technical template
 [profile.gemini]
 provider     = "gemini"
-gemini_model = "gemini-3.1-pro-preview"
+gemini_model = "gemini-3.8-flash"
 template     = "technical"
 
 # Local / offline — Ollama, no API key required
@@ -118,13 +126,13 @@ template     = "default"
 # Claude CLI — delegates auth to the local claude CLI (Claude Code session)
 [profile.claude-cli]
 provider         = "claude-cli"
-claude_cli_model = "claude-sonnet-4-6"
+claude_cli_model = "claude-sonnet-5-5"
 template         = "default"
 
 # Gemini CLI — delegates auth to the local gemini CLI (Google OAuth)
 [profile.gemini-cli]
 provider         = "gemini-cli"
-gemini_cli_model = "gemini-2.5-flash"
+gemini_cli_model = "gemini-3.8-flash"
 template         = "default"
 
 # Codex CLI — uses the local codex CLI (requires OPENAI_API_KEY)
@@ -141,6 +149,7 @@ func newInitConfigCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "init-config",
+		Args:  cobra.NoArgs,
 		Short: "Write a default config file to ~/.ai-mr-comment.toml",
 		Long: `Writes a commented TOML configuration file with all supported settings and
 their defaults. Edit the generated file to add your API keys and customise
@@ -240,12 +249,19 @@ func showCostEstimate(ctx context.Context, cfg *Config, systemPrompt, diffConten
 		totalTokens, _ = fallback.CountTokens(context.Background(), "", systemPrompt, diffContent)
 		_, _ = fmt.Fprintln(w, "Using heuristic fallback.")
 	}
-	cost := EstimateCost(model, totalTokens)
+	cost, knownCost := estimate.LookupCost(model, totalTokens)
+	if cfg.Provider == Ollama {
+		cost, knownCost = 0, true
+	}
 	_, _ = fmt.Fprintln(w, "Token & Cost Estimation:")
 	_, _ = fmt.Fprintf(w, "- Model: %s\n", model)
 	_, _ = fmt.Fprintf(w, "- Diff lines: %d\n", strings.Count(diffContent, "\n")+1)
 	_, _ = fmt.Fprintf(w, "- Estimated Input Tokens: %d\n", totalTokens)
-	_, _ = fmt.Fprintf(w, "- Estimated Input Cost: $%.6f\n", cost)
+	if knownCost {
+		_, _ = fmt.Fprintf(w, "- Estimated Input Cost: $%.6f\n", cost)
+	} else {
+		_, _ = fmt.Fprintln(w, "- Estimated Input Cost: unknown (model pricing is unavailable)")
+	}
 	_, _ = fmt.Fprintln(w, "\nNote: Output tokens and cost depend on the generated response length.")
 }
 

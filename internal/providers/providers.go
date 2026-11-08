@@ -19,9 +19,9 @@ import (
 	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
-	openai "github.com/openai/openai-go"
-	"github.com/openai/openai-go/packages/param"
-	"github.com/openai/openai-go/responses"
+	openai "github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/packages/param"
+	"github.com/openai/openai-go/v3/responses"
 	"github.com/pbsladek/ai-mr-comment/internal/config"
 	"google.golang.org/genai"
 )
@@ -106,7 +106,7 @@ func CallOpenAI(ctx context.Context, client *openai.Client, cfg *config.Config, 
 		Model:           cfg.OpenAIModel,
 		Instructions:    param.NewOpt(systemPrompt),
 		Input:           responses.ResponseNewParamsInputUnion{OfString: param.NewOpt(diffContent)},
-		MaxOutputTokens: param.NewOpt(int64(4000)),
+		MaxOutputTokens: param.NewOpt(int64(cfg.OutputTokenLimit())),
 		Store:           param.NewOpt(false),
 		Truncation:      responses.ResponseNewParamsTruncationAuto,
 	})
@@ -169,7 +169,7 @@ func enrichOpenAIError(err error) error {
 func CallAnthropic(ctx context.Context, client *anthropic.Client, cfg *config.Config, systemPrompt, diffContent string) (string, error) {
 	resp, err := client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.Model(cfg.AnthropicModel),
-		MaxTokens: 4000,
+		MaxTokens: int64(cfg.OutputTokenLimit()),
 		System: []anthropic.TextBlockParam{
 			{Text: systemPrompt},
 		},
@@ -200,10 +200,11 @@ func CallAnthropic(ctx context.Context, client *anthropic.Client, cfg *config.Co
 // CallOllama sends a generation request to the Ollama local API.
 func CallOllama(ctx context.Context, cfg *config.Config, systemPrompt, diffContent string) (string, error) {
 	reqBody := map[string]any{
-		"model":  cfg.OllamaModel,
-		"prompt": diffContent,
-		"system": systemPrompt,
-		"stream": false,
+		"model":   cfg.OllamaModel,
+		"prompt":  diffContent,
+		"system":  systemPrompt,
+		"stream":  false,
+		"options": map[string]any{"num_predict": cfg.OutputTokenLimit()},
 	}
 
 	buf, _ := json.Marshal(reqBody)
@@ -256,7 +257,7 @@ func CallGemini(ctx context.Context, cfg *config.Config, systemPrompt, diffConte
 		return "", err
 	}
 
-	resp, err := client.Models.GenerateContent(ctx, cfg.GeminiModel, genai.Text(diffContent), geminiGenerateConfig(systemPrompt))
+	resp, err := client.Models.GenerateContent(ctx, cfg.GeminiModel, genai.Text(diffContent), geminiGenerateConfig(systemPrompt, cfg.OutputTokenLimit()))
 	if err != nil {
 		return "", enrichNetworkError(err)
 	}
@@ -272,8 +273,13 @@ func CallGemini(ctx context.Context, cfg *config.Config, systemPrompt, diffConte
 	return output, nil
 }
 
-func geminiGenerateConfig(systemPrompt string) *genai.GenerateContentConfig {
+func geminiGenerateConfig(systemPrompt string, limits ...int) *genai.GenerateContentConfig {
+	limit := config.DefaultMaxOutputTokens
+	if len(limits) > 0 {
+		limit = limits[0]
+	}
 	return &genai.GenerateContentConfig{
+		MaxOutputTokens: int32(limit),
 		SystemInstruction: &genai.Content{
 			Parts: []*genai.Part{genai.NewPartFromText(systemPrompt)},
 		},
@@ -476,7 +482,7 @@ func StreamOpenAI(ctx context.Context, client *openai.Client, cfg *config.Config
 		Model:           cfg.OpenAIModel,
 		Instructions:    param.NewOpt(systemPrompt),
 		Input:           responses.ResponseNewParamsInputUnion{OfString: param.NewOpt(diffContent)},
-		MaxOutputTokens: param.NewOpt(int64(4000)),
+		MaxOutputTokens: param.NewOpt(int64(cfg.OutputTokenLimit())),
 		Store:           param.NewOpt(false),
 		Truncation:      responses.ResponseNewParamsTruncationAuto,
 	})
@@ -487,7 +493,7 @@ func StreamOpenAI(ctx context.Context, client *openai.Client, cfg *config.Config
 		event := stream.Current()
 		switch event.Type {
 		case "response.output_text.delta":
-			token := event.Delta.OfString
+			token := event.Delta
 			if token == "" {
 				token = event.Text
 			}
@@ -511,7 +517,7 @@ func StreamOpenAI(ctx context.Context, client *openai.Client, cfg *config.Config
 func StreamAnthropic(ctx context.Context, client *anthropic.Client, cfg *config.Config, systemPrompt, diffContent string, w io.Writer) (string, error) {
 	stream := client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.Model(cfg.AnthropicModel),
-		MaxTokens: 4000,
+		MaxTokens: int64(cfg.OutputTokenLimit()),
 		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
 		Messages: []anthropic.MessageParam{
 			{
@@ -550,7 +556,7 @@ func StreamGemini(ctx context.Context, cfg *config.Config, systemPrompt, diffCon
 		return "", err
 	}
 
-	stream := client.Models.GenerateContentStream(ctx, cfg.GeminiModel, genai.Text(diffContent), geminiGenerateConfig(systemPrompt))
+	stream := client.Models.GenerateContentStream(ctx, cfg.GeminiModel, genai.Text(diffContent), geminiGenerateConfig(systemPrompt, cfg.OutputTokenLimit()))
 
 	var sb strings.Builder
 	for resp, err := range stream {
@@ -573,10 +579,11 @@ func StreamGemini(ctx context.Context, cfg *config.Config, systemPrompt, diffCon
 
 func StreamOllama(ctx context.Context, cfg *config.Config, systemPrompt, diffContent string, w io.Writer) (string, error) {
 	reqBody := map[string]any{
-		"model":  cfg.OllamaModel,
-		"prompt": diffContent,
-		"system": systemPrompt,
-		"stream": true,
+		"model":   cfg.OllamaModel,
+		"prompt":  diffContent,
+		"system":  systemPrompt,
+		"stream":  true,
+		"options": map[string]any{"num_predict": cfg.OutputTokenLimit()},
 	}
 
 	buf, _ := json.Marshal(reqBody)

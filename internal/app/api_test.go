@@ -13,8 +13,8 @@ import (
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	anthropicopt "github.com/anthropics/anthropic-sdk-go/option"
-	openai "github.com/openai/openai-go"
-	openaiopt "github.com/openai/openai-go/option"
+	openai "github.com/openai/openai-go/v3"
+	openaiopt "github.com/openai/openai-go/v3/option"
 	"github.com/pbsladek/ai-mr-comment/internal/providers"
 )
 
@@ -231,8 +231,8 @@ func TestCallGemini_Success(t *testing.T) {
 				t.Fatalf("expected diff content text, got %#v", parts[0])
 			}
 			if generation, ok := req["generationConfig"].(map[string]any); ok {
-				if _, capped := generation["maxOutputTokens"]; capped {
-					t.Fatalf("expected maxOutputTokens to be unset, got %#v", req["generationConfig"])
+				if generation["maxOutputTokens"] != float64(8192) {
+					t.Errorf("expected maxOutputTokens=8192, got %#v", req["generationConfig"])
 				}
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -255,7 +255,7 @@ func TestCallGemini_Success(t *testing.T) {
 	}
 	defer func() { geminiClientOptions = nil }()
 
-	cfg := &Config{GeminiAPIKey: "test", GeminiModel: "gemini-2.5-flash"}
+	cfg := &Config{MaxOutputTokens: 8192, GeminiAPIKey: "test", GeminiModel: "gemini-2.5-flash"}
 
 	result, err := callGemini(context.Background(), cfg, "prompt", "diff")
 	if err != nil {

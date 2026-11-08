@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"strings"
+	"time"
 )
 
 // HeuristicTokenEstimator approximates token count from character length.
@@ -29,19 +30,42 @@ type ModelPrice struct {
 // It performs an exact lookup first, then falls back to substring matching.
 // Returns 0 for unknown models or Ollama (which runs locally at no cost).
 func EstimateCost(model string, inputTokens int32) float64 {
+	cost, known := LookupCost(model, inputTokens)
+	if !known && inputTokens > 0 {
+		return substringFallbackPrice(strings.ToLower(model), inputTokens)
+	}
+	return cost
+}
+
+// LookupCost distinguishes unknown pricing from a known zero-cost estimate.
+func LookupCost(model string, inputTokens int32) (float64, bool) {
+	return lookupCostAt(model, inputTokens, time.Now())
+}
+
+func lookupCostAt(model string, inputTokens int32, now time.Time) (float64, bool) {
 	if inputTokens <= 0 {
-		return 0.0
+		return 0.0, false
 	}
 
 	model = strings.ToLower(model)
 
-	// Ollama models are local and free.
-	if strings.Contains(model, "ollama") || strings.Contains(model, "llama") {
-		return 0.0
-	}
-
 	// Pricing table in USD per 1M tokens (approximate, subject to change).
 	prices := map[string]ModelPrice{
+		// Standard text input prices checked 2026-11-07.
+		// https://developers.openai.com/api/docs/pricing
+		"gpt-6-astra":   {Input: 10.00},
+		"gpt-6.1-sol":   {Input: 2.00},
+		"gpt-6.1-terra": {Input: 1.00},
+		"gpt-6-luna":    {Input: 0.10},
+		// https://platform.claude.com/docs/en/about-claude/pricing
+		"claude-fable-5-1":  {Input: 10.00},
+		"claude-opus-5-5":   {Input: 4.00},
+		"claude-sonnet-5-5": {Input: 2.00},
+		"claude-haiku-5-5":  {Input: 0.10},
+		// https://ai.google.dev/gemini-api/docs/pricing
+		"gemini-4-argon":        {Input: 2.00}, // Promotional input price through 2026-11-30.
+		"gemini-3.8-flash":      {Input: 0.75}, // Promotional input price through 2026-12-31.
+		"gemini-3.5-flash-lite": {Input: 0.30},
 		// OpenAI (current)
 		"o3":            {Input: 2.00},
 		"o3-mini":       {Input: 1.10},
@@ -103,10 +127,21 @@ func EstimateCost(model string, inputTokens int32) float64 {
 	}
 
 	if price, ok := prices[model]; ok {
-		return float64(inputTokens) / 1_000_000 * price.Input
+		if model == "claude-haiku-5-5" && inputTokens > 100000 {
+			price.Input = 0.50
+		}
+		// Apply the published end dates of Google's introductory prices.
+		today := now.UTC()
+		if model == "gemini-4-argon" && !today.Before(time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)) {
+			price.Input = 4.00
+		}
+		if model == "gemini-3.8-flash" && !today.Before(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)) {
+			price.Input = 1.50
+		}
+		return float64(inputTokens) / 1_000_000 * price.Input, true
 	}
 
-	return substringFallbackPrice(model, inputTokens)
+	return 0, false
 }
 
 // substringRule matches a model name by one or two required substrings.

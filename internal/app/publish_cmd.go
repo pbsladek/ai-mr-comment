@@ -69,12 +69,13 @@ func newPublishCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, st
 
 	cmd := &cobra.Command{
 		Use:   "publish",
+		Args:  cobra.NoArgs,
 		Short: "Generate and sync PR/MR title, description, labels, reviewers, and managed summary",
 		Long: `Generates a title and description, then synchronizes them to a remote
 GitHub PR or GitLab MR. Pass --pr to target an existing PR/MR, or omit --pr to
 find or create one from the current branch and origin remote.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := deps.loadConfig(profileName)
+			cfg, err := loadCommandConfig(cmd, deps.loadConfig, profileName)
 			if err != nil {
 				return err
 			}
@@ -109,6 +110,9 @@ find or create one from the current branch and origin remote.`,
 			}
 			if strings.TrimSpace(diffContent) == "" {
 				return withExitCode(3, errors.New("no diff found to publish"))
+			}
+			if err := checkInputSize(diffContent, cfg); err != nil {
+				return err
 			}
 			summary := summarizeDiff(diffContent, "publish", getModelName(cfg), len(strings.Split(diffContent, "\n")) > 4000)
 			diffContent = processDiff(diffContent, 4000)
@@ -238,9 +242,11 @@ find or create one from the current branch and origin remote.`,
 		},
 	}
 
+	addResourceFlags(cmd)
 	cmd.Flags().StringVar(&prURL, "pr", "", "GitHub PR or GitLab MR URL; omitted means find or create from the current branch")
 	cmd.Flags().StringVar(&provider, "provider", "", "AI provider to use")
 	cmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this run")
+	_ = cmd.RegisterFlagCompletionFunc("model", completeModels)
 	cmd.Flags().StringVarP(&templateName, "template", "t", "default", "Prompt template to use")
 	cmd.Flags().StringVar(&profileName, "profile", "", "Named config profile to activate")
 	cmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")

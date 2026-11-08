@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	gogithub "github.com/google/go-github/v68/github"
-	gogitlab "gitlab.com/gitlab-org/api/client-go"
+	gogithub "github.com/google/go-github/v93/github"
+	gogitlab "gitlab.com/gitlab-org/api/client-go/v3"
 	"golang.org/x/oauth2"
 )
 
@@ -21,16 +21,15 @@ type Metadata struct {
 
 // NewGitHubClient returns a go-github client configured for public GitHub or GHE.
 func NewGitHubClient(ctx context.Context, token, baseURL string) (*gogithub.Client, error) {
-	var httpClient *http.Client
+	var opts []gogithub.ClientOptionsFunc
 	if token != "" {
 		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-		httpClient = oauth2.NewClient(ctx, ts)
+		opts = append(opts, gogithub.WithHTTPClient(oauth2.NewClient(ctx, ts)))
 	}
-	gh := gogithub.NewClient(httpClient)
 	if baseURL != "" {
-		return gh.WithEnterpriseURLs(baseURL, baseURL)
+		opts = append(opts, gogithub.WithEnterpriseURLs(baseURL, baseURL))
 	}
-	return gh, nil
+	return gogithub.NewClient(opts...)
 }
 
 // NewGitLabClient returns a go-gitlab client configured for public or self-hosted GitLab.
@@ -63,10 +62,10 @@ func FindOrCreateGitHubPR(ctx context.Context, gh *gogithub.Client, owner, repo,
 	if base == "" {
 		base = "main"
 	}
-	pr, _, err := gh.PullRequests.Create(ctx, owner, repo, &gogithub.NewPullRequest{
+	pr, _, err := gh.PullRequests.Create(ctx, owner, repo, gogithub.CreatePullRequest{
 		Title: &title,
-		Head:  &branch,
-		Base:  &base,
+		Head:  branch,
+		Base:  base,
 	})
 	if err != nil {
 		return "", wrapGitHubAuthError("creating GitHub PR", err)
@@ -194,7 +193,7 @@ func PostGitHubPRCommentWithClient(ctx context.Context, gh *gogithub.Client, prU
 	if err != nil {
 		return err
 	}
-	_, _, err = gh.Issues.CreateComment(ctx, owner, repo, number, &gogithub.IssueComment{Body: &body})
+	_, _, err = gh.Issues.CreateComment(ctx, owner, repo, number, gogithub.IssueCommentRequest{Body: body})
 	if err != nil {
 		return fmt.Errorf("posting GitHub PR comment: %w", err)
 	}
@@ -288,7 +287,7 @@ func UpsertGitHubPRCommentWithClient(ctx context.Context, gh *gogithub.Client, p
 		}
 		for _, comment := range comments {
 			if strings.Contains(comment.GetBody(), marker) {
-				_, _, err = gh.Issues.EditComment(ctx, owner, repo, comment.GetID(), &gogithub.IssueComment{Body: &body})
+				_, _, err = gh.Issues.UpdateComment(ctx, owner, repo, comment.GetID(), gogithub.IssueCommentRequest{Body: body})
 				if err != nil {
 					return fmt.Errorf("updating GitHub PR comment: %w", err)
 				}
@@ -615,7 +614,7 @@ func wrapGitHubAuthError(msg string, err error) error {
 func wrapGitLabAuthError(msg string, err error) error {
 	var glErr *gogitlab.ErrorResponse
 	if errors.As(err, &glErr) {
-		switch glErr.Response.StatusCode {
+		switch glErr.StatusCode {
 		case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
 			return fmt.Errorf("%s: %w (set GITLAB_TOKEN for private repos)", msg, err)
 		}

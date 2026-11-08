@@ -11,7 +11,7 @@ func resolveRootDiffInput(cmd *cobra.Command, cfg *Config, opts RootOptions, exc
 	if opts.InputFormat == "json" {
 		diffSource = "json"
 		var rawInput string
-		rawInput, err = readCommandInput(cmd, opts.DiffFilePath)
+		rawInput, err = readCommandInputWithLimit(cmd, opts.DiffFilePath, cfg.InputByteLimit())
 		if err == nil {
 			diffContent, err = decodeAgentInput(rawInput)
 		}
@@ -38,13 +38,13 @@ func resolveRootDiffInput(cmd *cobra.Command, cfg *Config, opts RootOptions, exc
 		} else {
 			diffSource = "file: " + opts.DiffFilePath
 		}
-		diffContent, err = readCommandInput(cmd, opts.DiffFilePath)
+		diffContent, err = readCommandInputWithLimit(cmd, opts.DiffFilePath, cfg.InputByteLimit())
 		return diffContent, diffSource, err
 	}
 
 	if commandStdinIsPiped(cmd) {
 		diffSource = "stdin"
-		diffContent, err = readCommandInput(cmd, "-")
+		diffContent, err = readCommandInputWithLimit(cmd, "-", cfg.InputByteLimit())
 		return diffContent, diffSource, err
 	}
 

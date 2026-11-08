@@ -58,11 +58,11 @@ func TestLoadConfig_DefaultsWhenMissingFile(t *testing.T) {
 	if cfg.Provider != Anthropic {
 		t.Errorf("expected provider Anthropic, got %v", cfg.Provider)
 	}
-	if cfg.OpenAIModel != "gpt-5.5" {
-		t.Errorf("expected OpenAI model gpt-5.5, got %v", cfg.OpenAIModel)
+	if cfg.OpenAIModel != "gpt-6.1-sol" {
+		t.Errorf("expected OpenAI model gpt-6.1-sol, got %v", cfg.OpenAIModel)
 	}
-	if cfg.AnthropicModel != "claude-sonnet-4-6" {
-		t.Errorf("expected Anthropic model claude-sonnet-4-6, got %v", cfg.AnthropicModel)
+	if cfg.AnthropicModel != "claude-sonnet-5-5" {
+		t.Errorf("expected Anthropic model claude-sonnet-5-5, got %v", cfg.AnthropicModel)
 	}
 	if cfg.OllamaModel != "llama3.2" {
 		t.Errorf("expected Ollama model llama3.2, got %v", cfg.OllamaModel)

@@ -122,6 +122,7 @@ func newRootCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, strin
 
 	rootCmd := &cobra.Command{
 		Use:           "ai-mr-comment",
+		Args:          cobra.NoArgs,
 		Short:         "Generate MR/PR comments using AI",
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -131,7 +132,7 @@ func newRootCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, strin
 				return nil
 			}
 			runStart := deps.now()
-			cfg, err := deps.loadConfig(profileName)
+			cfg, err := loadCommandConfig(cmd, deps.loadConfig, profileName)
 			if err != nil {
 				return err
 			}
@@ -226,6 +227,9 @@ func newRootCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, strin
 			diffContent, diffSource, err := resolveRootDiffInput(cmd, cfg, rootOpts, exclude, deps)
 			debugLog(cfg, "diff fetch: elapsed=%dms", deps.since(diffFetchStart).Milliseconds())
 			if err != nil {
+				return err
+			}
+			if err := checkInputSize(diffContent, cfg); err != nil {
 				return err
 			}
 			if strings.TrimSpace(diffContent) == "" {
@@ -568,6 +572,7 @@ func newRootCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, strin
 	rootCmd.Flags().StringVar(&outputPath, "output", "", "Output file path")
 	rootCmd.Flags().StringVar(&provider, "provider", "", "API provider (openai, anthropic, gemini, ollama, claude-cli, gemini-cli, codex-cli)")
 	rootCmd.Flags().StringVar(&modelOverride, "model", "", "Override the model for this run (e.g. gpt-5.5, claude-opus-4-7, gemini-3.1-pro-preview)")
+	_ = rootCmd.RegisterFlagCompletionFunc("model", completeModels)
 	rootCmd.Flags().StringVarP(&templateName, "template", "t", "default", "Prompt template to use (e.g., default, conventional, technical)")
 	rootCmd.Flags().BoolVar(&debug, "debug", false, "Show token/cost estimate and exit without calling the API")
 	rootCmd.Flags().BoolVar(&verbose, "verbose", false, "Enable verbose debug logging to stderr (provider, model, timing, errors)")
@@ -620,6 +625,7 @@ func newRootCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, strin
 	_ = rootCmd.RegisterFlagCompletionFunc("stream", completeValues([]string{"jsonl"}))
 	_ = rootCmd.RegisterFlagCompletionFunc("clipboard", completeValues([]string{"title", "description", "comment", "commit-msg", "all"}))
 
+	addResourceFlags(rootCmd)
 	rootCmd.AddCommand(newInitConfigCmd())
 	rootCmd.AddCommand(newModelsCmd())
 	rootCmd.AddCommand(newCheckCmd(chatFn))

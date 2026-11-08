@@ -3,14 +3,14 @@ package remote
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 
-	gogithub "github.com/google/go-github/v68/github"
-	gogitlab "gitlab.com/gitlab-org/api/client-go"
+	gogithub "github.com/google/go-github/v93/github"
+	gogitlab "gitlab.com/gitlab-org/api/client-go/v3"
 )
 
 func newRemoteTestGitHubClient(t *testing.T, mux *http.ServeMux) *gogithub.Client {
@@ -18,13 +18,11 @@ func newRemoteTestGitHubClient(t *testing.T, mux *http.ServeMux) *gogithub.Clien
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	gh := gogithub.NewClient(nil)
-	baseURL, err := url.Parse(srv.URL + "/")
+	baseURL := srv.URL + "/"
+	gh, err := gogithub.NewClient(gogithub.WithURLs(&baseURL, &baseURL))
 	if err != nil {
 		t.Fatal(err)
 	}
-	gh.BaseURL = baseURL
-	gh.UploadURL = baseURL
 	return gh
 }
 
@@ -444,6 +442,22 @@ func TestGitLabFindOrCreateMR(t *testing.T) {
 	})
 }
 
+func TestGitLabAuthErrorWithoutHTTPResponse(t *testing.T) {
+	for _, original := range []*gogitlab.ErrorResponse{
+		{StatusCode: http.StatusUnauthorized},
+		{StatusCode: http.StatusForbidden},
+		gogitlab.ErrNotFound,
+	} {
+		wrapped := wrapGitLabAuthError("fetching GitLab MR", original)
+		if !strings.Contains(wrapped.Error(), "set GITLAB_TOKEN") {
+			t.Errorf("status %d: expected auth guidance, got %v", original.StatusCode, wrapped)
+		}
+		if !errors.Is(wrapped, original) {
+			t.Errorf("status %d: original error was not preserved", original.StatusCode)
+		}
+	}
+}
+
 func TestRemoteAuthErrorWrappingAndFormatting(t *testing.T) {
 	req, err := http.NewRequest(http.MethodGet, "https://api.example.test/resource", nil)
 	if err != nil {
@@ -453,7 +467,7 @@ func TestRemoteAuthErrorWrappingAndFormatting(t *testing.T) {
 	if !strings.Contains(ghErr.Error(), "set GITHUB_TOKEN") {
 		t.Fatalf("expected GitHub auth guidance, got %v", ghErr)
 	}
-	glErr := wrapGitLabAuthError("listing GitLab MRs", &gogitlab.ErrorResponse{Response: &http.Response{StatusCode: http.StatusForbidden, Request: req}})
+	glErr := wrapGitLabAuthError("listing GitLab MRs", &gogitlab.ErrorResponse{StatusCode: http.StatusForbidden, Response: &http.Response{StatusCode: http.StatusForbidden, Request: req}})
 	if !strings.Contains(glErr.Error(), "set GITLAB_TOKEN") {
 		t.Fatalf("expected GitLab auth guidance, got %v", glErr)
 	}

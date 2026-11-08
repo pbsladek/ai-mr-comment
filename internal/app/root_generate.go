@@ -135,9 +135,16 @@ func generateSmartChunkComment(req rootGenerationRequest) (string, error) {
 	summaries := make([]string, len(chunks))
 	debugLog(cfg, "smart-chunk: summarizing %d chunks in parallel", len(chunks))
 	eg, egCtx := errgroup.WithContext(req.Context)
+	eg.SetLimit(cfg.ChunkLimit())
 	for i, chunk := range chunks {
+		if err := egCtx.Err(); err != nil {
+			break
+		}
 		i, chunk := i, chunk
 		eg.Go(func() error {
+			if err := egCtx.Err(); err != nil {
+				return err
+			}
 			debugLog(cfg, "smart-chunk: processing chunk %d/%d", i+1, len(chunks))
 			summary, err := timedCall(cfg, fmt.Sprintf("chunk-summary-%d", i+1), func() (string, error) {
 				return req.Chat(egCtx, cfg, cfg.Provider, chunkPrompt, processDiff(chunk, 1000))
@@ -150,6 +157,9 @@ func generateSmartChunkComment(req rootGenerationRequest) (string, error) {
 		})
 	}
 	if err := eg.Wait(); err != nil {
+		return "", err
+	}
+	if err := req.Context.Err(); err != nil {
 		return "", err
 	}
 

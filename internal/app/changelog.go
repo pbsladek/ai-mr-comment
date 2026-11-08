@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	internalconfig "github.com/pbsladek/ai-mr-comment/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -28,7 +29,7 @@ type changelogArgs struct {
 }
 
 func runChangelogWithDeps(cmd *cobra.Command, a changelogArgs, chatFn func(context.Context, *Config, ApiProvider, string, string) (string, error), deps commandDeps) error {
-	cfg, err := deps.loadConfig(a.profile)
+	cfg, err := loadCommandConfig(cmd, deps.loadConfig, a.profile)
 	if err != nil {
 		return err
 	}
@@ -62,8 +63,11 @@ func runChangelogWithDeps(cmd *cobra.Command, a changelogArgs, chatFn func(conte
 		return withExitCode(4, errors.New("changelog --dry-run cannot be combined with --estimate"))
 	}
 
-	diffContent, err := resolveDiffWithDeps(cmd, a.commit, a.diffFilePath, deps)
+	diffContent, err := resolveDiffWithDeps(cmd, a.commit, a.diffFilePath, deps, cfg.InputByteLimit())
 	if err != nil {
+		return err
+	}
+	if err := checkInputSize(diffContent, cfg); err != nil {
 		return err
 	}
 	rawSummary := summarizeDiff(diffContent, "changelog", getModelName(cfg), len(strings.Split(diffContent, "\n")) > 4000)
@@ -140,13 +144,17 @@ func writeChangelogDryRun(cmd *cobra.Command, cfg *Config, a changelogArgs, summ
 	return nil
 }
 
-func resolveDiffWithDeps(cmd *cobra.Command, commit, diffFilePath string, deps commandDeps) (string, error) {
+func resolveDiffWithDeps(cmd *cobra.Command, commit, diffFilePath string, deps commandDeps, limits ...int64) (string, error) {
+	limit := internalconfig.DefaultMaxInputBytes
+	if len(limits) > 0 {
+		limit = limits[0]
+	}
 	var diffContent string
 	var err error
 	if diffFilePath != "" {
-		diffContent, err = readCommandInput(cmd, diffFilePath)
+		diffContent, err = readCommandInputWithLimit(cmd, diffFilePath, limit)
 	} else if commandStdinIsPiped(cmd) {
-		diffContent, err = readCommandInput(cmd, "-")
+		diffContent, err = readCommandInputWithLimit(cmd, "-", limit)
 	} else {
 		if !deps.isGitRepo() {
 			return "", fmt.Errorf("not a git repository. Run from inside a git repo or use --file to provide a diff")
@@ -224,6 +232,7 @@ func newChangelogCmdWithDeps(chatFn func(context.Context, *Config, ApiProvider, 
 
 	cmd := &cobra.Command{
 		Use:   "changelog",
+		Args:  cobra.NoArgs,
 		Short: "Generate a user-facing changelog entry from a commit range",
 		Long: `Analyses a git diff (commit range, staged changes, or diff file) and
 produces a user-facing changelog entry in Keep a Changelog markdown
@@ -238,11 +247,13 @@ Examples:
 		},
 	}
 
+	addResourceFlags(cmd)
 	cmd.Flags().StringVar(&a.commit, "commit", "", "Commit or commit range to diff (e.g. v1.2.0..HEAD)")
 	cmd.Flags().StringVar(&a.diffFilePath, "file", "", "Path to diff file instead of running git diff")
 	cmd.Flags().StringVar(&a.outputPath, "output", "", "Write changelog to this file instead of stdout")
 	cmd.Flags().StringVar(&a.provider, "provider", "", "AI provider (openai, anthropic, gemini, ollama, claude-cli, gemini-cli, codex-cli)")
 	cmd.Flags().StringVar(&a.modelOverride, "model", "", "Override the model for this run")
+	_ = cmd.RegisterFlagCompletionFunc("model", completeModels)
 	cmd.Flags().StringVar(&a.format, "format", "text", "Output format: text or json")
 	cmd.Flags().StringVar(&a.systemPromptFlag, "system-prompt", "", `Override the system prompt for this run. Use @path to read from a file (e.g. --system-prompt=@notes.txt).`)
 	cmd.Flags().StringVar(&a.preset, "preset", "", "Preset defaults: ci, local-fast, security, release-notes")

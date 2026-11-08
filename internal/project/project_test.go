@@ -1,14 +1,17 @@
 package project
 
 import (
+	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
 
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 var githubActionSHAPinPattern = regexp.MustCompile(`@[0-9a-fA-F]{40}$`)
@@ -155,6 +158,7 @@ func TestWorkflowAndReleaseYAMLParse(t *testing.T) {
 		t.Fatal(err)
 	}
 	files = append(files, repoPath(t, ".goreleaser.yaml"))
+	files = append(files, repoPath(t, ".github", "dependabot.yml"))
 	for _, file := range files {
 		content, err := os.ReadFile(file)
 		if err != nil {
@@ -223,12 +227,10 @@ func TestReleaseSafetyWorkflowConfiguration(t *testing.T) {
 			"name: Validate Release Candidate",
 			"run: make verify",
 			"needs: validate",
-			`node-version: "24.10.0"`,
 			"run: npm ci",
 			"run: npm run semantic-release -- --ci",
 		},
 		".github/workflows/release.yml": {
-			"version: v2.15.4",
 			"DOCKER_FIPS_TAGS: ${{ needs.docker_fips.outputs.docker_fips_tags }}",
 			"DOCKER_FIPS_DIGEST: ${{ needs.docker_fips.outputs.docker_fips_digest }}",
 			`"${REQUIRE_DOCKER_PROVENANCE}" "${REQUIRE_DOCKER_FIPS_PROVENANCE}"`,
@@ -244,17 +246,6 @@ func TestReleaseSafetyWorkflowConfiguration(t *testing.T) {
 			"ai-mr-comment_linux_amd64.sbom.json",
 			".docker_fips.published == true",
 			".docker_fips.digest",
-		},
-		"package.json": {
-			`"node": "24.10.0"`,
-			`"semantic-release": "25.0.3"`,
-			`"@semantic-release/github": "12.0.8"`,
-		},
-		"package-lock.json": {
-			`"semantic-release": "25.0.3"`,
-			`"@semantic-release/commit-analyzer": "13.0.1"`,
-			`"@semantic-release/release-notes-generator": "14.1.1"`,
-			`"@semantic-release/github": "12.0.8"`,
 		},
 	}
 	contents := map[string]string{
@@ -280,6 +271,101 @@ func TestReleaseSafetyWorkflowConfiguration(t *testing.T) {
 		} {
 			if strings.Contains(content, stale) {
 				t.Fatalf("%s still contains floating release tool reference %q", file, stale)
+			}
+		}
+	}
+}
+
+func TestReleaseDependencyManifestMatchesLockfile(t *testing.T) {
+	type manifest struct {
+		DevDependencies map[string]string `json:"devDependencies"`
+		Engines         map[string]string `json:"engines"`
+	}
+	var declared manifest
+	if err := json.Unmarshal([]byte(readRepoFile(t, "package.json")), &declared); err != nil {
+		t.Fatal(err)
+	}
+	var lock struct {
+		Packages map[string]json.RawMessage `json:"packages"`
+	}
+	if err := json.Unmarshal([]byte(readRepoFile(t, "package-lock.json")), &lock); err != nil {
+		t.Fatal(err)
+	}
+	var root manifest
+	if err := json.Unmarshal(lock.Packages[""], &root); err != nil {
+		t.Fatal(err)
+	}
+	if len(declared.DevDependencies) == 0 || !reflect.DeepEqual(declared, root) {
+		t.Fatal("package.json release dependencies or engine constraints differ from the lockfile root")
+	}
+	for name, version := range declared.DevDependencies {
+		if !regexp.MustCompile(`^\d+\.\d+\.\d+$`).MatchString(version) {
+			t.Errorf("%s must use an exact release version, got %q", name, version)
+		}
+		var pkg struct {
+			Version string `json:"version"`
+		}
+		if err := json.Unmarshal(lock.Packages["node_modules/"+name], &pkg); err != nil {
+			t.Fatal(err)
+		}
+		if pkg.Version != version {
+			t.Errorf("%s manifest version %s differs from installed lockfile version %s", name, version, pkg.Version)
+		}
+	}
+}
+
+func TestReleaseToolVersionsArePinnedAndNodeEngineIsCompatible(t *testing.T) {
+	var pkg struct {
+		Engines map[string]string `json:"engines"`
+	}
+	if err := json.Unmarshal([]byte(readRepoFile(t, "package.json")), &pkg); err != nil {
+		t.Fatal(err)
+	}
+	engine := regexp.MustCompile(`^\^(\d+)\.(\d+)\.(\d+)$`).FindStringSubmatch(pkg.Engines["node"])
+	if engine == nil {
+		t.Fatalf("expected a bounded Node engine range, got %q", pkg.Engines["node"])
+	}
+	var minimumMajor, minimumMinor, minimumPatch int
+	if _, err := fmt.Sscanf(pkg.Engines["node"], "^%d.%d.%d", &minimumMajor, &minimumMinor, &minimumPatch); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []string{"tag.yml", "release.yml"} {
+		var workflow struct {
+			Jobs map[string]struct {
+				Steps []struct {
+					Uses string            `yaml:"uses"`
+					With map[string]string `yaml:"with"`
+				} `yaml:"steps"`
+			} `yaml:"jobs"`
+		}
+		if err := yaml.Unmarshal([]byte(readRepoFile(t, ".github", "workflows", file)), &workflow); err != nil {
+			t.Fatal(err)
+		}
+		for _, job := range workflow.Jobs {
+			for _, step := range job.Steps {
+				key := ""
+				if strings.HasPrefix(step.Uses, "actions/setup-node@") {
+					key = "node-version"
+				}
+				if strings.HasPrefix(step.Uses, "goreleaser/goreleaser-action@") {
+					key = "version"
+				}
+				if key == "" {
+					continue
+				}
+				version := strings.TrimPrefix(step.With[key], "v")
+				if !regexp.MustCompile(`^\d+\.\d+\.\d+$`).MatchString(version) {
+					t.Fatalf("%s %s must pin an exact tool version, got %q", file, step.Uses, step.With[key])
+				}
+				if key == "node-version" {
+					var major, minor, patch int
+					if _, err := fmt.Sscanf(version, "%d.%d.%d", &major, &minor, &patch); err != nil {
+						t.Fatal(err)
+					}
+					if major != minimumMajor || minor < minimumMinor || (minor == minimumMinor && patch < minimumPatch) {
+						t.Fatalf("CI Node %s does not satisfy package engine %s", version, pkg.Engines["node"])
+					}
+				}
 			}
 		}
 	}

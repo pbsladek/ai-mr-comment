@@ -6,14 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"os/exec"
 	"strings"
 	"testing"
 
-	gogithub "github.com/google/go-github/v68/github"
-	gogitlab "gitlab.com/gitlab-org/api/client-go"
+	gogithub "github.com/google/go-github/v93/github"
+	gogitlab "gitlab.com/gitlab-org/api/client-go/v3"
 )
 
 func TestProcessDiffAndTruncate(t *testing.T) {
@@ -404,10 +403,11 @@ func newTestGitHubClient(t *testing.T, mux *http.ServeMux) *gogithub.Client {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	gh := gogithub.NewClient(nil)
-	baseURL, _ := url.Parse(srv.URL + "/")
-	gh.BaseURL = baseURL
-	gh.UploadURL = baseURL
+	baseURL := srv.URL + "/"
+	gh, err := gogithub.NewClient(gogithub.WithURLs(&baseURL, &baseURL))
+	if err != nil {
+		t.Fatal(err)
+	}
 	return gh
 }
 
@@ -485,7 +485,10 @@ func TestGetPRDiff_APIError(t *testing.T) {
 }
 
 func TestGetPRDiff_InvalidURL(t *testing.T) {
-	gh := gogithub.NewClient(nil)
+	gh, clientErr := gogithub.NewClient()
+	if clientErr != nil {
+		t.Fatal(clientErr)
+	}
 	_, err := getPRDiffWithClient(context.Background(), gh, "https://notgithub.com/owner/repo/pull/1")
 	if err == nil {
 		t.Fatal("expected error for invalid URL, got nil")
